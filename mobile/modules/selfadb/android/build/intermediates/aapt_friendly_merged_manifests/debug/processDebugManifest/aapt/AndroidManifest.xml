@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="expo.modules.selfadb" >
+
+    <uses-sdk android:minSdkVersion="24" />
+
+    <!-- adb client connects over TCP (localhost adbd) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- foreground service so clipboard sync survives the app being swiped away -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- needed later for NsdManager mDNS discovery of _adb-tls-connect._tcp -->
+    <!-- <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" /> -->
+    <application>
+        <service
+            android:name="expo.modules.selfadb.ClipForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" >
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="clipboard_sync" />
+        </service>
+    </application>
+
+</manifest>

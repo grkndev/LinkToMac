@@ -1,0 +1,48 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:1:1-25:12
+INJECTED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:1:1-25:12
+	package
+		INJECTED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.INTERNET
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:4:3-65
+	android:name
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:4:20-62
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:7:3-75
+	android:name
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:7:20-72
+uses-permission#android.permission.FOREGROUND_SERVICE_SPECIAL_USE
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:8:3-87
+	android:name
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:8:20-84
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:9:3-75
+	android:name
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:9:20-72
+application
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:14:3-23:17
+service#expo.modules.selfadb.ClipForegroundService
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:15:5-22:15
+	android:exported
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:17:7-31
+	android:foregroundServiceType
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:18:7-49
+	android:name
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:16:7-44
+property#android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE
+ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:19:7-21:42
+	android:value
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:21:9-39
+	android:name
+		ADDED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:20:9-68
+uses-sdk
+INJECTED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml
+INJECTED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml

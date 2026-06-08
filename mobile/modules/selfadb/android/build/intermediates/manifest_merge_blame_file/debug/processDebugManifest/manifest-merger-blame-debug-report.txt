@@ -1,0 +1,44 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="expo.modules.selfadb" >
+4
+5    <uses-sdk android:minSdkVersion="24" />
+6
+7    <!-- adb client connects over TCP (localhost adbd) -->
+8    <uses-permission android:name="android.permission.INTERNET" />
+8-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:4:3-65
+8-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:4:20-62
+9
+10    <!-- foreground service so clipboard sync survives the app being swiped away -->
+11    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+11-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:7:3-75
+11-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:7:20-72
+12    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+12-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:8:3-87
+12-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:8:20-84
+13    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+13-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:9:3-75
+13-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:9:20-72
+14
+15    <!-- needed later for NsdManager mDNS discovery of _adb-tls-connect._tcp -->
+16    <!-- <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" /> -->
+17    <application>
+17-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:14:3-23:17
+18        <service
+18-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:15:5-22:15
+19            android:name="expo.modules.selfadb.ClipForegroundService"
+19-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:16:7-44
+20            android:exported="false"
+20-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:17:7-31
+21            android:foregroundServiceType="specialUse" >
+21-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:18:7-49
+22            <property
+22-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:19:7-21:42
+23                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+23-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:20:9-68
+24                android:value="clipboard_sync" />
+24-->/Volumes/ExternalSSD/repo/LinkToMac/mobile/modules/selfadb/android/src/main/AndroidManifest.xml:21:9-39
+25        </service>
+26    </application>
+27
+28</manifest>

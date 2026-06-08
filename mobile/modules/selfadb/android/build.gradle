@@ -1,0 +1,44 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+group = 'expo.modules.selfadb'
+version = '0.1.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useExpoPublishing()
+
+android {
+  namespace "expo.modules.selfadb"
+  compileSdk 35
+
+  defaultConfig {
+    minSdk 24
+    targetSdk 34
+  }
+
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // ===================================================================
+  // libadb-android — pure-Java adb client with Android 11+ TLS + spake2
+  // pairing (this is what makes self-ADB possible on Android 14).
+  // Published on JitPack (NOT Maven Central) under the com.github.* group.
+  //   https://github.com/MuntashirAkon/libadb-android
+  // JitPack repo is already on the search path (expo adds it); if a clean
+  // checkout can't resolve it, add to android/build.gradle allprojects:
+  //   maven { url "https://jitpack.io" }
+  // ===================================================================
+  implementation "com.github.MuntashirAkon:libadb-android:3.1.1"
+  // libadb-android already pulls bcprov-jdk15to18:1.81 transitively (it uses BC
+  // for spake2/pairing). Add ONLY the matching bcpkix (cert builder) in the same
+  // variant+version so there are no duplicate org.bouncycastle.* classes.
+  implementation "org.bouncycastle:bcpkix-jdk15to18:1.81"
+  // TLS provider required for adb-over-TLS (Android 11+)
+  implementation "org.conscrypt:conscrypt-android:2.5.3"
+}

@@ -1,0 +1,11 @@
+*.java
+workflow.md
+.claude/
+/mobile/node_modules/
+/mobile/android/
+/mobile/.vscode/
+/mobile/.expo/
+/mobile/.claude/
+/mobile/CLAUDE.md
+/mobile/README.md
+/mobile/AGENTS.md
