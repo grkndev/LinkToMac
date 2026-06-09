@@ -7,7 +7,7 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   pair(host: string, port: number, code: string): Promise<string>;
   /** TLS connect using the stored key. Find host/port via Wireless Debugging settings (or mDNS later). */
   connect(host: string, port: number): Promise<string>;
-  /** push the bundled cliptest.dex, launch it via app_process, then open the localhost clip socket. */
+  /** push the bundled clipboard-agent.dex, launch it via app_process, then open the localhost clip socket. */
   deployAndRun(clipPort: number): Promise<string>;
   /** send text down to the shell process to set the system clipboard. */
   writeClipboard(text: string): Promise<void>;

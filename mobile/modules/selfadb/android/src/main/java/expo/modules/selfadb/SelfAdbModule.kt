@@ -9,7 +9,7 @@ import java.net.Socket
 /**
  * Control plane for the self-ADB clipboard pipeline.
  *
- *   adb (libadb) ── launches ──► ClipTest daemon (shell UID, detached)
+ *   adb (libadb) ── launches ──► ClipboardAgent daemon (shell UID, detached)
  *                                      │ localhost:53123
  *   ClipForegroundService ◄───────────┘  (survives app swipe; owns the bridge)
  *        │ ClipBus
@@ -58,8 +58,8 @@ class SelfAdbModule : Module() {
       if (probe(clipPort)) {
         log("daemon already alive on :$clipPort")
       } else {
-        log("pushing cliptest.dex -> /data/local/tmp")
-        adb.pushAsset("cliptest.dex", "/data/local/tmp/cliptest.dex") { log(it) }
+        log("pushing clipboard-agent.dex -> /data/local/tmp")
+        adb.pushAsset("clipboard-agent.dex", "/data/local/tmp/clipboard-agent.dex") { log(it) }
         log("launching detached daemon...")
         log("launch: " + adb.launchDaemon(clipPort))
       }

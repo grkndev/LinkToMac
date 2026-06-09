@@ -12,8 +12,8 @@ can't do A14 TLS+pairing, fall back to bundling a real `adb` binary (LADB style)
 
 | File | Role |
 |------|------|
-| `../../native-src/cliptest/ClipTest.java` | Privileged runnable: clipboard read/write + localhost NDJSON socket server |
-| `../../native-src/cliptest/build-dex.sh` | `javac` → `d8` → drops `cliptest.dex` into this module's assets |
+| `../../native-src/clipboard-agent/ClipboardAgent.java` | Privileged runnable: clipboard read/write + localhost NDJSON socket server |
+| `../../native-src/clipboard-agent/build-dex.sh` | `javac` → `d8` → drops `clipboard-agent.dex` into this module's assets |
 | `android/.../AdbManager.kt` | **libadb-android wrapper** — pair / connect / exec / pushAsset (⚠️ main VERIFY surface) |
 | `android/.../ClipBridge.kt` | On-device localhost client to the jar; emits clip events |
 | `android/.../SelfAdbModule.kt` | Expo module: `pair / connect / deployAndRun / writeClipboard / stop` + events |
@@ -27,7 +27,7 @@ localhost socket (127.0.0.1:clipPort), not over adb.
 ```bash
 # 1) build the dex (needs a local Android SDK with build-tools + a platform)
 cd mobile
-bash native-src/cliptest/build-dex.sh        # -> modules/selfadb/android/src/main/assets/cliptest.dex
+bash native-src/clipboard-agent/build-dex.sh # -> modules/selfadb/android/src/main/assets/clipboard-agent.dex
 
 # 2) verify libadb-android coordinates in modules/selfadb/android/build.gradle
 #    (see VERIFY list below) then prebuild + build the dev client
@@ -66,7 +66,7 @@ Still to confirm at runtime (the actual spike):
 
 ## Daemon behaviour (confirmed)
 
-`deployAndRun` launches ClipTest **detached** (`setsid` + `nohup`), so it keeps
+`deployAndRun` launches ClipboardAgent **detached** (`setsid` + `nohup`), so it keeps
 running after:
 
 - the adb connection drops,

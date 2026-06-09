@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Compile ClipTest.java -> classes -> dex, then drop the dex into the
+# Compile ClipboardAgent.java -> classes -> dex, then drop the dex into the
 # selfadb native module's assets so it ships inside the dev-client APK.
 #
-# Output: ../../modules/selfadb/android/src/main/assets/cliptest.dex
+# Output: ../../modules/selfadb/android/src/main/assets/clipboard-agent.dex
 #
 # Requirements: a local Android SDK with build-tools (for d8) and a platform
 # (android.jar). Override ANDROID_SDK_ROOT if auto-detection fails.
@@ -40,7 +40,7 @@ mkdir -p "$BUILD/classes" "$OUT_ASSET"
 
 echo "[1/3] javac"
 javac -source 1.8 -target 1.8 -cp "$PLATFORM_JAR" \
-      -d "$BUILD/classes" "$HERE/ClipTest.java"
+      -d "$BUILD/classes" "$HERE/ClipboardAgent.java"
 
 echo "[2/3] d8 -> dex (min-api 34)"
 # shellcheck disable=SC2046
@@ -48,8 +48,8 @@ echo "[2/3] d8 -> dex (min-api 34)"
       --lib "$PLATFORM_JAR" --min-api 34 --output "$BUILD"
 
 echo "[3/3] copy asset"
-cp "$BUILD/classes.dex" "$OUT_ASSET/cliptest.dex"
+cp "$BUILD/classes.dex" "$OUT_ASSET/clipboard-agent.dex"
 
 echo
-echo "OK -> $OUT_ASSET/cliptest.dex"
+echo "OK -> $OUT_ASSET/clipboard-agent.dex"
 echo "Now rebuild the dev client so the asset is bundled."

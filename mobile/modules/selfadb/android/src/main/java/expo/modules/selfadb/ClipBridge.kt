@@ -9,7 +9,7 @@ import java.net.Socket
 import java.nio.charset.StandardCharsets
 
 /**
- * On-device localhost client to the privileged ClipTest process.
+ * On-device localhost client to the privileged ClipboardAgent process.
  *
  *   jar -> app : {"type":"clip","text":"...","ts":1234}
  *   app -> jar : {"cmd":"write","text":"..."}

@@ -71,7 +71,7 @@ class AdbManager(private val context: Context) {
   }
 
   /**
-   * Launch ClipTest as a DETACHED daemon (Shizuku-style). `setsid` puts it in a
+   * Launch the clipboard agent as a DETACHED daemon (Shizuku-style). `setsid` puts it in a
    * new session so adbd's process-group kill can't reach it; `nohup` ignores
    * SIGHUP; stdio is redirected to a log file and /dev/null so it no longer
    * depends on the adb stream. Result: it survives adb disconnect, wireless
@@ -144,10 +144,10 @@ class AdbManager(private val context: Context) {
   }
 
   companion object {
-    private const val DEX_PATH = "/data/local/tmp/cliptest.dex"
+    private const val DEX_PATH = "/data/local/tmp/clipboard-agent.dex"
     private const val LOG_PATH = "/data/local/tmp/clip.log"
     private const val NICE_NAME = "linktomac_clip"
-    private const val MAIN_CLASS = "com.grkn.cliptest.ClipTest"
+    private const val MAIN_CLASS = "com.grkndev.clipboard.ClipboardAgent"
 
     private const val KEY_FILE = "adbkey"
     private const val PUB_FILE = "adbkey.pub"
