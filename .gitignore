@@ -3,6 +3,10 @@ workflow.md
 .claude/
 /mobile/node_modules/
 /mobile/android/
+
+# Gradle / native build output (regenerated; only the asset dex is kept)
+/mobile/modules/**/android/build/
+/mobile/native-src/**/build/
 /mobile/.vscode/
 /mobile/.expo/
 /mobile/.claude/
