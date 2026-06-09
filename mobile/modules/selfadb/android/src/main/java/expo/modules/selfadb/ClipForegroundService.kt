@@ -24,6 +24,10 @@ import android.os.IBinder
 class ClipForegroundService : Service() {
 
   private var bridge: ClipBridge? = null
+  private var relay: RelayClient? = null
+
+  /** Last text we wrote to the device clipboard; its echo `onClip` is swallowed. */
+  @Volatile private var lastWritten: String? = null
 
   override fun onCreate() {
     super.onCreate()
@@ -38,13 +42,20 @@ class ClipForegroundService : Service() {
       bridge = ClipBridge(
         port = port,
         onClip = { text, ts ->
-          ClipBus.log("clip: ${text.take(60)}")
-          ClipBus.clip(text, ts)
-          // TODO: encrypt (secretbox) + send over WS to the relay -> Mac
+          if (text == lastWritten) {
+            lastWritten = null // echo of our own write -> swallow
+          } else {
+            ClipBus.log("clip: ${text.take(60)}")
+            ClipBus.clip(text, ts)
+            relay?.sendClip(text)
+          }
         },
         onLog = { ClipBus.log(it) }
       ).also { it.start() }
     }
+    // Auto-start the relay from persisted config. Also covers the null-intent START_STICKY
+    // restart after the app is killed -> reconnects to the Mac with no JS runtime.
+    maybeStartRelay()
     return START_STICKY
   }
 
@@ -52,7 +63,61 @@ class ClipForegroundService : Service() {
     bridge?.write(text)
   }
 
+  // ---- Relay (WS to the Mac) -----------------------------------------------
+
+  /** Persist config and (re)connect — but skip the restart if nothing changed. */
+  fun applyRelayConfig(url: String, token: String, room: String) {
+    val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val unchanged = p.getString("url", null) == url &&
+      p.getString("token", null) == token &&
+      p.getString("room", null) == room
+    saveConfig(this, url, token, room)
+    if (unchanged && relay != null) return
+    reloadRelay()
+  }
+
+  /** (Re)apply persisted relay config, replacing any running client. */
+  fun reloadRelay() {
+    relay?.shutdown()
+    relay = null
+    maybeStartRelay()
+  }
+
+  /** Live pause/resume; does not touch persisted config. */
+  fun setPaused(paused: Boolean) {
+    if (paused) {
+      relay?.shutdown()
+      relay = null
+      ClipBus.relay("disconnected", false, null)
+    } else {
+      reloadRelay()
+    }
+  }
+
+  private fun maybeStartRelay() {
+    if (relay != null) return
+    val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val url = p.getString("url", null) ?: return
+    val token = p.getString("token", null) ?: return
+    val room = p.getString("room", null) ?: return
+    ClipBus.log("relay starting -> $url")
+    relay = RelayClient(
+      url = url,
+      token = token,
+      room = room,
+      onClipReceived = { text ->
+        lastWritten = text
+        bridge?.write(text)
+        ClipBus.log("relay -> clipboard (${text.length})")
+      },
+      onStatus = { status, peerOnline, error -> ClipBus.relay(status, peerOnline, error) },
+      log = { ClipBus.log(it) },
+    ).also { it.start() }
+  }
+
   override fun onDestroy() {
+    relay?.shutdown()
+    relay = null
     bridge?.stop()
     bridge = null
     instance = null
@@ -94,7 +159,17 @@ class ClipForegroundService : Service() {
     private const val CHANNEL = "linktomac"
     private const val NOTIF_ID = 1001
     private const val EXTRA_PORT = "port"
+    private const val PREFS = "linktomac_relay"
     const val DEFAULT_PORT = 53123
+
+    /** Persist relay config so the service (incl. a START_STICKY restart) can connect. */
+    fun saveConfig(ctx: Context, url: String, token: String, room: String) {
+      ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putString("url", url)
+        .putString("token", token)
+        .putString("room", room)
+        .apply()
+    }
 
     fun start(ctx: Context, port: Int) {
       val intent = Intent(ctx, ClipForegroundService::class.java).putExtra(EXTRA_PORT, port)

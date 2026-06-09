@@ -12,6 +12,7 @@ import android.util.Log
 object ClipBus {
   @Volatile var onClip: ((String, Double) -> Unit)? = null
   @Volatile var onLog: ((String) -> Unit)? = null
+  @Volatile var onRelay: ((Map<String, Any?>) -> Unit)? = null
 
   fun clip(text: String, ts: Double) {
     onClip?.invoke(text, ts)
@@ -20,5 +21,9 @@ object ClipBus {
   fun log(msg: String) {
     Log.i("LinkToMac", msg) // always in logcat, even when the app is closed
     onLog?.invoke(msg)
+  }
+
+  fun relay(status: String, peerOnline: Boolean, error: String?) {
+    onRelay?.invoke(mapOf("status" to status, "peerOnline" to peerOnline, "lastError" to error))
   }
 }

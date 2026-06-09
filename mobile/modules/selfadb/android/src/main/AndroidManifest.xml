@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
 
   <!-- adb client connects over TCP (localhost adbd) -->
   <uses-permission android:name="android.permission.INTERNET" />
@@ -8,8 +9,22 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-  <!-- needed later for NsdManager mDNS discovery of _adb-tls-connect._tcp -->
-  <!-- <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" /> -->
+  <!-- mDNS discovery of _adb-tls-pairing / _adb-tls-connect via NsdManager -->
+  <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+  <!-- keep the relay WS alive under doze / aggressive OEM battery management -->
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+  <!--
+    Self-toggle of wireless debugging (Settings.Global "adb_wifi_enabled") so a
+    paired device can silently reconnect after reboot with NO 6-digit code. A
+    normal app can't hold this, but its protection level carries the
+    `development` flag, so we grant it to ourselves over our own adb session on
+    first pair:  pm grant <pkg> android.permission.WRITE_SECURE_SETTINGS
+    It MUST be declared here for that grant to be accepted.
+  -->
+  <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+    tools:ignore="ProtectedPermissions" />
 
   <application>
     <service

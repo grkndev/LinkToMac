@@ -35,6 +35,14 @@
             "imageWidth": 76
           }
         }
+      ],
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "QR ile eşleştirme için kameraya erişim gerekiyor.",
+          "barcodeScannerEnabled": true
+        }
       ]
     ],
     "experiments": {

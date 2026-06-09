@@ -3,12 +3,17 @@ package expo.modules.selfadb
 import android.content.Context
 import android.os.Build
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
+import io.github.muntashirakon.adb.android.AdbMdns
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import java.io.File
 import java.math.BigInteger
+import java.net.InetAddress
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
@@ -49,6 +54,43 @@ class AdbManager(private val context: Context) {
 
   fun connect(host: String, port: Int): Boolean =
     manager.connect(host, port)
+
+  /**
+   * Block until adbd advertises [serviceType] over mDNS, or [timeoutMs] passes.
+   * Uses libadb's NsdManager-backed [AdbMdns]. The pairing service
+   * (SERVICE_TYPE_TLS_PAIRING) is only advertised while the system "Pair device
+   * with pairing code" dialog is open; the connect service
+   * (SERVICE_TYPE_TLS_CONNECT) whenever wireless debugging is on. Returns the
+   * first valid host:port, or null on timeout.
+   */
+  fun discover(serviceType: String, timeoutMs: Long): Pair<InetAddress, Int>? {
+    val latch = CountDownLatch(1)
+    val result = AtomicReference<Pair<InetAddress, Int>?>(null)
+    val mdns = AdbMdns(context, serviceType) { host: InetAddress?, port: Int ->
+      if (host != null && port > 0 && result.compareAndSet(null, host to port)) {
+        latch.countDown()
+      }
+    }
+    mdns.start()
+    return try {
+      latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+      result.get()
+    } finally {
+      try {
+        mdns.stop()
+      } catch (_: Exception) {
+      }
+    }
+  }
+
+  /**
+   * Grant ourselves WRITE_SECURE_SETTINGS over the live adb session. Only works
+   * because that permission carries the `development` protection flag. Persists
+   * across reboot, letting the app self-toggle wireless debugging later with no
+   * adb and no pairing code. No-op if already granted.
+   */
+  fun grantSecureSettings(pkg: String): String =
+    runShort("pm grant $pkg android.permission.WRITE_SECURE_SETTINGS; echo GRANT_DONE")
 
   /**
    * Run a short-lived command over an exec stream and return its stdout. The

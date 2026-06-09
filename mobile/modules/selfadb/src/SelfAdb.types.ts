@@ -16,8 +16,17 @@ export type StatusEvent = {
   clip: string;
 };
 
+export type RelayEvent = {
+  /** "disconnected" | "connecting" | "connected" | "joined" | "error" */
+  status: string;
+  /** whether the Mac peer is present in the room */
+  peerOnline: boolean;
+  lastError?: string | null;
+};
+
 export type SelfAdbModuleEvents = {
   onClip: (event: ClipEvent) => void;
   onLog: (event: LogEvent) => void;
   onStatus: (event: StatusEvent) => void;
+  onRelay: (event: RelayEvent) => void;
 };
