@@ -1,0 +1,40 @@
+# XcodeGen spec. Generate the project with:  xcodegen generate
+# The resulting LinkToMac.xcodeproj is reproducible from this file and is gitignored.
+name: LinkToMac
+options:
+  bundleIdPrefix: dev.grkn
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Ad-hoc signing so the app builds/runs locally without a Developer team.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: "NO"
+    ENABLE_HARDENED_RUNTIME: "NO"
+targets:
+  LinkToMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMac
+        PRODUCT_NAME: LinkToMac
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+schemes:
+  LinkToMac:
+    build:
+      targets:
+        LinkToMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release
