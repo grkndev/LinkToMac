@@ -32,10 +32,16 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   writeClipboard(text: string): Promise<void>;
   /** persist relay config (url/token/room/peer name) and (re)connect the native WS to the Mac. */
   setRelay(url: string, token: string, room: string, peerName: string | null): Promise<void>;
+  /** unpair: forget the persisted relay config and disconnect the native WS. */
+  clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */
   relayGetStatus(): Promise<RelayEvent>;
   /** live pause/resume of relay forwarding (does not touch persisted config). */
   relaySetPaused(paused: boolean): Promise<void>;
+  /** hide/show the FGS notification's status-bar icon (re-posts on a MIN/LOW importance channel). */
+  setStatusNotificationVisible(visible: boolean): Promise<void>;
+  /** whether the status-bar icon is currently shown (persisted, default true). */
+  getStatusNotificationVisible(): Promise<boolean>;
   /** whether the FGS notification can be shown (POST_NOTIFICATIONS, Android 13+). */
   hasPostNotifications(): Promise<boolean>;
   /** request POST_NOTIFICATIONS; re-posts the service notification once granted. */

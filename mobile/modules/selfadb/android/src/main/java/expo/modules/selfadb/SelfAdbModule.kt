@@ -185,6 +185,16 @@ class SelfAdbModule : Module() {
       }
     }
 
+    /** Unpair: forget the persisted relay config and drop the WS connection. */
+    AsyncFunction("clearRelay") {
+      val svc = ClipForegroundService.instance
+      if (svc != null) {
+        svc.clearRelayConfig()
+      } else {
+        ClipForegroundService.clearConfig(appCtx)
+      }
+    }
+
     /** Current relay state, retained across the service/app lifecycle gap. */
     AsyncFunction("relayGetStatus") {
       ClipBus.lastRelay ?: mapOf("status" to "disconnected", "peerOnline" to false, "lastError" to null)
@@ -221,6 +231,16 @@ class SelfAdbModule : Module() {
         if (granted) ClipForegroundService.instance?.refreshNotification()
         promise.resolve(granted)
       }, Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    /** Hide/show the FGS notification's status-bar icon (re-posts on a MIN/LOW channel). */
+    AsyncFunction("setStatusNotificationVisible") { visible: Boolean ->
+      ClipForegroundService.setStatusNotificationVisible(appCtx, visible)
+      ClipForegroundService.instance?.applyStatusNotificationVisibility()
+    }
+
+    AsyncFunction("getStatusNotificationVisible") {
+      ClipForegroundService.getStatusNotificationVisible(appCtx)
     }
 
     AsyncFunction("hasIgnoreBatteryOptimizations") {

@@ -84,6 +84,16 @@ class ClipForegroundService : Service() {
     maybeStartRelay()
   }
 
+  /** Unpair: drop the persisted config and the live connection. Stays disconnected
+   *  (including across START_STICKY restarts) until a new pairing is pushed. */
+  fun clearRelayConfig() {
+    clearConfig(this)
+    relay?.shutdown()
+    relay = null
+    ClipBus.relay("disconnected", false, null)
+    updateNotification(peerOnline = false)
+  }
+
   /** Live pause/resume; does not touch persisted config. */
   fun setPaused(paused: Boolean) {
     if (paused) {
@@ -137,6 +147,10 @@ class ClipForegroundService : Service() {
       nm.createNotificationChannel(
         NotificationChannel(CHANNEL, "Link to macOS", NotificationManager.IMPORTANCE_LOW)
       )
+      // MIN importance hides the status-bar icon; the notification stays in the shade.
+      nm.createNotificationChannel(
+        NotificationChannel(CHANNEL_MIN, "Link to macOS (icon hidden)", NotificationManager.IMPORTANCE_MIN)
+      )
     }
     val notification = buildNotification("Device disconnected", "Waiting for connection…")
     if (Build.VERSION.SDK_INT >= 34) {
@@ -148,7 +162,7 @@ class ClipForegroundService : Service() {
 
   private fun buildNotification(title: String, text: String): Notification {
     val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      Notification.Builder(this, CHANNEL)
+      Notification.Builder(this, if (getStatusNotificationVisible(this)) CHANNEL else CHANNEL_MIN)
     } else {
       @Suppress("DEPRECATION") Notification.Builder(this)
     }
@@ -173,6 +187,30 @@ class ClipForegroundService : Service() {
     updateNotification(online)
   }
 
+  /**
+   * Switch the notification between the LOW (icon visible) and MIN (icon hidden) channels.
+   * notify() can't move an existing notification to another channel, so re-enter the
+   * foreground state with a freshly built one.
+   */
+  fun applyStatusNotificationVisibility() {
+    val online = notifiedPeerOnline ?: false
+    notifiedPeerOnline = null
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    val name = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .getString("peerName", null) ?: "your Mac"
+    val notification = if (online) {
+      buildNotification("Device connected", "Your device has connected to $name")
+    } else {
+      buildNotification("Device disconnected", "Waiting to reconnect to $name")
+    }
+    if (Build.VERSION.SDK_INT >= 34) {
+      startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+    } else {
+      startForeground(NOTIF_ID, notification)
+    }
+    notifiedPeerOnline = online
+  }
+
   /** Reflect the Mac's presence in the sticky foreground notification. */
   private fun updateNotification(peerOnline: Boolean) {
     if (notifiedPeerOnline == peerOnline) return
@@ -193,10 +231,25 @@ class ClipForegroundService : Service() {
     var instance: ClipForegroundService? = null
 
     private const val CHANNEL = "linktomac"
+    private const val CHANNEL_MIN = "linktomac_min"
     private const val NOTIF_ID = 1001
     private const val EXTRA_PORT = "port"
     private const val PREFS = "linktomac_relay"
+    // Separate prefs file: clearConfig() wipes PREFS on unpair, UI settings must survive that.
+    private const val PREFS_UI = "linktomac_ui"
+    private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"
     const val DEFAULT_PORT = 53123
+
+    /** Whether the foreground notification should show a status-bar icon (default true). */
+    fun getStatusNotificationVisible(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getBoolean(KEY_STATUS_NOTIF_VISIBLE, true)
+
+    fun setStatusNotificationVisible(ctx: Context, visible: Boolean) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_STATUS_NOTIF_VISIBLE, visible)
+        .apply()
+    }
 
     /** Persist relay config so the service (incl. a START_STICKY restart) can connect. */
     fun saveConfig(ctx: Context, url: String, token: String, room: String, peerName: String?) {
@@ -206,6 +259,11 @@ class ClipForegroundService : Service() {
         .putString("room", room)
         .putString("peerName", peerName)
         .apply()
+    }
+
+    /** Forget the persisted relay config (unpair); safe to call with the service down. */
+    fun clearConfig(ctx: Context) {
+      ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
     fun start(ctx: Context, port: Int) {
