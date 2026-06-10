@@ -33,6 +33,11 @@ enum PairingStore {
         keychainSet(data)
     }
 
+    /// Deletes the persisted pairing; the next `loadOrCreate()` mints a fresh room/key.
+    static func clear() {
+        SecItemDelete(baseQuery() as CFDictionary)
+    }
+
     /// JSON the phone scans: `{"v":1,"room":"...","key":"...","name":"grkn's MacBook Air"}`.
     /// `name` is this Mac's current computer name, read fresh on every QR render — it is
     /// not part of the persisted pairing.

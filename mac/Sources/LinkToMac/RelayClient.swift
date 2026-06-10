@@ -27,7 +27,7 @@ final class RelayClient {
     private(set) var lastClip: String?
 
     /// Generated once and persisted; the room we join and show as a QR for the phone.
-    let pairing: Pairing = PairingStore.loadOrCreate()
+    private(set) var pairing: Pairing = PairingStore.loadOrCreate()
 
     /// Whether the user wants to be connected; drives reconnect behaviour.
     private var shouldStay = false
@@ -82,6 +82,19 @@ final class RelayClient {
 
     func toggle() {
         shouldStay ? disconnect() : connect()
+    }
+
+    /// Forget the current pairing: drop the connection, delete the Keychain secret, and
+    /// mint a fresh room/key. Reconnects into the new (empty) room if we were active, so
+    /// the next "Pairing QR" scan links up immediately; the old phone is left behind in
+    /// the abandoned room.
+    func unpair() {
+        let wasActive = shouldStay
+        disconnect()
+        PairingStore.clear()
+        pairing = PairingStore.loadOrCreate()
+        lastClip = nil
+        if wasActive { connect() }
     }
 
     // MARK: - Socket lifecycle

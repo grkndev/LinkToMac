@@ -23,6 +23,10 @@ struct MenuContent: View {
             onShowPairing()
         }
 
+        Button("Unpair…") {
+            confirmUnpair()
+        }
+
         Button(client.isActive ? "Disconnect" : "Connect") {
             client.toggle()
         }
@@ -38,5 +42,21 @@ struct MenuContent: View {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")
+    }
+
+    /// Confirm before discarding the room/key; the phone must rescan a fresh QR after.
+    private func confirmUnpair() {
+        let alert = NSAlert()
+        alert.messageText = "Unpair this Mac?"
+        alert.informativeText =
+            "The current room and key will be deleted and a new pairing will be generated. "
+            + "The phone disconnects and must scan the new QR to pair again."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Unpair")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            client.unpair()
+        }
     }
 }
