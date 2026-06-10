@@ -1,11 +1,15 @@
 package expo.modules.selfadb
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import expo.modules.interfaces.permissions.PermissionsStatus
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import io.github.muntashirakon.adb.android.AdbMdns
@@ -171,19 +175,52 @@ class SelfAdbModule : Module() {
 
     // ---- Relay (native WS to the Mac, runs in the foreground service) --------
 
-    /** Persist relay config (url/token/room) and (re)connect the WS if the service is up. */
-    AsyncFunction("setRelay") { url: String, token: String, room: String ->
+    /** Persist relay config (url/token/room/peer name) and (re)connect the WS if the service is up. */
+    AsyncFunction("setRelay") { url: String, token: String, room: String, peerName: String? ->
       val svc = ClipForegroundService.instance
       if (svc != null) {
-        svc.applyRelayConfig(url, token, room)
+        svc.applyRelayConfig(url, token, room, peerName)
       } else {
-        ClipForegroundService.saveConfig(appCtx, url, token, room)
+        ClipForegroundService.saveConfig(appCtx, url, token, room, peerName)
       }
+    }
+
+    /** Current relay state, retained across the service/app lifecycle gap. */
+    AsyncFunction("relayGetStatus") {
+      ClipBus.lastRelay ?: mapOf("status" to "disconnected", "peerOnline" to false, "lastError" to null)
     }
 
     /** Live pause/resume of relay forwarding. */
     AsyncFunction("relaySetPaused") { paused: Boolean ->
       ClipForegroundService.instance?.setPaused(paused)
+    }
+
+    /** Whether the FGS notification can be shown (POST_NOTIFICATIONS, Android 13+). */
+    AsyncFunction("hasPostNotifications") {
+      Build.VERSION.SDK_INT < 33 ||
+        appCtx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * Ask for POST_NOTIFICATIONS (Android 13+). Without it the foreground service runs
+     * but its sticky notification is silently hidden. Re-posts the notification once
+     * granted, since the grant is not retroactive for an already-started service.
+     */
+    AsyncFunction("requestPostNotifications") { promise: Promise ->
+      if (Build.VERSION.SDK_INT < 33) {
+        promise.resolve(true)
+        return@AsyncFunction
+      }
+      val manager = appContext.permissions
+      if (manager == null) {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+      manager.askForPermissions({ result ->
+        val granted = result[Manifest.permission.POST_NOTIFICATIONS]?.status == PermissionsStatus.GRANTED
+        if (granted) ClipForegroundService.instance?.refreshNotification()
+        promise.resolve(granted)
+      }, Manifest.permission.POST_NOTIFICATIONS)
     }
 
     AsyncFunction("hasIgnoreBatteryOptimizations") {

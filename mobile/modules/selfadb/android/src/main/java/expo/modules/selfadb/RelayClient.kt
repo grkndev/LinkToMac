@@ -7,6 +7,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -43,17 +44,31 @@ class RelayClient(
   fun start() {
     if (running) return
     running = true
-    exec.execute { open() }
+    post { open() }
   }
 
   fun stop() {
     running = false
-    exec.execute {
+    post {
       cancelReconnect()
       ws?.close(1000, "client stop")
       ws = null
       peerOnline = false
       onStatus("disconnected", false, null)
+    }
+  }
+
+  /**
+   * Post to the state thread, dropping the task if the executor was shut down. After
+   * `shutdown()`, closing the socket still triggers OkHttp's onClosed/onFailure on its own
+   * thread; an unguarded execute() there throws RejectedExecutionException and kills the
+   * process (crash on pause).
+   */
+  private fun post(task: Runnable) {
+    try {
+      exec.execute(task)
+    } catch (e: RejectedExecutionException) {
+      // shut down; late callback intentionally dropped
     }
   }
 
@@ -81,8 +96,8 @@ class RelayClient(
 
   private val listener = object : WebSocketListener() {
     override fun onOpen(webSocket: WebSocket, response: Response) {
-      exec.execute {
-        if (!running) return@execute
+      post {
+        if (!running) return@post
         val join = JSONObject().put("t", "join").put("room", room).put("device", "android")
         webSocket.send(join.toString())
         onStatus("connected", peerOnline, null)
@@ -90,7 +105,7 @@ class RelayClient(
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
-      exec.execute { handle(text) }
+      post { handle(text) }
     }
 
     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -98,11 +113,11 @@ class RelayClient(
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-      exec.execute { fail("closed $code") }
+      post { fail("closed $code") }
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-      exec.execute { fail("error ${t.message}") }
+      post { fail("error ${t.message}") }
     }
   }
 
@@ -144,7 +159,11 @@ class RelayClient(
     val delay = minOf(1L shl minOf(attempt, 5), 30L) // 1,2,4,8,16,32 -> cap 30s
     attempt++
     onStatus("connecting", peerOnline, reason)
-    reconnectFuture = exec.schedule({ if (running) open() }, delay, TimeUnit.SECONDS)
+    reconnectFuture = try {
+      exec.schedule({ if (running) open() }, delay, TimeUnit.SECONDS)
+    } catch (e: RejectedExecutionException) {
+      null // shut down while failing; no reconnect
+    }
   }
 
   private fun cancelReconnect() {

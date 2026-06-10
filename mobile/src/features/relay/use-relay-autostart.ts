@@ -15,7 +15,15 @@ export function useRelayAutostart(): void {
   useEffect(() => {
     loadPairing()
       .then((pairing) => {
-        if (pairing) return SelfAdb.setRelay(relayUrl(), RELAY_TOKEN, pairing.room);
+        if (pairing) return SelfAdb.setRelay(relayUrl(), RELAY_TOKEN, pairing.room, pairing.name ?? null);
+      })
+      .catch(() => {});
+
+    // Android 13+: without POST_NOTIFICATIONS the foreground service runs but its
+    // sticky status notification is silently hidden — ask on boot.
+    SelfAdb.hasPostNotifications()
+      .then((granted) => {
+        if (!granted) return SelfAdb.requestPostNotifications().then(() => undefined);
       })
       .catch(() => {});
   }, []);

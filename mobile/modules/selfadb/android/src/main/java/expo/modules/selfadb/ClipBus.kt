@@ -14,6 +14,10 @@ object ClipBus {
   @Volatile var onLog: ((String) -> Unit)? = null
   @Volatile var onRelay: ((Map<String, Any?>) -> Unit)? = null
 
+  /** Last relay state, retained so a late-attaching UI can query it (the service may
+   *  have connected long before the app/JS came up). */
+  @Volatile var lastRelay: Map<String, Any?>? = null
+
   fun clip(text: String, ts: Double) {
     onClip?.invoke(text, ts)
   }
@@ -24,6 +28,8 @@ object ClipBus {
   }
 
   fun relay(status: String, peerOnline: Boolean, error: String?) {
-    onRelay?.invoke(mapOf("status" to status, "peerOnline" to peerOnline, "lastError" to error))
+    val payload = mapOf("status" to status, "peerOnline" to peerOnline, "lastError" to error)
+    lastRelay = payload
+    onRelay?.invoke(payload)
   }
 }

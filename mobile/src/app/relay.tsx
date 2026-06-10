@@ -34,15 +34,20 @@ export default function RelayScreen() {
   // Push relay config to native whenever we have a pairing (refreshes the dev IP each launch).
   useEffect(() => {
     if (!pairing) return;
-    SelfAdb.setRelay(relayUrl(), RELAY_TOKEN, pairing.room).catch(() => {});
+    SelfAdb.setRelay(relayUrl(), RELAY_TOKEN, pairing.room, pairing.name ?? null).catch(() => {});
   }, [pairing]);
 
-  // Mirror native relay status + local clipboard copies for display.
+  // Mirror native relay status + local clipboard copies for display. The service may have
+  // connected long before this screen mounted, so seed from the retained native state
+  // (subscribe first so no transition slips between the two).
   useEffect(() => {
     const r = SelfAdb.addListener('onRelay', (e) =>
       setRelay({ status: e.status, peerOnline: e.peerOnline, lastError: e.lastError }),
     );
     const c = SelfAdb.addListener('onClip', (e) => setLastCopied(e.text));
+    SelfAdb.relayGetStatus()
+      .then((e) => setRelay({ status: e.status, peerOnline: e.peerOnline, lastError: e.lastError }))
+      .catch(() => {});
     return () => {
       r.remove();
       c.remove();

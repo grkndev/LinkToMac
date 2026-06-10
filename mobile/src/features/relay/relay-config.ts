@@ -5,7 +5,7 @@
 import Constants from 'expo-constants';
 
 /** Used only if the Metro dev-server host can't be derived (set to your Mac's LAN IP). */
-const FALLBACK_HOST = '10.148.104.103';
+const FALLBACK_HOST = '127.0.0.1';
 
 /**
  * Host where the relay is reachable FROM THE PHONE. The relay runs on the same Mac as the
@@ -13,7 +13,7 @@ const FALLBACK_HOST = '10.148.104.103';
  * derive the relay host from the dev-server URI. This auto-tracks the Mac's LAN IP, so a
  * changing IP no longer breaks the connection (the bug that bit us before).
  *
- * `hostUri` looks like "10.148.104.103:8081". On a device, localhost/loopback would point
+ * `hostUri` looks like "127.0.0.1:8081". On a device, localhost/loopback would point
  * back at the phone, so we ignore those and fall back to the hardcoded LAN IP.
  */
 function resolveHost(): string {

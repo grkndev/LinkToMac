@@ -66,12 +66,13 @@ class ClipForegroundService : Service() {
   // ---- Relay (WS to the Mac) -----------------------------------------------
 
   /** Persist config and (re)connect — but skip the restart if nothing changed. */
-  fun applyRelayConfig(url: String, token: String, room: String) {
+  fun applyRelayConfig(url: String, token: String, room: String, peerName: String?) {
     val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val unchanged = p.getString("url", null) == url &&
       p.getString("token", null) == token &&
-      p.getString("room", null) == room
-    saveConfig(this, url, token, room)
+      p.getString("room", null) == room &&
+      p.getString("peerName", null) == peerName
+    saveConfig(this, url, token, room, peerName)
     if (unchanged && relay != null) return
     reloadRelay()
   }
@@ -89,6 +90,7 @@ class ClipForegroundService : Service() {
       relay?.shutdown()
       relay = null
       ClipBus.relay("disconnected", false, null)
+      updateNotification(peerOnline = false)
     } else {
       reloadRelay()
     }
@@ -110,7 +112,10 @@ class ClipForegroundService : Service() {
         bridge?.write(text)
         ClipBus.log("relay -> clipboard (${text.length})")
       },
-      onStatus = { status, peerOnline, error -> ClipBus.relay(status, peerOnline, error) },
+      onStatus = { status, peerOnline, error ->
+        ClipBus.relay(status, peerOnline, error)
+        updateNotification(peerOnline)
+      },
       log = { ClipBus.log(it) },
     ).also { it.start() }
   }
@@ -133,23 +138,54 @@ class ClipForegroundService : Service() {
         NotificationChannel(CHANNEL, "Link to macOS", NotificationManager.IMPORTANCE_LOW)
       )
     }
-    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      Notification.Builder(this, CHANNEL)
-    } else {
-      @Suppress("DEPRECATION") Notification.Builder(this)
-    }
-    val notification = builder
-      .setContentTitle("Link to macOS")
-      .setContentText("Pano senkronu aktif")
-      .setSmallIcon(android.R.drawable.stat_notify_sync)
-      .setOngoing(true)
-      .build()
-
+    val notification = buildNotification("Device disconnected", "Waiting for connection…")
     if (Build.VERSION.SDK_INT >= 34) {
       startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
     } else {
       startForeground(NOTIF_ID, notification)
     }
+  }
+
+  private fun buildNotification(title: String, text: String): Notification {
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(this, CHANNEL)
+    } else {
+      @Suppress("DEPRECATION") Notification.Builder(this)
+    }
+    return builder
+      .setContentTitle(title)
+      .setContentText(text)
+      .setSmallIcon(android.R.drawable.stat_notify_sync)
+      .setOngoing(true)
+      .build()
+  }
+
+  /** Last peerOnline value shown in the notification; skips redundant notify() calls. */
+  @Volatile private var notifiedPeerOnline: Boolean? = null
+
+  /**
+   * Re-post the notification with the current state. Needed right after POST_NOTIFICATIONS
+   * is granted: the grant doesn't retroactively reveal a notification posted while denied.
+   */
+  fun refreshNotification() {
+    val online = notifiedPeerOnline ?: false
+    notifiedPeerOnline = null
+    updateNotification(online)
+  }
+
+  /** Reflect the Mac's presence in the sticky foreground notification. */
+  private fun updateNotification(peerOnline: Boolean) {
+    if (notifiedPeerOnline == peerOnline) return
+    notifiedPeerOnline = peerOnline
+    val name = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .getString("peerName", null) ?: "your Mac"
+    val notification = if (peerOnline) {
+      buildNotification("Device connected", "Your device has connected to $name")
+    } else {
+      buildNotification("Device disconnected", "Waiting to reconnect to $name")
+    }
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    nm.notify(NOTIF_ID, notification)
   }
 
   companion object {
@@ -163,11 +199,12 @@ class ClipForegroundService : Service() {
     const val DEFAULT_PORT = 53123
 
     /** Persist relay config so the service (incl. a START_STICKY restart) can connect. */
-    fun saveConfig(ctx: Context, url: String, token: String, room: String) {
+    fun saveConfig(ctx: Context, url: String, token: String, room: String, peerName: String?) {
       ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
         .putString("url", url)
         .putString("token", token)
         .putString("room", room)
+        .putString("peerName", peerName)
         .apply()
     }
 

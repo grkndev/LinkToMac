@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import type { SelfAdbModuleEvents } from './SelfAdb.types';
+import type { RelayEvent, SelfAdbModuleEvents } from './SelfAdb.types';
 
 /** Boot state returned by autoStart(): drives the JS gate. */
 export type AutoStartState = 'ready' | 'need-pair' | 'need-connect';
@@ -30,10 +30,16 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   openWirelessDebuggingSettings(): Promise<void>;
   /** send text down to the shell process to set the system clipboard. */
   writeClipboard(text: string): Promise<void>;
-  /** persist relay config (url/token/room) and (re)connect the native WS to the Mac. */
-  setRelay(url: string, token: string, room: string): Promise<void>;
+  /** persist relay config (url/token/room/peer name) and (re)connect the native WS to the Mac. */
+  setRelay(url: string, token: string, room: string, peerName: string | null): Promise<void>;
+  /** current relay state, retained natively (the service may have connected before the app). */
+  relayGetStatus(): Promise<RelayEvent>;
   /** live pause/resume of relay forwarding (does not touch persisted config). */
   relaySetPaused(paused: boolean): Promise<void>;
+  /** whether the FGS notification can be shown (POST_NOTIFICATIONS, Android 13+). */
+  hasPostNotifications(): Promise<boolean>;
+  /** request POST_NOTIFICATIONS; re-posts the service notification once granted. */
+  requestPostNotifications(): Promise<boolean>;
   /** whether the app is exempt from battery optimizations (more resilient FGS). */
   hasIgnoreBatteryOptimizations(): Promise<boolean>;
   /** open the system dialog to request battery-optimization exemption. */
