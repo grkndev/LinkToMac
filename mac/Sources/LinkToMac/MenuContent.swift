@@ -27,6 +27,11 @@ struct MenuContent: View {
             client.toggle()
         }
 
+        Toggle("Start at Login", isOn: Binding(
+            get: { LoginItem.isEnabled },
+            set: { try? LoginItem.setEnabled($0) }
+        ))
+
         Divider()
 
         Button("Quit") {

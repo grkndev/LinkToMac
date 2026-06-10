@@ -33,9 +33,12 @@ enum PairingStore {
         keychainSet(data)
     }
 
-    /// JSON the phone scans: `{"v":1,"room":"...","key":"..."}`.
+    /// JSON the phone scans: `{"v":1,"room":"...","key":"...","name":"grkn's MacBook Air"}`.
+    /// `name` is this Mac's current computer name, read fresh on every QR render — it is
+    /// not part of the persisted pairing.
     static func qrPayload(_ pairing: Pairing) -> String {
-        let payload = QRPayload(v: 1, room: pairing.room, key: pairing.key)
+        let name = Host.current().localizedName ?? "Mac"
+        let payload = QRPayload(v: 1, room: pairing.room, key: pairing.key, name: name)
         let data = (try? JSONEncoder().encode(payload)) ?? Data()
         return String(decoding: data, as: UTF8.self)
     }
@@ -44,6 +47,7 @@ enum PairingStore {
         let v: Int
         let room: String
         let key: String
+        let name: String
     }
 
     private static func randomBase64(_ count: Int) -> String {

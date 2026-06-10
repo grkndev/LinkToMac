@@ -1,8 +1,8 @@
 import AppKit
 
 /// Polls `NSPasteboard.changeCount` (there is no change notification) and reports new text.
-/// We only watch — we never write the pasteboard here — so a change always means the user
-/// copied something, and there is no self-induced echo to suppress on the Mac side.
+/// Remote clips are written through `write(_:)`, which stamps `lastChangeCount` so the
+/// poll never re-broadcasts our own write back to the peer (echo suppression).
 @MainActor
 final class PasteboardWatcher {
     private let pasteboard = NSPasteboard.general
@@ -32,6 +32,15 @@ final class PasteboardWatcher {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+    }
+
+    /// Write a remote clip to the pasteboard. Both this and `poll()` run on the main
+    /// actor, so stamping `lastChangeCount` here is enough to swallow the echo. If the
+    /// user copies within the same poll window, last writer wins.
+    func write(_ text: String) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        lastChangeCount = pasteboard.changeCount
     }
 
     private func poll() {

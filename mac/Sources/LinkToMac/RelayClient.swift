@@ -156,7 +156,9 @@ final class RelayClient {
                 guard gen == generation else { return }
                 handle(message)
             } catch {
-                guard gen == generation else { return } // stale socket failure; ignore
+                // Cancelled (intentional disconnect tears the socket down under us) or
+                // stale socket failure; both expected, not an error.
+                guard !Task.isCancelled, gen == generation else { return }
                 handleFailure("receive failed: \(error.localizedDescription)")
                 return
             }
@@ -202,6 +204,7 @@ final class RelayClient {
         case let .clip(_, ct):
             // Placeholder codec: ct is base64(utf8(text)); nonce ignored until crypto lands.
             if let text = ClipCodec.decode(ct: ct) {
+                pasteboard?.write(text)
                 lastClip = text
                 log("clip received (\(text.count) chars)")
             } else {
@@ -226,12 +229,14 @@ final class RelayClient {
     }
 
     private func heartbeatTick(generation gen: Int) async -> Bool {
-        guard gen == generation else { return false }
+        guard !Task.isCancelled, gen == generation else { return false }
         do {
             try await send(.ping)
             return true
         } catch {
-            if gen == generation { handleFailure("ping failed: \(error.localizedDescription)") }
+            if !Task.isCancelled, gen == generation {
+                handleFailure("ping failed: \(error.localizedDescription)")
+            }
             return false
         }
     }
