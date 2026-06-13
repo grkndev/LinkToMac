@@ -29,7 +29,12 @@ export function PairingProvider({ children }: { children: ReactNode }) {
   const [paused, setPausedState] = useState(false);
 
   useEffect(() => {
-    loadPairing().then(setPairingState);
+    // A SecureStore read failure must not strand `pairing` at undefined (which the
+    // root layout treats as "still booting" -> permanent spinner). Fall back to
+    // unpaired so the guards send the user to the pairing flow instead.
+    loadPairing()
+      .then(setPairingState)
+      .catch(() => setPairingState(null));
   }, []);
 
   useEffect(() => {

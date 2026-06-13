@@ -8,6 +8,7 @@ import { Spacing } from '@/constants/theme';
 import { PairingProvider, usePairing } from '@/features/relay/pairing-context';
 import { useRelayAutostart } from '@/features/relay/use-relay-autostart';
 import { ClipBootProvider, useClipBootContext } from '@/features/selfadb/clip-boot-context';
+import {StatusBar} from "expo-status-bar"
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -16,6 +17,7 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <ClipBootProvider>
         <PairingProvider>
+          <StatusBar style='auto' />
           <AnimatedSplashOverlay />
           <RootNavigator />
         </PairingProvider>
@@ -54,8 +56,8 @@ function RootNavigator() {
         </Stack.Protected>
         <Stack.Protected guard={macPaired}>
           <Stack.Screen name="index" />
-          <Stack.Screen name="settings" options={{ headerShown: true, title: 'Ayarlar' }} />
-          <Stack.Screen name="logs" options={{ headerShown: true, title: 'Günlükler' }} />
+          <Stack.Screen name="settings" options={{ headerShown: true, title: 'Settings', headerShadowVisible:false }} />
+          <Stack.Screen name="logs" options={{ headerShown: true, title: 'Logs' }} />
         </Stack.Protected>
         <Stack.Screen name="qr-scan" options={{ presentation: 'modal' }} />
       </Stack.Protected>

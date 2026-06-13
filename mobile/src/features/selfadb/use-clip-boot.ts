@@ -3,6 +3,26 @@ import { AppState } from 'react-native';
 
 import SelfAdb, { CLIP_PORT } from './client';
 
+/**
+ * Hard ceiling for a single autoStart(). The native call has bounded timeouts on
+ * probe (400ms) and mDNS discover (8s), but adb's TLS connect + exec streams
+ * (dex push, daemon launch) have none — a half-trusted adbd (common on Samsung
+ * after a wireless-debugging toggle/reboot) can stall them forever. Without this
+ * the boot state never leaves 'booting' and the app hangs on the spinner.
+ */
+const AUTOSTART_TIMEOUT_MS = 20_000;
+
+/** Distinguishes "native call stalled" from a real native error in the catch. */
+class TimeoutError extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(`${label} ${ms} ms içinde yanıt vermedi`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 export type BootState =
   | 'booting' // first autoStart in flight
   | 'need-pair' // never paired -> show PairScreen (pair mode)
@@ -38,11 +58,14 @@ export function useClipBoot(): ClipBoot {
     busy.current = true;
     setError(null);
     try {
-      const result = await SelfAdb.autoStart(CLIP_PORT);
+      const result = await withTimeout(SelfAdb.autoStart(CLIP_PORT), AUTOSTART_TIMEOUT_MS, 'autoStart');
       setState(result === 'ready' ? 'ready' : result); // 'need-pair' | 'need-connect'
     } catch (e: any) {
       setError(e?.message ?? String(e));
-      setState('error');
+      // A stall only happens past isPaired(), in the connect/deploy phase, so the
+      // device is paired — route to the recoverable reconnect screen (which the
+      // foreground-resume effect retries) instead of stranding on the spinner.
+      setState(e instanceof TimeoutError ? 'need-connect' : 'error');
     } finally {
       busy.current = false;
     }

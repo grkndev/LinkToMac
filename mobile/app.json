@@ -46,7 +46,9 @@
           "cameraPermission": "QR ile eşleştirme için kameraya erişim gerekiyor.",
           "barcodeScannerEnabled": true
         }
-      ]
+      ],
+      "expo-font",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,

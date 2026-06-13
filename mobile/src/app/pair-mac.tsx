@@ -1,82 +1,110 @@
+import {
+  Box,
+  Button,
+  Column,
+  Host,
+  Row,
+  Text,
+  useMaterialColors,
+  type MaterialColors,
+} from '@expo/ui/jetpack-compose';
+import {
+  background,
+  clip,
+  fillMaxSize,
+  fillMaxWidth,
+  padding,
+  paddingAll,
+  Shapes,
+  size,
+  weight,
+} from '@expo/ui/jetpack-compose/modifiers';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useColorScheme } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+
+/** Brand blue (app.json notification color) — seeds the Material 3 palette. Matches Settings. */
+const SEED = '#208AEF';
 
 /** Mac pairing entry: shown when ADB is ready but no Mac has been paired yet. */
 export default function PairMacScreen() {
-  const theme = useTheme();
   const router = useRouter();
+  const scheme = useColorScheme();
+  const insets = useSafeAreaInsets();
+  const colors = useMaterialColors({ seedColor: SEED });
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.hero}>
-          <ThemedText type="title" style={styles.title}>
-            Cihazınızı eşleştirin
-          </ThemedText>
-          <ThemedText type="default" themeColor="textSecondary">
-            Panonu Mac ile senkronize etmek için cihazları eşleştir.
-          </ThemedText>
-        </View>
+    <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>
+      {/* Outer column fills the screen and centers the content group vertically. */}
+      <Column
+        modifiers={[
+          fillMaxSize(),
+          padding(Spacing.four, insets.top + Spacing.four, Spacing.four, insets.bottom + Spacing.four),
+        ]}
+        verticalArrangement="center"
+      >
+        <Column modifiers={[fillMaxWidth()]} verticalArrangement={{ spacedBy: Spacing.five }}>
+          {/* Hero */}
+          <Column modifiers={[fillMaxWidth()]} verticalArrangement={{ spacedBy: Spacing.three }}>
+            <Text color={colors.onBackground} style={{ typography: 'displaySmall', fontWeight: '700' }}>
+              Cihazınızı eşleştirin
+            </Text>
+            <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyLarge' }}>
+              Panonu Mac ile senkronize etmek için cihazları eşleştir.
+            </Text>
+          </Column>
 
-        <ThemedView type="backgroundElement" style={styles.card}>
-          <Step n={1} text="Mac uygulamasında menüden “Pairing QR…” penceresini aç" />
-          <Step n={2} text="QR kodu telefonunla tara" />
-        </ThemedView>
+          {/* Steps — tonal extra-large rounded container, matching Settings' sections. */}
+          <Column
+            modifiers={[
+              fillMaxWidth(),
+              clip(Shapes.RoundedCorner(28)),
+              background(colors.surfaceContainerHigh),
+              paddingAll(Spacing.four),
+            ]}
+            verticalArrangement={{ spacedBy: Spacing.three }}
+          >
+            <Step colors={colors} n={1} text="Mac uygulamasında menüden “Pairing QR…” penceresini aç" />
+            <Step colors={colors} n={2} text="QR kodu telefonunla tara" />
+          </Column>
 
-        <Pressable
-          onPress={() => router.push('/qr-scan')}
-          style={[styles.primaryBtn, { backgroundColor: theme.text }]}>
-          <ThemedText type="default" style={[styles.primaryLabel, { color: theme.background }]}>
-            QR Kodu Tara
-          </ThemedText>
-        </Pressable>
-      </SafeAreaView>
-    </ThemedView>
+          {/* Primary CTA — native M3 filled button (uses the seeded primary/onPrimary pair). */}
+          <Button
+            onClick={() => router.push('/qr-scan')}
+            modifiers={[fillMaxWidth()]}
+            contentPadding={{ top: Spacing.two, bottom: Spacing.two }}
+          >
+            <Text color={colors.onPrimary} style={{ typography: 'labelLarge', fontWeight: '600' }}>
+              QR Kodu Tara
+            </Text>
+          </Button>
+        </Column>
+      </Column>
+    </Host>
   );
 }
 
-function Step({ n, text }: { n: number; text: string }) {
+/** Numbered tonal bubble + wrapping instruction text — the M3 Expressive list idiom. */
+function Step({ colors, n, text }: { colors: MaterialColors; n: number; text: string }) {
   return (
-    <View style={styles.step}>
-      <ThemedText type="smallBold" themeColor="textSecondary">
-        {n}.
-      </ThemedText>
-      <ThemedText type="small" style={styles.stepText}>
+    <Row
+      modifiers={[fillMaxWidth()]}
+      horizontalArrangement={{ spacedBy: Spacing.three }}
+      verticalAlignment="center"
+    >
+      <Box
+        contentAlignment="center"
+        modifiers={[size(28, 28), clip(Shapes.Circle), background(colors.primaryContainer)]}
+      >
+        <Text color={colors.onPrimaryContainer} style={{ typography: 'labelLarge', fontWeight: '700' }}>
+          {n}
+        </Text>
+      </Box>
+      <Text modifiers={[weight(1)]} color={colors.onSurface} style={{ typography: 'bodyMedium' }}>
         {text}
-      </ThemedText>
-    </View>
+      </Text>
+    </Row>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  safe: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    justifyContent: 'center',
-    gap: Spacing.five,
-  },
-  hero: { gap: Spacing.three },
-  title: { fontSize: 40, lineHeight: 44 },
-  card: {
-    borderRadius: Spacing.four,
-    padding: Spacing.four,
-    gap: Spacing.three,
-  },
-  step: { flexDirection: 'row', gap: Spacing.two, alignItems: 'flex-start' },
-  stepText: { flex: 1 },
-  primaryBtn: {
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.three,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  primaryLabel: { fontWeight: '700' },
-});

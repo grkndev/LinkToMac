@@ -12,6 +12,7 @@ import expo.modules.interfaces.permissions.PermissionsStatus
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import io.github.muntashirakon.adb.AdbPairingRequiredException
 import io.github.muntashirakon.adb.android.AdbMdns
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -96,33 +97,43 @@ class SelfAdbModule : Module() {
       }
       // 3. Paired but daemon dead (typical after reboot). Bring wireless
       //    debugging up ourselves if we hold the permission, then mDNS-connect.
-      val canToggle = hasSecureSettings()
-      if (canToggle) {
-        log("self-enabling wireless debugging")
-        setWifiDebug(true)
-      }
-      val endpoint = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
-      if (endpoint == null) {
-        log("connect service not advertised -> need-connect")
-        return@AsyncFunction "need-connect"
-      }
-      val host = endpoint.first.hostAddress ?: "127.0.0.1"
-      status("connecting", "idle")
-      log("connecting $host:${endpoint.second} (mDNS)")
-      if (!adb.connect(host, endpoint.second)) {
+      try {
+        val canToggle = hasSecureSettings()
+        if (canToggle) {
+          log("self-enabling wireless debugging")
+          setWifiDebug(true)
+        }
+        val endpoint = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
+        if (endpoint == null) {
+          log("connect service not advertised -> need-connect")
+          return@AsyncFunction "need-connect"
+        }
+        val host = endpoint.first.hostAddress ?: "127.0.0.1"
+        status("connecting", "idle")
+        log("connecting $host:${endpoint.second} (mDNS)")
+        if (!adb.connect(host, endpoint.second)) {
+          status("failed", "idle")
+          throw Exception("connect failed despite mDNS endpoint $host:${endpoint.second}")
+        }
+        status("connected", "idle")
+        // If we couldn't self-toggle, the user just enabled it manually -> grab
+        // the permission now so every future reboot is silent.
+        if (!canToggle) {
+          log("grant for future silent reconnects: " + adb.grantSecureSettings(appCtx.packageName))
+        }
+        deploy(clipPort)
+        if (canToggle) setWifiDebug(false) // detached daemon survives; minimise surface
+        status("connected", "running")
+        "ready"
+      } catch (e: AdbPairingRequiredException) {
+        // adbd no longer trusts our stored key (common on Samsung/One UI after a
+        // wireless-debugging toggle or reboot, which wipes the paired-keys list).
+        // isPaired() only checks the local key file, so it lied. Route to the
+        // pairing screen for a fresh code instead of dying in an error loop.
+        log("adbd requires re-pairing -> need-pair (${e.message})")
         status("failed", "idle")
-        throw Exception("connect failed despite mDNS endpoint $host:${endpoint.second}")
+        "need-pair"
       }
-      status("connected", "idle")
-      // If we couldn't self-toggle, the user just enabled it manually -> grab
-      // the permission now so every future reboot is silent.
-      if (!canToggle) {
-        log("grant for future silent reconnects: " + adb.grantSecureSettings(appCtx.packageName))
-      }
-      deploy(clipPort)
-      if (canToggle) setWifiDebug(false) // detached daemon survives; minimise surface
-      status("connected", "running")
-      "ready"
     }
 
     /**
