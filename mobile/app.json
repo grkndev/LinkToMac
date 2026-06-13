@@ -7,6 +7,9 @@
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
+    "extra": {
+      "relayHost": "51.38.98.148"
+    },
     "ios": {
       "icon": "./assets/expo.icon"
     },
