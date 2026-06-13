@@ -4,7 +4,10 @@ import {
   Host,
   LoadingIndicator,
   useMaterialColors,
-  Button
+  Button,
+  Box,
+  Surface,
+  Shape,
 } from "@expo/ui/jetpack-compose";
 import { AnimatedSplashOverlay } from "@/components/animated-icon";
 import { ThemedText } from "@/components/themed-text";
@@ -18,6 +21,12 @@ import {
 } from "@/features/selfadb/clip-boot-context";
 import { StatusBar } from "expo-status-bar";
 import { SEED } from "@/components/m3";
+import {
+  clip,
+  fillMaxSize,
+  Shapes,
+  size,
+} from "@expo/ui/jetpack-compose/modifiers";
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -50,7 +59,8 @@ function RootNavigator() {
   useRelayAutostart();
 
   // Hold the Stack until boot + SecureStore settle so the guards don't flicker.
-  if (boot.state === "booting" || pairing === undefined) return <Booting />;
+  if (boot.state === "booting" || pairing === undefined)
+    return <Booting />;
 
   const adbReady = boot.state === "ready";
   const macPaired = pairing != null;
@@ -89,16 +99,33 @@ function Booting() {
   const colors = useMaterialColors({ seedColor: SEED });
   const scheme = useColorScheme();
   return (
-    <ThemedView style={styles.booting}>
+    <ThemedView
+      style={[styles.booting, { backgroundColor: colors.background }]}
+    >
       <Host
         matchContents
         style={{ backgroundColor: "transparent" }}
         seedColor={SEED}
         colorScheme={scheme}
       >
-        <LoadingIndicator color={colors.primary} />
+        <Surface
+          color={colors.secondaryContainer}
+          modifiers={[size(64, 64)]}
+          shape={Shape.RoundedCorner({
+            cornerRadii: {
+              bottomEnd: 32,
+              topStart: 32, 
+              bottomStart: 32,
+              topEnd: 32,
+            },
+          })}
+        >
+          <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
+            <LoadingIndicator color={colors.primary} />
+          </Box>
+        </Surface>
       </Host>
-      <ThemedText type="small" themeColor="textSecondary">
+      <ThemedText type="default" themeColor="textSecondary">
         Connecting to Mac...
       </ThemedText>
     </ThemedView>
