@@ -1,111 +1,228 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import {
+  Box,
+  Column,
+  Host,
+  Icon,
+  ListItem,
+  Row,
+  Shape,
+  Surface,
+  Text,
+  useMaterialColors,
+  type MaterialColors,
+} from '@expo/ui/jetpack-compose';
+import {
+  alpha,
+  background,
+  clip,
+  fillMaxSize,
+  fillMaxWidth,
+  padding,
+  Shapes,
+  size,
+  verticalScroll,
+  weight,
+} from '@expo/ui/jetpack-compose/modifiers';
 import { useRouter } from 'expo-router';
-import { Alert, Pressable, Text, View } from 'react-native';
-import { SafeAreaView as RNSafeAreaView } from 'react-native-safe-area-context';
-import { withUniwind } from 'uniwind';
+import { Alert, useColorScheme } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  ButtonGroup,
+  Group,
+  IconCircle,
+  SEED,
+  groupShape,
+  groupShapeH,
+  tonal,
+  type RowShape,
+} from '@/components/m3';
+import { Spacing } from '@/constants/theme';
 import { usePairing } from '@/features/relay/pairing-context';
 import { useRelayStatus } from '@/features/relay/use-relay-status';
-import { useTheme } from '@/hooks/use-theme';
 
-// SafeAreaView is third-party (not a core RN component), so it needs withUniwind
-// to accept `className`. Wrap once at module level — never inside a render.
-const SafeAreaView = withUniwind(RNSafeAreaView);
+/** Brand green for the "online" status dot — M3 has no green role, so this stays a literal. */
+const ONLINE = '#2ECC71';
+
+/** Material XML vector drawables (see assets/icons), tinted by the `Icon` component. */
+const ICONS = {
+  settings: require('../../assets/icons/settings.xml'),
+  laptop: require('../../assets/icons/laptop_mac.xml'),
+  lock: require('../../assets/icons/lock.xml'),
+  send: require('../../assets/icons/send.xml'),
+  cast: require('../../assets/icons/cast.xml'),
+  folder: require('../../assets/icons/folder_open.xml'),
+  clipboard: require('../../assets/icons/content_paste.xml'),
+};
+
+/** 28dp "extra-large" rounded square for the expressive hero tile. */
+const HERO_SHAPE = Shape.RoundedCorner({
+  cornerRadii: { topStart: 28, topEnd: 28, bottomStart: 28, bottomEnd: 28 },
+});
 
 /** Home: paired Mac's identity + connection state, plus quick actions. */
 export default function HomeScreen() {
-  const theme = useTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const scheme = useColorScheme();
+  const colors = useMaterialColors({ seedColor: SEED });
   const { pairing, paused } = usePairing();
   const { relay, lastClip } = useRelayStatus();
 
   const connected = relay.peerOnline && !paused;
-  const statusLabel = paused ? 'Duraklatıldı' : connected ? 'Bağlı' : 'Bağlı değil';
+  const statusLabel = paused ? 'Paused' : connected ? 'Connected' : 'Not connected';
 
   return (
-    <View className="flex-1 bg-background">
-      <SafeAreaView className="flex-1 gap-8 p-6">
-        <View className="flex-row justify-end">
-          <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-            <MaterialIcons name="settings" size={26} color={theme.textSecondary} />
-          </Pressable>
-        </View>
+    <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>
+      <Column
+        modifiers={[
+          fillMaxWidth(),
+          verticalScroll(),
+          padding(
+            Spacing.three,
+            insets.top + Spacing.two,
+            Spacing.three,
+            insets.bottom + Spacing.five,
+          ),
+        ]}
+        verticalArrangement={{ spacedBy: Spacing.five }}
+      >
+        {/* Top bar: settings entry point. */}
+        <Row modifiers={[fillMaxWidth()]} horizontalArrangement="end">
+          <Surface
+            color={colors.surfaceContainerHigh}
+            shape={HERO_SHAPE}
+            onClick={() => router.push('/settings')}
+            modifiers={[size(44, 44)]}
+          >
+            <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
+              <Icon source={ICONS.settings} size={24} tint={colors.onSurfaceVariant} />
+            </Box>
+          </Surface>
+        </Row>
 
-        <View className="items-center gap-2">
-          <View className="mb-2 h-24 w-24 items-center justify-center rounded-2xl bg-background-element">
-            <MaterialIcons name="laptop-mac" size={48} color={theme.textSecondary} />
-          </View>
-          <Text className="text-center text-5xl font-semibold leading-13 text-foreground">
+        {/* Hero: the paired Mac's identity + live connection status. */}
+        <Column
+          modifiers={[fillMaxWidth()]}
+          horizontalAlignment="center"
+          verticalArrangement={{ spacedBy: Spacing.two }}
+        >
+          <Surface color={colors.secondaryContainer} shape={HERO_SHAPE} modifiers={[size(96, 96)]}>
+            <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
+              <Icon source={ICONS.laptop} size={46} tint={colors.onSecondaryContainer} />
+            </Box>
+          </Surface>
+          <Text
+            color={colors.onSurface}
+            style={{ typography: 'headlineLarge', fontWeight: '600', textAlign: 'center' }}
+          >
             {pairing?.name ?? 'Mac'}
           </Text>
-          <View className="flex-row items-center gap-2">
-            <View
-              className={`h-2 w-2 rounded-full ${connected ? 'bg-[#2ecc71]' : 'bg-[#e5484d]'}`}
+          <Row verticalAlignment="center" horizontalArrangement={{ spacedBy: Spacing.two }}>
+            <Box
+              modifiers={[size(8, 8), clip(Shapes.Circle), background(connected ? ONLINE : colors.error)]}
             />
-            <Text className="text-sm font-medium text-foreground-secondary">{statusLabel}</Text>
-          </View>
-        </View>
+            <Text
+              color={colors.onSurfaceVariant}
+              style={{ typography: 'labelLarge', fontWeight: '600' }}
+            >
+              {statusLabel}
+            </Text>
+          </Row>
+        </Column>
 
-        <View className="flex-row gap-4">
-          <ActionButton icon="lock-outline" label="PC'yi Kilitle" />
-          <ActionButton icon="send" label="Dosya Gönder" />
-          <ActionButton icon="cast" label="Ekranı Yansıt" />
-        </View>
+        {/* Quick actions — connected button group; placeholders, so dimmed + "coming soon". */}
+        <ButtonGroup>
+          <ActionTile colors={colors} icon={ICONS.lock} label="Lock Mac" />
+          <ActionTile colors={colors} icon={ICONS.cast} label="Cast Screen" />
+        </ButtonGroup>
 
-        <View className="gap-4">
-          <ListRow icon="folder-open" label="Alınan dosyalar" value="Yakında" />
-          <ListRow
-            icon="content-paste"
-            label="Pano"
-            value={lastClip ? truncate(lastClip) : 'Henüz kopyalanan bir şey yok'}
+        {/* Info list — same grouped-list language as Settings. */}
+        <Group>
+          <InfoRow colors={colors} icon={ICONS.folder} label="Received files" value="Soon" />
+          <InfoRow
+            colors={colors}
+            icon={ICONS.clipboard}
+            label="Clipboard"
+            value={lastClip ? truncate(lastClip) : 'No items copied yet'}
           />
-        </View>
-      </SafeAreaView>
-    </View>
+        </Group>
+      </Column>
+    </Host>
   );
 }
 
-/** Placeholder quick action; functionality lands in a later update. */
-function ActionButton({
+/** Equal-width quick action; functionality lands in a later update, so it's dimmed. */
+function 
+ActionTile({
+  colors,
   icon,
   label,
+  shape = groupShapeH(true, true),
 }: {
-  icon: keyof typeof MaterialIcons.glyphMap;
+  colors: MaterialColors;
+  icon: number;
   label: string;
+  shape?: RowShape;
 }) {
-  const theme = useTheme();
+  const t = tonal(colors, 'secondary');
   return (
-    <Pressable
-      className="flex-1 items-center gap-2 opacity-40"
-      onPress={() => Alert.alert('Yakında', 'Bu özellik henüz hazır değil.')}>
-      <View className="items-center justify-center self-stretch rounded-2xl bg-background-element py-4">
-        <MaterialIcons name={icon} size={26} color={theme.textSecondary} />
-      </View>
-      <Text className="text-center text-sm font-medium text-foreground-secondary">{label}</Text>
-    </Pressable>
+    <Surface
+      color={colors.surfaceContainerHigh}
+      shape={shape}
+      onClick={() => Alert.alert('Soon', 'This feature is not available yet.')}
+      modifiers={[weight(1), alpha(0.5)]}
+    >
+      <Column
+        modifiers={[fillMaxWidth(), padding(Spacing.two, Spacing.three, Spacing.two, Spacing.three)]}
+        horizontalAlignment="center"
+        verticalArrangement={{ spacedBy: Spacing.two }}
+      >
+        <IconCircle source={icon} container={t.container} on={t.on} />
+        <Text
+          color={colors.onSurface}
+          style={{ typography: 'labelLarge', fontWeight: '600', textAlign: 'center' }}
+        >
+          {label}
+        </Text>
+      </Column>
+    </Surface>
   );
 }
 
-function ListRow({
+/** Rounded tonal row with a leading icon circle, a label, and a supporting value line. */
+function InfoRow({
+  colors,
   icon,
   label,
   value,
+  shape = groupShape(true, true),
 }: {
-  icon: keyof typeof MaterialIcons.glyphMap;
+  colors: MaterialColors;
+  icon: number;
   label: string;
   value: string;
+  shape?: RowShape;
 }) {
-  const theme = useTheme();
+  const t = tonal(colors, 'secondary');
   return (
-    <View className="flex-row items-center gap-4 rounded-2xl bg-background-element p-4">
-      <MaterialIcons name={icon} size={22} color={theme.textSecondary} />
-      <View className="flex-1 gap-0.5">
-        <Text className="text-sm font-bold text-foreground">{label}</Text>
-        <Text className="text-sm font-medium text-foreground-secondary" numberOfLines={1}>
-          {value}
-        </Text>
-      </View>
-    </View>
+    <Surface color={colors.surfaceContainerHigh} shape={shape} modifiers={[fillMaxWidth()]}>
+      <ListItem colors={{ containerColor: 'transparent' }} modifiers={[fillMaxWidth()]}>
+        <ListItem.LeadingContent>
+          <IconCircle source={icon} container={t.container} on={t.on} />
+        </ListItem.LeadingContent>
+        <ListItem.HeadlineContent>
+          <Text color={colors.onSurface} style={{ typography: 'bodyLarge', fontWeight: '500' }}>
+            {label}
+          </Text>
+        </ListItem.HeadlineContent>
+        <ListItem.SupportingContent>
+          <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+            {value}
+          </Text>
+        </ListItem.SupportingContent>
+      </ListItem>
+    </Surface>
   );
 }
 
