@@ -52,6 +52,15 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   requestIgnoreBatteryOptimizations(): Promise<void>;
   /** true if a pairing key already exists on disk. */
   isPaired(): Promise<boolean>;
+  /** snapshot of the in-app log ring buffer (oldest first), retained across the JS gap. */
+  getLogs(): Promise<string[]>;
+  /** clear the in-app log ring buffer. */
+  clearLogs(): Promise<void>;
+  /**
+   * fetch the privileged daemon's own on-device log + a liveness/socket probe.
+   * (Re)connects adb over mDNS, self-enabling wireless debugging if permitted.
+   */
+  readDaemonLog(): Promise<string>;
   /** kill the detached daemon (requires adb connected). */
   killDaemon(): Promise<string>;
   /** detach the bridge but LEAVE the daemon running (survives app death). */

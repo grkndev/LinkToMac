@@ -55,6 +55,7 @@ function RootNavigator() {
         <Stack.Protected guard={macPaired}>
           <Stack.Screen name="index" />
           <Stack.Screen name="settings" options={{ headerShown: true, title: 'Ayarlar' }} />
+          <Stack.Screen name="logs" options={{ headerShown: true, title: 'Günlükler' }} />
         </Stack.Protected>
         <Stack.Screen name="qr-scan" options={{ presentation: 'modal' }} />
       </Stack.Protected>

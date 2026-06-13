@@ -256,6 +256,46 @@ class SelfAdbModule : Module() {
       )
     }
 
+    // ---- Diagnostics / logs --------------------------------------------------
+
+    /** Snapshot of the in-app log ring buffer (oldest first), retained natively across
+     *  the JS-runtime gap so the Logs screen shows events from before it attached. */
+    AsyncFunction("getLogs") {
+      ClipBus.snapshot()
+    }
+
+    AsyncFunction("clearLogs") {
+      ClipBus.clearBuffer()
+    }
+
+    /**
+     * Fetch the privileged daemon's own on-device log (`/data/local/tmp/clip.log`: its
+     * selftest, "listening", "client connected", "captured -> emit" lines) plus a liveness
+     * probe. This is the ground truth for "is the clipboard agent actually running and is
+     * the system clip-changed listener firing?". Needs adb, so we (re)connect over mDNS,
+     * self-enabling wireless debugging if we hold WRITE_SECURE_SETTINGS, then turn it back
+     * off. The detached daemon survives that toggle.
+     */
+    AsyncFunction("readDaemonLog") {
+      val socketUp = probe(ClipForegroundService.DEFAULT_PORT)
+      val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
+      try {
+        val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
+          ?: return@AsyncFunction "bridge socket: ${if (socketUp) "açık" else "KAPALI"}\n\n" +
+            "Cihaz logu okunamadı: kablosuz hata ayıklama yayında değil.\n" +
+            "Geliştirici Seçenekleri > Kablosuz hata ayıklama'yı açıp tekrar dene."
+        val host = ep.first.hostAddress ?: "127.0.0.1"
+        if (!adb.connect(host, ep.second)) {
+          return@AsyncFunction "adb bağlanılamadı ($host:${ep.second}) — eşleştirme düşmüş olabilir."
+        }
+        val alive = adb.runShort("pgrep -f ${AdbManager.NICE_NAME} >/dev/null 2>&1 && echo ÇALIŞIYOR || echo ÖLÜ")
+        val log = adb.runShort("cat /data/local/tmp/clip.log 2>/dev/null || echo '(clip.log yok — daemon hiç başlamamış olabilir)'")
+        "daemon süreci: $alive\nbridge socket: ${if (socketUp) "açık" else "KAPALI"}\n\n$log"
+      } finally {
+        if (toggled) setWifiDebug(false)
+      }
+    }
+
     AsyncFunction("killDaemon") {
       val r = adb.killDaemon()
       ClipForegroundService.stop(appCtx)

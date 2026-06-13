@@ -188,7 +188,8 @@ class AdbManager(private val context: Context) {
   companion object {
     private const val DEX_PATH = "/data/local/tmp/clipboard-agent.dex"
     private const val LOG_PATH = "/data/local/tmp/clip.log"
-    private const val NICE_NAME = "linktomac_clip"
+    /** `app_process --nice-name` of the detached daemon; also used to pgrep/kill it. */
+    const val NICE_NAME = "linktomac_clip"
     private const val MAIN_CLASS = "com.grkndev.clipboard.ClipboardAgent"
 
     private const val KEY_FILE = "adbkey"
