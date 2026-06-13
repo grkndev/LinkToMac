@@ -1,3 +1,40 @@
+@import 'tailwindcss';
+@import 'uniwind';
+
+/*
+ * Theme color tokens.
+ * `Colors` in src/constants/theme.ts stays the source of truth for native
+ * StyleSheet code (useTheme()); these mirror the same hex values so className
+ * utilities (bg-background, text-foreground, …) match it exactly. Keep both in
+ * sync when changing the palette. Mapping to Colors keys:
+ *   --color-foreground            = text
+ *   --color-foreground-secondary  = textSecondary
+ *   --color-background            = background
+ *   --color-background-element    = backgroundElement
+ *   --color-background-selected   = backgroundSelected
+ *   --color-primary               = brand/link color (#3c87f7)
+ */
+@layer theme {
+  :root {
+    @variant light {
+      --color-background: #ffffff;
+      --color-background-element: #f0f0f3;
+      --color-background-selected: #e0e1e6;
+      --color-foreground: #000000;
+      --color-foreground-secondary: #60646c;
+      --color-primary: #3c87f7;
+    }
+    @variant dark {
+      --color-background: #000000;
+      --color-background-element: #212225;
+      --color-background-selected: #2e3135;
+      --color-foreground: #ffffff;
+      --color-foreground-secondary: #b0b4ba;
+      --color-primary: #3c87f7;
+    }
+  }
+}
+
 :root {
   --font-display:
     Spline Sans, Inter, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji,

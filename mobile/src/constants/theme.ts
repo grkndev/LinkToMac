@@ -7,6 +7,11 @@ import '@/global.css';
 
 import { Platform } from 'react-native';
 
+/**
+ * Source of truth for the palette (native StyleSheet code via useTheme()).
+ * Mirrored as CSS variables in src/global.css for Uniwind className utilities
+ * (bg-background, text-foreground, …) — keep both in sync when editing colors.
+ */
 export const Colors = {
   light: {
     text: '#000000',
