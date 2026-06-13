@@ -1,23 +1,32 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
-import { ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
-
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
-import { PairingProvider, usePairing } from '@/features/relay/pairing-context';
-import { useRelayAutostart } from '@/features/relay/use-relay-autostart';
-import { ClipBootProvider, useClipBootContext } from '@/features/selfadb/clip-boot-context';
-import {StatusBar} from "expo-status-bar"
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
+import { ActivityIndicator, StyleSheet, useColorScheme } from "react-native";
+import {
+  Host,
+  LoadingIndicator,
+  useMaterialColors,
+  Button
+} from "@expo/ui/jetpack-compose";
+import { AnimatedSplashOverlay } from "@/components/animated-icon";
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { Spacing } from "@/constants/theme";
+import { PairingProvider, usePairing } from "@/features/relay/pairing-context";
+import { useRelayAutostart } from "@/features/relay/use-relay-autostart";
+import {
+  ClipBootProvider,
+  useClipBootContext,
+} from "@/features/selfadb/clip-boot-context";
+import { StatusBar } from "expo-status-bar";
+import { SEED } from "@/components/m3";
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <ClipBootProvider>
         <PairingProvider>
-          <StatusBar style='auto' />
+          <StatusBar style="auto" />
           <AnimatedSplashOverlay />
           <RootNavigator />
         </PairingProvider>
@@ -37,12 +46,13 @@ export default function RootLayout() {
 function RootNavigator() {
   const boot = useClipBootContext();
   const { pairing } = usePairing();
+
   useRelayAutostart();
 
   // Hold the Stack until boot + SecureStore settle so the guards don't flicker.
-  if (boot.state === 'booting' || pairing === undefined) return <Booting />;
+  if (boot.state === "booting" || pairing === undefined) return <Booting />;
 
-  const adbReady = boot.state === 'ready';
+  const adbReady = boot.state === "ready";
   const macPaired = pairing != null;
 
   return (
@@ -56,21 +66,40 @@ function RootNavigator() {
         </Stack.Protected>
         <Stack.Protected guard={macPaired}>
           <Stack.Screen name="index" />
-          <Stack.Screen name="settings" options={{ headerShown: true, title: 'Settings', headerShadowVisible:false }} />
-          <Stack.Screen name="logs" options={{ headerShown: true, title: 'Logs' }} />
+          <Stack.Screen
+            name="settings"
+            options={{
+              headerShown: true,
+              title: "Settings",
+              headerShadowVisible: false,
+            }}
+          />
+          <Stack.Screen
+            name="logs"
+            options={{ headerShown: true, title: "Logs" }}
+          />
         </Stack.Protected>
-        <Stack.Screen name="qr-scan" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="qr-scan" options={{ presentation: "modal" }} />
       </Stack.Protected>
     </Stack>
   );
 }
 
 function Booting() {
+  const colors = useMaterialColors({ seedColor: SEED });
+  const scheme = useColorScheme();
   return (
     <ThemedView style={styles.booting}>
-      <ActivityIndicator />
+      <Host
+        matchContents
+        style={{ backgroundColor: "transparent" }}
+        seedColor={SEED}
+        colorScheme={scheme}
+      >
+        <LoadingIndicator color={colors.primary} />
+      </Host>
       <ThemedText type="small" themeColor="textSecondary">
-        Bağlanılıyor…
+        Connecting to Mac...
       </ThemedText>
     </ThemedView>
   );
@@ -79,8 +108,8 @@ function Booting() {
 const styles = StyleSheet.create({
   booting: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: Spacing.three,
   },
 });
