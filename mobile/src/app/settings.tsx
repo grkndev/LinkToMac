@@ -1,56 +1,23 @@
 import {
-  Box,
   Column,
   Host,
-  Icon,
   ListItem,
-  Shape,
   Surface,
   Switch,
   Text,
   useMaterialColors,
   type MaterialColors,
 } from '@expo/ui/jetpack-compose';
-import {
-  background,
-  clip,
-  fillMaxWidth,
-  padding,
-  Shapes,
-  size,
-  verticalScroll,
-} from '@expo/ui/jetpack-compose/modifiers';
+import { fillMaxWidth, padding, verticalScroll } from '@expo/ui/jetpack-compose/modifiers';
 import { useRouter } from 'expo-router';
-import { Children, cloneElement, isValidElement, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, AppState, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Group, IconCircle, SEED, groupShape, tonal, type RowShape } from '@/components/m3';
 import { Spacing } from '@/constants/theme';
 import { usePairing } from '@/features/relay/pairing-context';
 import SelfAdb from '@/features/selfadb/client';
-
-/** Brand blue (app.json notification color) — seeds the whole Material 3 palette. */
-const SEED = '#208AEF';
-
-/**
- * Google-style grouped list: the rows in a section read as one rounded block, packed with a
- * hairline GROUP_GAP between them. The group's outer corners are large (R_OUTER); the corners
- * that touch a neighbour are small (R_INNER). A lone row keeps large corners all the way round.
- */
-const GROUP_GAP = 3;
-const R_OUTER = 24;
-const R_INNER = 6;
-
-type RowShape = ReturnType<typeof Shape.RoundedCorner>;
-
-/** Position-aware corner radii for a row inside its group. */
-function groupShape(isFirst: boolean, isLast: boolean): RowShape {
-  const top = isFirst ? R_OUTER : R_INNER;
-  const bottom = isLast ? R_OUTER : R_INNER;
-  return Shape.RoundedCorner({
-    cornerRadii: { topStart: top, topEnd: top, bottomStart: bottom, bottomEnd: bottom },
-  });
-}
 
 /** Material XML vector drawables (see assets/icons), tinted by the `Icon` component. */
 const ICONS = {
@@ -62,15 +29,6 @@ const ICONS = {
   linkOff: require('../../assets/icons/link_off.xml'),
   terminal: require('../../assets/icons/terminal.xml'),
 };
-
-type Tone = 'secondary' | 'error';
-
-/** Tonal container + on-container pair for the expressive leading icon circle. */
-function tonal(colors: MaterialColors, tone: Tone) {
-  return tone === 'error'
-    ? { container: colors.errorContainer, on: colors.onErrorContainer }
-    : { container: colors.secondaryContainer, on: colors.onSecondaryContainer };
-}
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -197,33 +155,6 @@ export default function SettingsScreen() {
         </Group>
       </Column>
     </Host>
-  );
-}
-
-/** One continuous grouped list: clones each rendered row with position-aware corner radii. */
-function Group({ children }: { children: React.ReactNode }) {
-  // toArray drops the `null`s from conditionally-rendered rows, so first/last land correctly.
-  const rows = Children.toArray(children);
-  return (
-    <Column modifiers={[fillMaxWidth()]} verticalArrangement={{ spacedBy: GROUP_GAP }}>
-      {rows.map((row, i) =>
-        isValidElement<{ shape?: RowShape }>(row)
-          ? cloneElement(row, { shape: groupShape(i === 0, i === rows.length - 1) })
-          : row,
-      )}
-    </Column>
-  );
-}
-
-/** The signature M3 Expressive leading element: an icon inside a tonal circle. */
-function IconCircle({ source, container, on }: { source: number; container: string; on: string }) {
-  return (
-    <Box
-      contentAlignment="center"
-      modifiers={[size(40, 40), clip(Shapes.Circle), background(container)]}
-    >
-      <Icon source={source} size={22} tint={on} />
-    </Box>
   );
 }
 
