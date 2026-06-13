@@ -1,17 +1,16 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, Pressable, Text, View } from 'react-native';
+import { SafeAreaView as RNSafeAreaView } from 'react-native-safe-area-context';
+import { withUniwind } from 'uniwind';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
 import { usePairing } from '@/features/relay/pairing-context';
 import { useRelayStatus } from '@/features/relay/use-relay-status';
 import { useTheme } from '@/hooks/use-theme';
 
-const CONNECTED_COLOR = '#2ecc71';
-const DISCONNECTED_COLOR = '#e5484d';
+// SafeAreaView is third-party (not a core RN component), so it needs withUniwind
+// to accept `className`. Wrap once at module level — never inside a render.
+const SafeAreaView = withUniwind(RNSafeAreaView);
 
 /** Home: paired Mac's identity + connection state, plus quick actions. */
 export default function HomeScreen() {
@@ -24,41 +23,36 @@ export default function HomeScreen() {
   const statusLabel = paused ? 'Duraklatıldı' : connected ? 'Bağlı' : 'Bağlı değil';
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.topBar}>
-          <Pressable onPress={() => router.push('/settings')} hitSlop={Spacing.two}>
+    <View className="flex-1 bg-background">
+      <SafeAreaView className="flex-1 gap-8 p-6">
+        <View className="flex-row justify-end">
+          <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
             <MaterialIcons name="settings" size={26} color={theme.textSecondary} />
           </Pressable>
         </View>
 
-        <View style={styles.hero}>
-          <ThemedView type="backgroundElement" style={styles.deviceBadge}>
+        <View className="items-center gap-2">
+          <View className="mb-2 h-24 w-24 items-center justify-center rounded-2xl bg-background-element">
             <MaterialIcons name="laptop-mac" size={48} color={theme.textSecondary} />
-          </ThemedView>
-          <ThemedText type="title" style={{ textAlign: 'center' }}>
+          </View>
+          <Text className="text-center text-5xl font-semibold leading-13 text-foreground">
             {pairing?.name ?? 'Mac'}
-          </ThemedText>
-          <View style={styles.statusRow}>
+          </Text>
+          <View className="flex-row items-center gap-2">
             <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: connected ? CONNECTED_COLOR : DISCONNECTED_COLOR },
-              ]}
+              className={`h-2 w-2 rounded-full ${connected ? 'bg-[#2ecc71]' : 'bg-[#e5484d]'}`}
             />
-            <ThemedText type="small" themeColor="textSecondary">
-              {statusLabel}
-            </ThemedText>
+            <Text className="text-sm font-medium text-foreground-secondary">{statusLabel}</Text>
           </View>
         </View>
 
-        <View style={styles.actions}>
+        <View className="flex-row gap-4">
           <ActionButton icon="lock-outline" label="PC'yi Kilitle" />
           <ActionButton icon="send" label="Dosya Gönder" />
           <ActionButton icon="cast" label="Ekranı Yansıt" />
         </View>
 
-        <View style={styles.list}>
+        <View className="gap-4">
           <ListRow icon="folder-open" label="Alınan dosyalar" value="Yakında" />
           <ListRow
             icon="content-paste"
@@ -67,7 +61,7 @@ export default function HomeScreen() {
           />
         </View>
       </SafeAreaView>
-    </ThemedView>
+    </View>
   );
 }
 
@@ -82,14 +76,12 @@ function ActionButton({
   const theme = useTheme();
   return (
     <Pressable
-      style={styles.action}
+      className="flex-1 items-center gap-2 opacity-40"
       onPress={() => Alert.alert('Yakında', 'Bu özellik henüz hazır değil.')}>
-      <ThemedView type="backgroundElement" style={styles.actionIcon}>
+      <View className="items-center justify-center self-stretch rounded-2xl bg-background-element py-4">
         <MaterialIcons name={icon} size={26} color={theme.textSecondary} />
-      </ThemedView>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.actionLabel}>
-        {label}
-      </ThemedText>
+      </View>
+      <Text className="text-center text-sm font-medium text-foreground-secondary">{label}</Text>
     </Pressable>
   );
 }
@@ -105,54 +97,18 @@ function ListRow({
 }) {
   const theme = useTheme();
   return (
-    <ThemedView type="backgroundElement" style={styles.row}>
+    <View className="flex-row items-center gap-4 rounded-2xl bg-background-element p-4">
       <MaterialIcons name={icon} size={22} color={theme.textSecondary} />
-      <View style={styles.rowText}>
-        <ThemedText type="smallBold">{label}</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+      <View className="flex-1 gap-0.5">
+        <Text className="text-sm font-bold text-foreground">{label}</Text>
+        <Text className="text-sm font-medium text-foreground-secondary" numberOfLines={1}>
           {value}
-        </ThemedText>
+        </Text>
       </View>
-    </ThemedView>
+    </View>
   );
 }
 
 function truncate(s: string): string {
   return s.length > 40 ? `${s.slice(0, 40)}…` : s;
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  safe: { flex: 1, padding: Spacing.four, gap: Spacing.five },
-  topBar: { flexDirection: 'row', justifyContent: 'flex-end' },
-  hero: { alignItems: 'center', gap: Spacing.two },
-  deviceBadge: {
-    width: 96,
-    height: 96,
-    borderRadius: Spacing.three,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.two,
-  },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  actions: { flexDirection: 'row', gap: Spacing.three },
-  action: { flex: 1, alignItems: 'center', gap: Spacing.two, opacity: 0.4 },
-  actionIcon: {
-    alignSelf: 'stretch',
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.three,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionLabel: { textAlign: 'center' },
-  list: { gap: Spacing.three },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderRadius: Spacing.three,
-    padding: Spacing.three,
-  },
-  rowText: { flex: 1, gap: Spacing.half },
-});

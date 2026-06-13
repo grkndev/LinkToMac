@@ -1,4 +1,4 @@
-import { View, type ViewProps } from 'react-native';
+import { ScrollView, ScrollViewProps, View, type ViewProps } from 'react-native';
 
 import { ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -9,8 +9,21 @@ export type ThemedViewProps = ViewProps & {
   type?: ThemeColor;
 };
 
+export type ThemedScrollViewProps = ScrollViewProps & {
+  lightColor?: string;
+  darkColor?: string;
+  type?: ThemeColor;
+};
+
 export function ThemedView({ style, lightColor, darkColor, type, ...otherProps }: ThemedViewProps) {
   const theme = useTheme();
 
   return <View style={[{ backgroundColor: theme[type ?? 'background'] }, style]} {...otherProps} />;
+}
+
+export function 
+ThemedScrollView({ style, lightColor, darkColor, type, ...otherProps }: ThemedScrollViewProps) {
+  const theme = useTheme();
+
+  return <ScrollView style={[{ backgroundColor: theme[type ?? 'background'] }, style]} {...otherProps} />;
 }
