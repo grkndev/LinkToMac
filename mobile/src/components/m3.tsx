@@ -1,4 +1,4 @@
-import { Box, Column, Icon, Row, Shape, type MaterialColors } from '@expo/ui/jetpack-compose';
+import { Box, Column, Icon, Row, Shape, getMaterialColors, type MaterialColors } from '@expo/ui/jetpack-compose';
 import {
   background,
   clip,
@@ -6,7 +6,10 @@ import {
   Shapes,
   size,
 } from '@expo/ui/jetpack-compose/modifiers';
-import { Children, cloneElement, isValidElement, type ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, useMemo, type ReactNode } from 'react';
+import { useColorScheme } from 'react-native';
+
+import { type IconSource } from './icons';
 
 /**
  * Shared Material 3 Expressive primitives used across the native (Jetpack Compose) screens —
@@ -16,6 +19,20 @@ import { Children, cloneElement, isValidElement, type ReactNode } from 'react';
 
 /** Brand blue (app.json notification color) — seeds the whole Material 3 palette. */
 export const SEED = '#208AEF';
+
+/**
+ * Stable, scheme-keyed Material 3 palette. `useMaterialColors({ seedColor })` makes a
+ * synchronous native call and returns a *new* object on every render (see @expo/ui colors.ts),
+ * which churns the whole native `Host` subtree on each re-render. Memoizing by color scheme
+ * keeps the reference stable and only re-resolves when light/dark actually flips.
+ */
+export function useM3Colors(): MaterialColors {
+  const scheme = useColorScheme();
+  return useMemo(
+    () => getMaterialColors({ scheme: scheme === 'dark' ? 'dark' : 'light', seedColor: SEED }),
+    [scheme],
+  );
+}
 
 /**
  * Google-style grouped list: the rows in a group read as one rounded block, packed with a
@@ -99,7 +116,7 @@ export function IconCircle({
   diameter = 40,
   iconSize = 22,
 }: {
-  source: number;
+  source: IconSource;
   container: string;
   on: string;
   diameter?: number;

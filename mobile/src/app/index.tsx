@@ -8,7 +8,6 @@ import {
   Shape,
   Surface,
   Text,
-  useMaterialColors,
   type MaterialColors,
 } from '@expo/ui/jetpack-compose';
 import {
@@ -35,25 +34,16 @@ import {
   groupShape,
   groupShapeH,
   tonal,
+  useM3Colors,
   type RowShape,
 } from '@/components/m3';
+import { useIcons, type IconSource } from '@/components/icons';
 import { Spacing } from '@/constants/theme';
 import { usePairing } from '@/features/relay/pairing-context';
 import { useRelayStatus } from '@/features/relay/use-relay-status';
 
 /** Brand green for the "online" status dot — M3 has no green role, so this stays a literal. */
 const ONLINE = '#2ECC71';
-
-/** Material XML vector drawables (see assets/icons), tinted by the `Icon` component. */
-const ICONS = {
-  settings: require('../../assets/icons/settings.xml'),
-  laptop: require('../../assets/icons/laptop_mac.xml'),
-  lock: require('../../assets/icons/lock.xml'),
-  send: require('../../assets/icons/send.xml'),
-  cast: require('../../assets/icons/cast.xml'),
-  folder: require('../../assets/icons/folder_open.xml'),
-  clipboard: require('../../assets/icons/content_paste.xml'),
-};
 
 /** 28dp "extra-large" rounded square for the expressive hero tile. */
 const HERO_SHAPE = Shape.RoundedCorner({
@@ -65,7 +55,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
-  const colors = useMaterialColors({ seedColor: SEED });
+  const colors = useM3Colors();
+  const icons = useIcons();
   const { pairing, paused } = usePairing();
   const { relay, lastClip } = useRelayStatus();
 
@@ -96,7 +87,7 @@ export default function HomeScreen() {
             modifiers={[size(44, 44)]}
           >
             <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
-              <Icon source={ICONS.settings} size={24} tint={colors.onSurfaceVariant} />
+              <Icon source={icons.settings} size={24} tint={colors.onSurfaceVariant} />
             </Box>
           </Surface>
         </Row>
@@ -109,7 +100,7 @@ export default function HomeScreen() {
         >
           <Surface color={colors.secondaryContainer} shape={HERO_SHAPE} modifiers={[size(96, 96)]}>
             <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
-              <Icon source={ICONS.laptop} size={46} tint={colors.onSecondaryContainer} />
+              <Icon source={icons.laptop} size={46} tint={colors.onSecondaryContainer} />
             </Box>
           </Surface>
           <Text
@@ -133,16 +124,16 @@ export default function HomeScreen() {
 
         {/* Quick actions — connected button group; placeholders, so dimmed + "coming soon". */}
         <ButtonGroup>
-          <ActionTile colors={colors} icon={ICONS.lock} label="Lock Mac" />
-          <ActionTile colors={colors} icon={ICONS.cast} label="Cast Screen" />
+          <ActionTile colors={colors} icon={icons.lock} label="Lock Mac" />
+          <ActionTile colors={colors} icon={icons.cast} label="Cast Screen" />
         </ButtonGroup>
 
         {/* Info list — same grouped-list language as Settings. */}
         <Group>
-          <InfoRow colors={colors} icon={ICONS.folder} label="Received files" value="Soon" />
+          <InfoRow colors={colors} icon={icons.folder} label="Received files" value="Soon" />
           <InfoRow
             colors={colors}
-            icon={ICONS.clipboard}
+            icon={icons.clipboard}
             label="Clipboard"
             value={lastClip ? truncate(lastClip) : 'No items copied yet'}
           />
@@ -161,7 +152,7 @@ ActionTile({
   shape = groupShapeH(true, true),
 }: {
   colors: MaterialColors;
-  icon: number;
+  icon: IconSource;
   label: string;
   shape?: RowShape;
 }) {
@@ -199,7 +190,7 @@ function InfoRow({
   shape = groupShape(true, true),
 }: {
   colors: MaterialColors;
-  icon: number;
+  icon: IconSource;
   label: string;
   value: string;
   shape?: RowShape;

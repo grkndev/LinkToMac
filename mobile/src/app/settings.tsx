@@ -5,7 +5,6 @@ import {
   Surface,
   Switch,
   Text,
-  useMaterialColors,
   type MaterialColors,
 } from '@expo/ui/jetpack-compose';
 import { fillMaxWidth, padding, verticalScroll } from '@expo/ui/jetpack-compose/modifiers';
@@ -14,28 +13,19 @@ import { useEffect, useState } from 'react';
 import { Alert, AppState, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Group, IconCircle, SEED, groupShape, tonal, type RowShape } from '@/components/m3';
+import { useIcons, type IconSource } from '@/components/icons';
+import { Group, IconCircle, SEED, groupShape, tonal, useM3Colors, type RowShape } from '@/components/m3';
 import { Spacing } from '@/constants/theme';
 import { usePairing } from '@/features/relay/pairing-context';
 import SelfAdb from '@/features/selfadb/client';
-
-/** Material XML vector drawables (see assets/icons), tinted by the `Icon` component. */
-const ICONS = {
-  notifications: require('../../assets/icons/notifications.xml'),
-  notificationsActive: require('../../assets/icons/notifications_active.xml'),
-  contentCopy: require('../../assets/icons/content_copy.xml'),
-  battery: require('../../assets/icons/battery_charging_full.xml'),
-  qr: require('../../assets/icons/qr_code_scanner.xml'),
-  linkOff: require('../../assets/icons/link_off.xml'),
-  terminal: require('../../assets/icons/terminal.xml'),
-};
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { paused, setPaused, unpair } = usePairing();
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
-  const colors = useMaterialColors({ seedColor: SEED });
+  const colors = useM3Colors();
+  const icons = useIcons();
 
   const [notifIconVisible, setNotifIconVisible] = useState(true);
   const [notifGranted, setNotifGranted] = useState<boolean | null>(null);
@@ -87,7 +77,7 @@ export default function SettingsScreen() {
         <Group>
           <SwitchRow
             colors={colors}
-            icon={ICONS.notifications}
+            icon={icons.notifications}
             label="Show notification icon"
             hint="A notification icon will be displayed in the status bar."
             value={notifIconVisible}
@@ -96,7 +86,7 @@ export default function SettingsScreen() {
           {notifGranted === false ? (
             <ActionRow
               colors={colors}
-              icon={ICONS.notificationsActive}
+              icon={icons.notificationsActive}
               label="Grant notification permission"
               hint="Without permission, connection status notifications cannot be displayed."
               onPress={() => {
@@ -106,7 +96,7 @@ export default function SettingsScreen() {
           ) : null}
           <SwitchRow
             colors={colors}
-            icon={ICONS.contentCopy}
+            icon={icons.contentCopy}
             label="Clipboard sync"
             hint="Copies from the clipboard will be sent to the Mac."
             value={!paused}
@@ -115,7 +105,7 @@ export default function SettingsScreen() {
           {batteryOk === false ? (
             <ActionRow
               colors={colors}
-              icon={ICONS.battery}
+              icon={icons.battery}
               label="Disable battery optimization"
               hint="Required for uninterrupted background operation."
               onPress={() => {
@@ -125,21 +115,21 @@ export default function SettingsScreen() {
           ) : (
             <InfoRow
               colors={colors}
-              icon={ICONS.battery}
+              icon={icons.battery}
               label="Battery Optimization"
               value={batteryOk ? 'Disabled' : '—'}
             />
           )}
           <ActionRow
             colors={colors}
-            icon={ICONS.qr}
+            icon={icons.qr}
             label="Re-pair (Scan QR)"
             hint="Scan the Pairing QR from your Mac."
             onPress={() => router.push('/qr-scan')}
           />
           <ActionRow
             colors={colors}
-            icon={ICONS.linkOff}
+            icon={icons.linkOff}
             label="Remove Pairing"
             hint="Disconnect and remove the pairing."
             destructive
@@ -147,7 +137,7 @@ export default function SettingsScreen() {
           />
           <ActionRow
             colors={colors}
-            icon={ICONS.terminal}
+            icon={icons.terminal}
             label="Logs"
             hint="View ADB and device logs."
             onPress={() => router.push('/logs')}
@@ -169,7 +159,7 @@ function SwitchRow({
   shape = groupShape(true, true),
 }: {
   colors: MaterialColors;
-  icon: number;
+  icon: IconSource;
   label: string;
   hint?: string;
   value: boolean;
@@ -220,7 +210,7 @@ function ActionRow({
   shape = groupShape(true, true),
 }: {
   colors: MaterialColors;
-  icon: number;
+  icon: IconSource;
   label: string;
   hint?: string;
   destructive?: boolean;
@@ -266,7 +256,7 @@ function InfoRow({
   shape = groupShape(true, true),
 }: {
   colors: MaterialColors;
-  icon: number;
+  icon: IconSource;
   label: string;
   value: string;
   shape?: RowShape;

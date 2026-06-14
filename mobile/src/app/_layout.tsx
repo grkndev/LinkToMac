@@ -1,15 +1,16 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
-import { ActivityIndicator, StyleSheet, useColorScheme } from "react-native";
+import { useEffect, useMemo } from "react";
+import { StyleSheet, useColorScheme } from "react-native";
+import * as SystemUI from "expo-system-ui";
 import {
   Host,
   LoadingIndicator,
-  useMaterialColors,
-  Button,
   Box,
   Surface,
   Shape,
 } from "@expo/ui/jetpack-compose";
 import { AnimatedSplashOverlay } from "@/components/animated-icon";
+import { IconsProvider } from "@/components/icons";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Spacing } from "@/constants/theme";
@@ -20,24 +21,39 @@ import {
   useClipBootContext,
 } from "@/features/selfadb/clip-boot-context";
 import { StatusBar } from "expo-status-bar";
-import { SEED } from "@/components/m3";
-import {
-  clip,
-  fillMaxSize,
-  Shapes,
-  size,
-} from "@expo/ui/jetpack-compose/modifiers";
+import { SEED, useM3Colors } from "@/components/m3";
+import { fillMaxSize, size } from "@expo/ui/jetpack-compose/modifiers";
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const m3 = useM3Colors();
+
+  // Paint the navigation container + every screen with the M3 background so the slide
+  // transition never reveals the default white/black theme background before the native
+  // Compose `Host` draws its first frame.
+  const navTheme = useMemo(() => {
+    const base = colorScheme === "dark" ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: { ...base.colors, background: m3.background, card: m3.background },
+    };
+  }, [colorScheme, m3]);
+
+  // Paint the Android window background too, so the slide transition can't flash the default
+  // (white) window background through any gap before a screen's Compose `Host` draws.
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(m3.background).catch(() => {});
+  }, [m3.background]);
 
   return (
-    <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={navTheme}>
       <ClipBootProvider>
         <PairingProvider>
-          <StatusBar style="auto" />
-          <AnimatedSplashOverlay />
-          <RootNavigator />
+          <IconsProvider>
+            <StatusBar style="auto" />
+            <AnimatedSplashOverlay />
+            <RootNavigator background={m3.background} onSurface={m3.onSurface} />
+          </IconsProvider>
         </PairingProvider>
       </ClipBootProvider>
     </ThemeProvider>
@@ -52,7 +68,13 @@ export default function RootLayout() {
  *   3. Paired -> home + settings
  * qr-scan sits outside the pairing guards so it serves both first pairing and re-pairing.
  */
-function RootNavigator() {
+function RootNavigator({
+  background,
+  onSurface,
+}: {
+  background: string;
+  onSurface: string;
+}) {
   const boot = useClipBootContext();
   const { pairing } = usePairing();
 
@@ -66,7 +88,13 @@ function RootNavigator() {
   const macPaired = pairing != null;
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack
+      screenOptions={{
+        animation:"fade",
+        headerShown: false,
+        contentStyle: { backgroundColor: background },
+      }}
+    >
       <Stack.Protected guard={!adbReady}>
         <Stack.Screen name="adb-setup" />
       </Stack.Protected>
@@ -82,11 +110,18 @@ function RootNavigator() {
               headerShown: true,
               title: "Settings",
               headerShadowVisible: false,
+              headerStyle: { backgroundColor: background },
+              headerTintColor: onSurface,
             }}
           />
           <Stack.Screen
             name="logs"
-            options={{ headerShown: true, title: "Logs" }}
+            options={{
+              headerShown: true,
+              title: "Logs",
+              headerStyle: { backgroundColor: background },
+              headerTintColor: onSurface,
+            }}
           />
         </Stack.Protected>
         <Stack.Screen name="qr-scan" options={{ presentation: "modal" }} />
@@ -96,7 +131,7 @@ function RootNavigator() {
 }
 
 function Booting() {
-  const colors = useMaterialColors({ seedColor: SEED });
+  const colors = useM3Colors();
   const scheme = useColorScheme();
   return (
     <ThemedView

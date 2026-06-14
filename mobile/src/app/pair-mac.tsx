@@ -5,7 +5,6 @@ import {
   Host,
   Row,
   Text,
-  useMaterialColors,
   type MaterialColors,
 } from '@expo/ui/jetpack-compose';
 import {
@@ -23,6 +22,7 @@ import { useRouter } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useM3Colors } from '@/components/m3';
 import { Spacing } from '@/constants/theme';
 
 /** Brand blue (app.json notification color) — seeds the Material 3 palette. Matches Settings. */
@@ -33,7 +33,7 @@ export default function PairMacScreen() {
   const router = useRouter();
   const scheme = useColorScheme();
   const insets = useSafeAreaInsets();
-  const colors = useMaterialColors({ seedColor: SEED });
+  const colors = useM3Colors();
 
   return (
     <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>
