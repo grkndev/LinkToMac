@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "LinkToMac",
+    "slug": "linktomac",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "linktomac",
     "userInterfaceStyle": "automatic",
     "extra": {
       "relayHost": "51.38.98.148"
@@ -21,7 +21,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.grkndev.mobile"
+      "package": "com.grkndev.linktomac"
     },
     "web": {
       "output": "static",

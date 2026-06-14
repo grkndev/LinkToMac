@@ -14,7 +14,7 @@ const FALLBACK_HOST = '51.38.98.148';
  *   1. An explicit override in app.json -> expo.extra.relayHost. Use this to pin the relay to
  *      a deployed/remote server. NOTE: do NOT put this in `expo.hostUri` — that is a reserved
  *      Expo field used to build the dev deep-link base, and a bare IP there makes Expo Router
- *      open `mobile://<ip>/` on launch ("Unmatched route").
+ *      open `linktomac://<ip>/` on launch ("Unmatched route").
  *   2. The Metro dev-server host. When the relay runs on the same Mac as Metro this auto-tracks
  *      the Mac's LAN IP. `hostUri` looks like "127.0.0.1:8081"; on a device localhost/loopback
  *      points back at the phone, so we ignore those.
