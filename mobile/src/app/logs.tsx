@@ -7,6 +7,8 @@ import { useTheme } from '@/hooks/use-theme';
 
 const MAX_LINES = 500;
 
+type LogLine = { id: number; text: string };
+
 function clock(): string {
   return new Date().toTimeString().slice(0, 8); // HH:mm:ss — matches the native buffer format
 }
@@ -23,21 +25,25 @@ function preview(text: string): string {
  * the ground truth for whether the agent is alive and the clip-changed listener is firing.
  */
 export default function LogsScreen() {
-  const [lines, setLines] = useState<string[]>([]);
+  const [lines, setLines] = useState<LogLine[]>([]);
   const [daemonLog, setDaemonLog] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const idRef = useRef(0); // monotonic, so every line gets a stable unique key
 
-  const append = useCallback((line: string) => {
+  const append = useCallback((text: string) => {
     setLines((prev) => {
       const next = prev.length >= MAX_LINES ? prev.slice(prev.length - MAX_LINES + 1) : prev;
-      return [...next, line];
+      return [...next, { id: idRef.current++, text }];
     });
   }, []);
 
   useEffect(() => {
     SelfAdb.getLogs()
-      .then((seed) => setLines(seed.length ? seed : ['(henüz log yok)']))
+      .then((seed) => {
+        const texts = seed.length ? seed : ['(no logs yet)'];
+        setLines(texts.map((text) => ({ id: idRef.current++, text })));
+      })
       .catch(() => {});
 
     const log = SelfAdb.addListener('onLog', (e) => append(`${clock()}  ${e.message}`));
@@ -66,15 +72,15 @@ export default function LogsScreen() {
     setDaemonLog(null);
     SelfAdb.readDaemonLog()
       .then(setDaemonLog)
-      .catch((e: any) => setDaemonLog(`Hata: ${e?.message ?? String(e)}`))
+      .catch((e: any) => setDaemonLog(`Error: ${e?.message ?? String(e)}`))
       .finally(() => setFetching(false));
   }, []);
 
   const shareAll = useCallback(() => {
     const body = [
-      '=== Uygulama logları ===',
-      ...lines,
-      ...(daemonLog ? ['', '=== Cihaz (daemon) logu ===', daemonLog] : []),
+      '=== Application Logs ===',
+      ...lines.map((l) => l.text),
+      ...(daemonLog ? ['', '=== Device (daemon) Log ===', daemonLog] : []),
     ].join('\n');
     Share.share({ message: body }).catch(() => {});
   }, [lines, daemonLog]);
@@ -88,15 +94,14 @@ export default function LogsScreen() {
   return (
     <View className="flex-1 gap-4 bg-background p-4">
       <View className="flex-row gap-2">
-        <ToolbarButton icon="phonelink" label="Cihaz günlüğü" onPress={fetchDaemonLog} busy={fetching} />
-        <ToolbarButton icon="share" label="Paylaş" onPress={shareAll} />
-        <ToolbarButton icon="delete-outline" label="Temizle" onPress={clear} destructive />
+        <ToolbarButton icon="phonelink" label="Device Log" onPress={fetchDaemonLog} busy={fetching} />
+        <ToolbarButton icon="delete-outline" label="Clear" onPress={clear} destructive />
       </View>
 
       {daemonLog != null ? (
         <View className="gap-2 rounded-2xl bg-background-element p-4">
           <Text className="text-sm font-bold tracking-[0.5px] text-foreground-secondary">
-            CİHAZ (DAEMON) LOGU
+            DEVICE (DAEMON) LOG
           </Text>
           <ScrollView className="max-h-55">
             <Text className="font-[monospace] text-[11px] font-medium leading-4 text-foreground">
@@ -110,12 +115,12 @@ export default function LogsScreen() {
         ref={scrollRef}
         className="flex-1 rounded-2xl"
         contentContainerClassName="gap-0.5 p-4"
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}>
-        {lines.map((line, i) => (
+        onContentSizeChange={() => scrollRef.current?.scrollTo({ y: 0, animated: false })}>
+        {[...lines].reverse().map((line) => (
           <Text
-            key={i}
-            className={`font-[monospace] text-[11px] font-medium leading-4 ${lineClass(line)}`}>
-            {line}
+            key={line.id}
+            className={`font-[monospace] text-[11px] font-medium leading-4 ${lineClass(line.text)}`}>
+            {line.text}
           </Text>
         ))}
       </ScrollView>
