@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { ReactNode } from 'react';
 import { useRef } from 'react';
-import { Button, StyleSheet } from 'react-native';
+import { Button, Pressable, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -60,9 +60,11 @@ export function PairScanner({
       />
       <SafeAreaView edges={['bottom']} style={styles.footer}>
         <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-          Mac&apos;teki “Pairing QR” penceresini kameraya göster.
+          Show the “Pairing QR” screen on your Mac to pair.
         </ThemedText>
-        <Button title="İptal" onPress={onCancel} />
+        <Pressable onPress={onCancel} className='bg-blue-500 w-full py-3 rounded-full items-center'>
+          <Text className='text-white'>Cancel</Text>
+        </Pressable>
       </SafeAreaView>
     </ThemedView>
   );
