@@ -138,8 +138,7 @@ function Booting() {
       style={[styles.booting, { backgroundColor: colors.background }]}
     >
       <Host
-        matchContents
-        style={{ backgroundColor: "transparent" }}
+        style={{ width: 64, height: 64, backgroundColor: "transparent" }}
         seedColor={SEED}
         colorScheme={scheme}
       >
