@@ -120,6 +120,9 @@ wss.on('connection', (ws: WebSocket) => {
       case 'clip':
         relay.handleClip(conn, msg);
         break;
+      case 'cmd':
+        relay.handleCmd(conn, msg);
+        break;
       case 'ping':
         ws.send(serialize({ t: 'pong' }));
         break;

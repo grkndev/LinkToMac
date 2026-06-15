@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import type { RelayEvent, SelfAdbModuleEvents } from './SelfAdb.types';
+import type { ClipEvent, RelayEvent, SelfAdbModuleEvents } from './SelfAdb.types';
 
 /** Boot state returned by autoStart(): drives the JS gate. */
 export type AutoStartState = 'ready' | 'need-pair' | 'need-connect';
@@ -32,6 +32,8 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   writeClipboard(text: string): Promise<void>;
   /** persist relay config (url/token/room/peer name) and (re)connect the native WS to the Mac. */
   setRelay(url: string, token: string, room: string, peerName: string | null): Promise<void>;
+  /** send a remote action to the Mac over the relay (e.g. "lock"). Needs the service running. */
+  sendCommand(action: string): Promise<void>;
   /** unpair: forget the persisted relay config and disconnect the native WS. */
   clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */
@@ -54,6 +56,10 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   requestIgnoreBatteryOptimizations(): Promise<void>;
   /** true if a pairing key already exists on disk. */
   isPaired(): Promise<boolean>;
+  /** retained history of clips received FROM the Mac (newest-first), across the JS-runtime gap. */
+  getClipHistory(): Promise<ClipEvent[]>;
+  /** clear the retained Mac-clip history buffer. */
+  clearClipHistory(): Promise<void>;
   /** snapshot of the in-app log ring buffer (oldest first), retained across the JS gap. */
   getLogs(): Promise<string[]>;
   /** clear the in-app log ring buffer. */

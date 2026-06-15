@@ -84,6 +84,13 @@ class RelayClient(
     ws?.send(msg.toString())
   }
 
+  /** Send a remote action to the Mac (e.g. "lock"). No-op if the socket isn't open. */
+  fun sendCmd(action: String) {
+    if (action.isEmpty()) return
+    val msg = JSONObject().put("t", "cmd").put("action", action)
+    ws?.send(msg.toString())
+  }
+
   private fun open() {
     cancelReconnect()
     onStatus("connecting", peerOnline, null)

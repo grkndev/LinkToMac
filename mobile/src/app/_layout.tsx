@@ -108,7 +108,7 @@ function RootNavigator({
             name="settings"
             options={{
               headerShown: true,
-              headerBackTitle: "Settings",
+              headerTitle: "Settings",
               headerShadowVisible: false,
               headerStyle: { backgroundColor: background },
               headerTintColor: onSurface,
@@ -119,6 +119,16 @@ function RootNavigator({
             options={{
               headerShown: true,
               title: "Logs",
+              headerStyle: { backgroundColor: background },
+              headerTintColor: onSurface,
+            }}
+          />
+          <Stack.Screen
+            name="clipboard-history"
+            options={{
+              headerShown: true,
+              title: "Clipboard",
+              headerShadowVisible: false,
               headerStyle: { backgroundColor: background },
               headerTintColor: onSurface,
             }}

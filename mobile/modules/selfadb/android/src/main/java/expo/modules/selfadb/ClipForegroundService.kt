@@ -69,6 +69,14 @@ class ClipForegroundService : Service() {
     bridge?.write(text)
   }
 
+  /**
+   * Send a remote action to the Mac (e.g. "lock"). Independent of [sendPaused]: the pause
+   * toggle only gates outbound *clipboard* forwarding, not commands. No-op if not connected.
+   */
+  fun sendCmd(action: String) {
+    relay?.sendCmd(action)
+  }
+
   // ---- Relay (WS to the Mac) -----------------------------------------------
 
   /** Persist config and (re)connect — but skip the restart if nothing changed. */
@@ -124,6 +132,7 @@ class ClipForegroundService : Service() {
       onClipReceived = { text ->
         lastWritten = text
         bridge?.write(text)
+        ClipBus.macClip(text, System.currentTimeMillis().toDouble())
         ClipBus.log("relay -> clipboard (${text.length})")
       },
       onStatus = { status, peerOnline, error ->

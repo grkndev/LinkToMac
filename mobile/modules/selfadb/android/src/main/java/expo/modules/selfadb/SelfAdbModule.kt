@@ -43,11 +43,12 @@ class SelfAdbModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SelfAdb")
 
-    Events("onClip", "onLog", "onStatus", "onRelay")
+    Events("onClip", "onMacClip", "onLog", "onStatus", "onRelay")
 
     // Attach UI callbacks to the (possibly already-running) service.
     OnCreate {
       ClipBus.onClip = { text, ts -> sendEvent("onClip", mapOf("text" to text, "ts" to ts)) }
+      ClipBus.onMacClip = { text, ts -> sendEvent("onMacClip", mapOf("text" to text, "ts" to ts)) }
       ClipBus.onLog = { msg -> sendEvent("onLog", mapOf("message" to msg)) }
       ClipBus.onRelay = { payload -> sendEvent("onRelay", payload) }
     }
@@ -202,6 +203,12 @@ class SelfAdbModule : Module() {
       }
     }
 
+    /** Send a remote action to the Mac over the relay (e.g. "lock"). Needs the service running. */
+    AsyncFunction("sendCommand") { action: String ->
+      val svc = ClipForegroundService.instance ?: throw Exception("service not running")
+      svc.sendCmd(action)
+    }
+
     /** Unpair: forget the persisted relay config and drop the WS connection. */
     AsyncFunction("clearRelay") {
       val svc = ClipForegroundService.instance
@@ -295,6 +302,15 @@ class SelfAdbModule : Module() {
       ClipBus.clearBuffer()
     }
 
+    /** Retained history of clips received FROM the Mac (newest-first), across the JS-runtime gap. */
+    AsyncFunction("getClipHistory") {
+      ClipBus.clipHistory()
+    }
+
+    AsyncFunction("clearClipHistory") {
+      ClipBus.clearClipHistory()
+    }
+
     /**
      * Fetch the privileged daemon's own on-device log (`/data/local/tmp/clip.log`: its
      * selftest, "listening", "client connected", "captured -> emit" lines) plus a liveness
@@ -348,6 +364,7 @@ class SelfAdbModule : Module() {
     OnDestroy {
       // App going away: detach UI callbacks but LEAVE the service (and relay) running.
       ClipBus.onClip = null
+      ClipBus.onMacClip = null
       ClipBus.onLog = null
       ClipBus.onRelay = null
       adb.close()

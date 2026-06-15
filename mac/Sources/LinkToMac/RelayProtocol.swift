@@ -41,10 +41,12 @@ enum ServerMessage: Decodable {
     case peer(state: String, device: String)
     case error(code: String, message: String)
     case clip(nonce: String, ct: String)
+    /// A remote action from the peer (e.g. "lock"). Forwarded opaquely by the relay.
+    case cmd(action: String)
     case pong
 
     private enum CodingKeys: String, CodingKey {
-        case t, peers, state, device, code, message, nonce, ct
+        case t, peers, state, device, code, message, nonce, ct, action
     }
 
     enum DecodeError: Error {
@@ -72,6 +74,8 @@ enum ServerMessage: Decodable {
                 nonce: try c.decode(String.self, forKey: .nonce),
                 ct: try c.decode(String.self, forKey: .ct)
             )
+        case "cmd":
+            self = .cmd(action: try c.decode(String.self, forKey: .action))
         case "pong":
             self = .pong
         default:

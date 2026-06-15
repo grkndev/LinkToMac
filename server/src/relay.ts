@@ -2,7 +2,14 @@ import { WebSocket } from 'ws';
 
 import type { Logger } from './logger.js';
 import type { SlidingWindowLimiter } from './ratelimit.js';
-import { serialize, type ClipMsg, type Device, type JoinMsg, type ServerMessage } from './protocol.js';
+import {
+  serialize,
+  type ClipMsg,
+  type CmdMsg,
+  type Device,
+  type JoinMsg,
+  type ServerMessage,
+} from './protocol.js';
 
 export interface Conn {
   ws: WebSocket;
@@ -105,6 +112,34 @@ export class Relay {
     this.log.info(
       { room: redactRoom(conn.room), from: conn.device, bytes: msg.ct.length, delivered },
       'clip',
+    );
+  }
+
+  handleCmd(conn: Conn, msg: CmdMsg): void {
+    if (!conn.room || !conn.device) {
+      this.send(conn, { t: 'error', code: 'not-joined', message: 'join before sending commands' });
+      return;
+    }
+    const room = this.rooms.get(conn.room);
+    if (!room) return;
+
+    // Same fan-out as clips: forward verbatim to the *other* peer(s); never echo. The
+    // relay treats `action` as opaque, so new commands never need a server change.
+    const payload = JSON.stringify(msg);
+    let delivered = 0;
+    for (const peer of room.values()) {
+      if (peer === conn || peer.ws.readyState !== WebSocket.OPEN) continue;
+      if (peer.ws.bufferedAmount > this.opts.maxBufferedBytes) {
+        this.log.warn({ device: peer.device }, 'slow consumer; dropping connection');
+        peer.ws.close(CLOSE_BACKPRESSURE, 'backpressure');
+        continue;
+      }
+      peer.ws.send(payload);
+      delivered++;
+    }
+    this.log.info(
+      { room: redactRoom(conn.room), from: conn.device, action: msg.action, delivered },
+      'cmd',
     );
   }
 
