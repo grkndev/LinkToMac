@@ -151,9 +151,13 @@ class ClipForegroundService : Service() {
       nm.createNotificationChannel(
         NotificationChannel(CHANNEL, "Link to macOS", NotificationManager.IMPORTANCE_LOW)
       )
-      // MIN importance hides the status-bar icon; the notification stays in the shade.
+      // NONE importance keeps the status-bar icon hidden while the foreground service runs;
+      // the notification still lives in the shade. IMPORTANCE_MIN used to be enough but leaks
+      // the icon on Android 12+ and OEM skins (e.g. Samsung One UI). A channel's importance is
+      // immutable once created, so this lives under a fresh id (the old CHANNEL_MIN is dropped).
+      nm.deleteNotificationChannel("linktomac_min")
       nm.createNotificationChannel(
-        NotificationChannel(CHANNEL_MIN, "Link to macOS (icon hidden)", NotificationManager.IMPORTANCE_MIN)
+        NotificationChannel(CHANNEL_HIDDEN, "Link to macOS (icon hidden)", NotificationManager.IMPORTANCE_NONE)
       )
     }
     val notification = buildNotification("Device disconnected", "Waiting for connection…")
@@ -166,7 +170,7 @@ class ClipForegroundService : Service() {
 
   private fun buildNotification(title: String, text: String): Notification {
     val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      Notification.Builder(this, if (getStatusNotificationVisible(this)) CHANNEL else CHANNEL_MIN)
+      Notification.Builder(this, if (getStatusNotificationVisible(this)) CHANNEL else CHANNEL_HIDDEN)
     } else {
       @Suppress("DEPRECATION") Notification.Builder(this)
     }
@@ -235,7 +239,7 @@ class ClipForegroundService : Service() {
     var instance: ClipForegroundService? = null
 
     private const val CHANNEL = "linktomac"
-    private const val CHANNEL_MIN = "linktomac_min"
+    private const val CHANNEL_HIDDEN = "linktomac_hidden"
     private const val NOTIF_ID = 1001
     private const val EXTRA_PORT = "port"
     private const val PREFS = "linktomac_relay"
