@@ -9,6 +9,7 @@ import AppKit
 /// re-render live as the relay status / last clip change.
 struct MenuPanel: View {
     let client: RelayClient
+    let proximity: ProximityMonitor
     let onShowPairing: () -> Void
 
     private var deviceName: String { Host.current().localizedName ?? "This Mac" }
@@ -17,6 +18,7 @@ struct MenuPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             clipboardCard
+            securityCard
             generalCard
             footer
         }
@@ -69,6 +71,41 @@ struct MenuPanel: View {
                 if let clip = client.lastClip, !clip.isEmpty {
                     RowDivider()
                     InfoRow(icon: "doc.on.clipboard", title: "Last copy", value: clip)
+                }
+            }
+        }
+    }
+
+    // MARK: - Security
+
+    private var securityCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionTitle("SECURITY")
+            Card {
+                ToggleRow(
+                    icon: "lock.laptopcomputer",
+                    title: "Lock when phone leaves",
+                    isOn: Binding(get: { proximity.enabled }, set: { proximity.enabled = $0 }),
+                )
+                if proximity.enabled {
+                    RowDivider()
+                    InfoRow(icon: "dot.radiowaves.left.and.right", title: "Phone", value: proximity.statusText)
+                    RowDivider()
+                    PickerRow(
+                        icon: "antenna.radiowaves.left.and.right",
+                        title: "Sensitivity",
+                        selection: Binding(get: { proximity.sensitivity }, set: { proximity.sensitivity = $0 }),
+                        options: ProximityMonitor.Sensitivity.allCases,
+                        label: { $0.label },
+                    )
+                    RowDivider()
+                    PickerRow(
+                        icon: "clock",
+                        title: "Lock after",
+                        selection: Binding(get: { proximity.graceSeconds }, set: { proximity.graceSeconds = $0 }),
+                        options: ProximityMonitor.graceOptions,
+                        label: { "\($0)s" },
+                    )
                 }
             }
         }
@@ -150,6 +187,7 @@ struct MenuPanel: View {
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
             client.unpair()
+            proximity.reloadPairing() // room rotated → the beacon UUID follows it
         }
     }
 }
@@ -216,6 +254,33 @@ private struct ToggleRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
+    }
+}
+
+/// A row with a leading icon, a title, and a trailing pop-up menu picker.
+private struct PickerRow<Value: Hashable>: View {
+    let icon: String
+    let title: String
+    @Binding var selection: Value
+    let options: [Value]
+    let label: (Value) -> String
+    var body: some View {
+        HStack(spacing: 8) {
+            RowIcon(name: icon)
+            Text(title).font(.system(size: 13))
+            Spacer(minLength: 8)
+            Picker("", selection: $selection) {
+                ForEach(options, id: \.self) { option in
+                    Text(label(option)).tag(option)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .fixedSize()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
     }
 }
 

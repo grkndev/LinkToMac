@@ -9,7 +9,11 @@ struct LinkToMacApp: App {
         // Window-style menu bar extra: the dropdown is a soft native popover panel, which
         // (unlike a .menu) can host real switches and a designed layout. See `MenuPanel`.
         MenuBarExtra {
-            MenuPanel(client: delegate.client, onShowPairing: delegate.showPairingWindow)
+            MenuPanel(
+                client: delegate.client,
+                proximity: delegate.proximity,
+                onShowPairing: delegate.showPairingWindow,
+            )
         } label: {
             Image(systemName: delegate.client.menuBarSymbol)
         }
@@ -21,6 +25,8 @@ struct LinkToMacApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let client = RelayClient()
+    /// BLE presence watcher; self-gates on its persisted `enabled`, so this is cheap when off.
+    let proximity = ProximityMonitor()
     private var pairingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

@@ -30,17 +30,21 @@ export default function SettingsScreen() {
   const [notifIconVisible, setNotifIconVisible] = useState(true);
   const [notifGranted, setNotifGranted] = useState<boolean | null>(null);
   const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
+  const [proximityOn, setProximityOn] = useState(false);
 
   useEffect(() => {
     SelfAdb.getStatusNotificationVisible().then(setNotifIconVisible).catch(() => {});
     SelfAdb.hasPostNotifications().then(setNotifGranted).catch(() => setNotifGranted(null));
     SelfAdb.hasIgnoreBatteryOptimizations().then(setBatteryOk).catch(() => setBatteryOk(null));
+    SelfAdb.getProximityAdvertise().then(setProximityOn).catch(() => {});
 
     // The battery exemption is granted in a system dialog/settings screen; re-check on return.
     const sub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
       SelfAdb.hasIgnoreBatteryOptimizations().then(setBatteryOk).catch(() => {});
       SelfAdb.hasPostNotifications().then(setNotifGranted).catch(() => {});
+      // The OS may have revoked Nearby Devices behind our back -> reflect the real beacon state.
+      SelfAdb.getProximityAdvertise().then(setProximityOn).catch(() => {});
     });
     return () => sub.remove();
   }, []);
@@ -48,6 +52,28 @@ export default function SettingsScreen() {
   const toggleNotifIcon = (visible: boolean) => {
     setNotifIconVisible(visible);
     SelfAdb.setStatusNotificationVisible(visible).catch(() => {});
+  };
+
+  // Auto-lock needs Nearby Devices to advertise the BLE beacon; ask before enabling.
+  const toggleProximity = (on: boolean) => {
+    if (!on) {
+      setProximityOn(false);
+      SelfAdb.setProximityAdvertise(false).catch(() => {});
+      return;
+    }
+    SelfAdb.requestNearbyDevicesPermission()
+      .then((granted) => {
+        if (!granted) {
+          Alert.alert(
+            'Permission needed',
+            'Allow “Nearby devices” so your Mac can tell when this phone leaves.',
+          );
+          return;
+        }
+        setProximityOn(true);
+        SelfAdb.setProximityAdvertise(true).catch(() => {});
+      })
+      .catch(() => {});
   };
 
   const confirmUnpair = () => {
@@ -101,6 +127,14 @@ export default function SettingsScreen() {
             hint="Copies on this phone are sent to your Mac. You'll still receive the Mac's copies when off."
             value={!paused}
             onValueChange={(on) => setPaused(!on)}
+          />
+          <SwitchRow
+            colors={colors}
+            icon={icons.lock}
+            label="Auto-lock Mac when I leave"
+            hint="Your Mac locks when this phone leaves Bluetooth range. Turn on the matching switch on your Mac too."
+            value={proximityOn}
+            onValueChange={toggleProximity}
           />
           {batteryOk === false ? (
             <ActionRow

@@ -9,6 +9,18 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+  <!--
+    Proximity auto-lock: advertise a BLE presence beacon so the Mac can lock when this phone
+    leaves the room. BLUETOOTH_ADVERTISE is the "Nearby devices" runtime permission (Android
+    12+); advertising never derives location so no location permission is needed. Legacy
+    BLUETOOTH(_ADMIN) cover API <= 30. The beacon runs in the foreground service, so it needs
+    the connectedDevice FGS type on Android 14+.
+  -->
+  <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+  <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+  <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
   <!-- mDNS discovery of _adb-tls-pairing / _adb-tls-connect via NsdManager -->
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
@@ -30,7 +42,7 @@
     <service
       android:name=".ClipForegroundService"
       android:exported="false"
-      android:foregroundServiceType="specialUse">
+      android:foregroundServiceType="specialUse|connectedDevice">
       <property
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         android:value="clipboard_sync" />

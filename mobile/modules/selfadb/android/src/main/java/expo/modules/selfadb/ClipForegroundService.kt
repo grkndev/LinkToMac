@@ -25,6 +25,7 @@ class ClipForegroundService : Service() {
 
   private var bridge: ClipBridge? = null
   private var relay: RelayClient? = null
+  private var bleAdvertiser: BleAdvertiser? = null
 
   /** Last text we wrote to the device clipboard; its echo `onClip` is swallowed. */
   @Volatile private var lastWritten: String? = null
@@ -62,6 +63,8 @@ class ClipForegroundService : Service() {
     // Auto-start the relay from persisted config. Also covers the null-intent START_STICKY
     // restart after the app is killed -> reconnects to the Mac with no JS runtime.
     maybeStartRelay()
+    // Same for the BLE presence beacon (proximity auto-lock), if the user opted in.
+    maybeStartAdvertising()
     return START_STICKY
   }
 
@@ -89,6 +92,7 @@ class ClipForegroundService : Service() {
     saveConfig(this, url, token, room, peerName)
     if (unchanged && relay != null) return
     reloadRelay()
+    reloadAdvertiser() // room may have changed -> re-derive the beacon UUID
   }
 
   /** (Re)apply persisted relay config, replacing any running client. */
@@ -104,6 +108,8 @@ class ClipForegroundService : Service() {
     clearConfig(this)
     relay?.shutdown()
     relay = null
+    bleAdvertiser?.stop() // room is gone -> nothing to advertise
+    bleAdvertiser = null
     ClipBus.relay("disconnected", false, null)
     updateNotification(peerOnline = false)
   }
@@ -143,9 +149,42 @@ class ClipForegroundService : Service() {
     ).also { it.start() }
   }
 
+  // ---- BLE presence beacon (proximity auto-lock) ---------------------------
+
+  /**
+   * Live toggle of the presence beacon. When on, advertise the pairing-derived UUID so the Mac
+   * can lock when this phone leaves; when off, stop advertising. Persisted so a START_STICKY
+   * restart with no JS keeps honoring it.
+   */
+  fun setProximityAdvertise(enabled: Boolean) {
+    setProximityAdvertiseEnabled(this, enabled)
+    if (enabled) {
+      maybeStartAdvertising()
+    } else {
+      bleAdvertiser?.stop()
+      bleAdvertiser = null
+    }
+  }
+
+  private fun maybeStartAdvertising() {
+    if (!getProximityAdvertise(this)) return
+    val room = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("room", null) ?: return
+    if (bleAdvertiser == null) bleAdvertiser = BleAdvertiser(applicationContext) { ClipBus.log(it) }
+    bleAdvertiser?.start(room)
+  }
+
+  /** Restart advertising under a (possibly) new room — e.g. after a re-pair. */
+  private fun reloadAdvertiser() {
+    bleAdvertiser?.stop()
+    bleAdvertiser = null
+    maybeStartAdvertising()
+  }
+
   override fun onDestroy() {
     relay?.shutdown()
     relay = null
+    bleAdvertiser?.stop()
+    bleAdvertiser = null
     bridge?.stop()
     bridge = null
     instance = null
@@ -256,6 +295,7 @@ class ClipForegroundService : Service() {
     private const val PREFS_UI = "linktomac_ui"
     private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"
     private const val KEY_CLIP_SEND_PAUSED = "clipSendPaused"
+    private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     const val DEFAULT_PORT = 53123
 
     /** Whether the foreground notification should show a status-bar icon (default true). */
@@ -277,6 +317,17 @@ class ClipForegroundService : Service() {
     fun setClipSendPaused(ctx: Context, paused: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_CLIP_SEND_PAUSED, paused)
+        .apply()
+    }
+
+    /** Whether the BLE presence beacon is enabled (default false = not advertising). */
+    fun getProximityAdvertise(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getBoolean(KEY_PROXIMITY_ADVERTISE, false)
+
+    fun setProximityAdvertiseEnabled(ctx: Context, enabled: Boolean) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_PROXIMITY_ADVERTISE, enabled)
         .apply()
     }
 

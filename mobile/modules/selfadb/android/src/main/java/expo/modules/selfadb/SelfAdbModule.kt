@@ -239,6 +239,46 @@ class SelfAdbModule : Module() {
       ClipForegroundService.getClipSendPaused(appCtx)
     }
 
+    // ---- Proximity auto-lock (BLE presence beacon) ---------------------------
+
+    /** Enable/disable advertising the BLE presence beacon (Mac locks when this phone leaves). */
+    AsyncFunction("setProximityAdvertise") { enabled: Boolean ->
+      val svc = ClipForegroundService.instance
+      if (svc != null) {
+        svc.setProximityAdvertise(enabled)
+      } else {
+        ClipForegroundService.setProximityAdvertiseEnabled(appCtx, enabled)
+      }
+    }
+
+    /** Whether the presence beacon is enabled (persisted, default false). */
+    AsyncFunction("getProximityAdvertise") {
+      ClipForegroundService.getProximityAdvertise(appCtx)
+    }
+
+    /** Whether we hold the Nearby Devices (BLUETOOTH_ADVERTISE) permission. */
+    AsyncFunction("hasNearbyDevicesPermission") {
+      Build.VERSION.SDK_INT < 31 ||
+        appCtx.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Request the Nearby Devices permission (Android 12+); resolves whether it was granted. */
+    AsyncFunction("requestNearbyDevicesPermission") { promise: Promise ->
+      if (Build.VERSION.SDK_INT < 31) {
+        promise.resolve(true)
+        return@AsyncFunction
+      }
+      val manager = appContext.permissions
+      if (manager == null) {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+      manager.askForPermissions({ result ->
+        val granted = result[Manifest.permission.BLUETOOTH_ADVERTISE]?.status == PermissionsStatus.GRANTED
+        promise.resolve(granted)
+      }, Manifest.permission.BLUETOOTH_ADVERTISE)
+    }
+
     /** Whether the FGS notification can be shown (POST_NOTIFICATIONS, Android 13+). */
     AsyncFunction("hasPostNotifications") {
       Build.VERSION.SDK_INT < 33 ||

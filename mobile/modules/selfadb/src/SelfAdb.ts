@@ -34,6 +34,14 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   setRelay(url: string, token: string, room: string, peerName: string | null): Promise<void>;
   /** send a remote action to the Mac over the relay (e.g. "lock"). Needs the service running. */
   sendCommand(action: string): Promise<void>;
+  /** enable/disable the BLE presence beacon (Mac auto-locks when this phone leaves). Persisted. */
+  setProximityAdvertise(enabled: boolean): Promise<void>;
+  /** whether the presence beacon is enabled (persisted, default false). */
+  getProximityAdvertise(): Promise<boolean>;
+  /** whether we hold the Nearby Devices (BLUETOOTH_ADVERTISE) permission. */
+  hasNearbyDevicesPermission(): Promise<boolean>;
+  /** request the Nearby Devices permission (Android 12+); resolves whether granted. */
+  requestNearbyDevicesPermission(): Promise<boolean>;
   /** unpair: forget the persisted relay config and disconnect the native WS. */
   clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */

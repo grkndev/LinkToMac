@@ -19,6 +19,9 @@
 	<!-- Menubar agent: no Dock icon, no main window. -->
 	<key>LSUIElement</key>
 	<true/>
+	<!-- Bluetooth: scan for the phone's presence beacon to auto-lock when it leaves. -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>LinkToMac scans for your paired phone over Bluetooth to lock this Mac when you walk away.</string>
 	<!-- Allow cleartext ws:// to localhost / local network for the dev relay. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
