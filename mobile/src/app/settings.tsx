@@ -131,8 +131,8 @@ export default function SettingsScreen() {
           <SwitchRow
             colors={colors}
             icon={icons.lock}
-            label="Auto-lock Mac when I leave"
-            hint="Your Mac locks when this phone leaves Bluetooth range. Turn on the matching switch on your Mac too."
+            label="Auto-lock"
+            hint="Your Mac locks when this phone leaves range. Turn on the matching switch on your Mac too."
             value={proximityOn}
             onValueChange={toggleProximity}
           />
