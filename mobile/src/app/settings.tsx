@@ -6,18 +6,31 @@ import {
   Switch,
   Text,
   type MaterialColors,
-} from '@expo/ui/jetpack-compose';
-import { fillMaxWidth, padding, verticalScroll } from '@expo/ui/jetpack-compose/modifiers';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, AppState, useColorScheme } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+} from "@expo/ui/jetpack-compose";
+import * as Haptics from "expo-haptics";
+import {
+  fillMaxWidth,
+  padding,
+  verticalScroll,
+} from "@expo/ui/jetpack-compose/modifiers";
+import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
+import { Alert, AppState, useColorScheme } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useIcons, type IconSource } from '@/components/icons';
-import { Group, IconCircle, SEED, groupShape, tonal, useM3Colors, type RowShape } from '@/components/m3';
-import { Spacing } from '@/constants/theme';
-import { usePairing } from '@/features/relay/pairing-context';
-import SelfAdb from '@/features/selfadb/client';
+import { useIcons, type IconSource } from "@/components/icons";
+import {
+  Group,
+  IconCircle,
+  SEED,
+  groupShape,
+  tonal,
+  useM3Colors,
+  type RowShape,
+} from "@/components/m3";
+import { Spacing } from "@/constants/theme";
+import { usePairing } from "@/features/relay/pairing-context";
+import SelfAdb from "@/features/selfadb/client";
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -33,18 +46,32 @@ export default function SettingsScreen() {
   const [proximityOn, setProximityOn] = useState(false);
 
   useEffect(() => {
-    SelfAdb.getStatusNotificationVisible().then(setNotifIconVisible).catch(() => {});
-    SelfAdb.hasPostNotifications().then(setNotifGranted).catch(() => setNotifGranted(null));
-    SelfAdb.hasIgnoreBatteryOptimizations().then(setBatteryOk).catch(() => setBatteryOk(null));
-    SelfAdb.getProximityAdvertise().then(setProximityOn).catch(() => {});
+    SelfAdb.getStatusNotificationVisible()
+      .then(setNotifIconVisible)
+      .catch(() => {});
+    SelfAdb.hasPostNotifications()
+      .then(setNotifGranted)
+      .catch(() => setNotifGranted(null));
+    SelfAdb.hasIgnoreBatteryOptimizations()
+      .then(setBatteryOk)
+      .catch(() => setBatteryOk(null));
+    SelfAdb.getProximityAdvertise()
+      .then(setProximityOn)
+      .catch(() => {});
 
     // The battery exemption is granted in a system dialog/settings screen; re-check on return.
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') return;
-      SelfAdb.hasIgnoreBatteryOptimizations().then(setBatteryOk).catch(() => {});
-      SelfAdb.hasPostNotifications().then(setNotifGranted).catch(() => {});
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      SelfAdb.hasIgnoreBatteryOptimizations()
+        .then(setBatteryOk)
+        .catch(() => {});
+      SelfAdb.hasPostNotifications()
+        .then(setNotifGranted)
+        .catch(() => {});
       // The OS may have revoked Nearby Devices behind our back -> reflect the real beacon state.
-      SelfAdb.getProximityAdvertise().then(setProximityOn).catch(() => {});
+      SelfAdb.getProximityAdvertise()
+        .then(setProximityOn)
+        .catch(() => {});
     });
     return () => sub.remove();
   }, []);
@@ -65,8 +92,8 @@ export default function SettingsScreen() {
       .then((granted) => {
         if (!granted) {
           Alert.alert(
-            'Permission needed',
-            'Allow “Nearby devices” so your Mac can tell when this phone leaves.',
+            "Permission needed",
+            "Allow “Nearby devices” so your Mac can tell when this phone leaves.",
           );
           return;
         }
@@ -78,17 +105,21 @@ export default function SettingsScreen() {
 
   const confirmUnpair = () => {
     Alert.alert(
-      'Remove Pairing',
-      'The pairing will be removed and the connection to the Mac will be disconnected. You will need to scan the QR code from your Mac to pair again.',
+      "Remove Pairing",
+      "The pairing will be removed and the connection to the Mac will be disconnected. You will need to scan the QR code from your Mac to pair again.",
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => unpair() },
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: () => unpair() },
       ],
     );
   };
 
   return (
-    <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>
+    <Host
+      style={{ flex: 1, backgroundColor: colors.background }}
+      seedColor={SEED}
+      colorScheme={scheme}
+    >
       {/* One continuous Google-style grouped list — every row is a segment of a single rounded
           block (no section labels, no dividers). A plain Column (not LazyColumn) is required:
           it lives inside the outer verticalScroll() Column, which passes infinite height
@@ -97,7 +128,12 @@ export default function SettingsScreen() {
         modifiers={[
           fillMaxWidth(),
           verticalScroll(),
-          padding(Spacing.three, Spacing.three, Spacing.three, insets.bottom + Spacing.five),
+          padding(
+            Spacing.three,
+            Spacing.three,
+            Spacing.three,
+            insets.bottom + Spacing.five,
+          ),
         ]}
       >
         <Group>
@@ -116,7 +152,9 @@ export default function SettingsScreen() {
               label="Grant notification permission"
               hint="Without permission, connection status notifications cannot be displayed."
               onPress={() => {
-                SelfAdb.requestPostNotifications().then(setNotifGranted).catch(() => {});
+                SelfAdb.requestPostNotifications()
+                  .then(setNotifGranted)
+                  .catch(() => {});
               }}
             />
           ) : null}
@@ -151,7 +189,7 @@ export default function SettingsScreen() {
               colors={colors}
               icon={icons.battery}
               label="Battery Optimization"
-              value={batteryOk ? 'Disabled' : '—'}
+              value={batteryOk ? "Disabled" : "—"}
             />
           )}
           <ActionRow
@@ -159,7 +197,7 @@ export default function SettingsScreen() {
             icon={icons.qr}
             label="Re-pair (Scan QR)"
             hint="Scan the Pairing QR from your Mac."
-            onPress={() => router.push('/qr-scan')}
+            onPress={() => router.push("/qr-scan")}
           />
           <ActionRow
             colors={colors}
@@ -174,7 +212,7 @@ export default function SettingsScreen() {
             icon={icons.terminal}
             label="Logs"
             hint="View ADB and device logs."
-            onPress={() => router.push('/logs')}
+            onPress={() => router.push("/logs")}
           />
         </Group>
       </Column>
@@ -200,27 +238,39 @@ function SwitchRow({
   onValueChange: (value: boolean) => void;
   shape?: RowShape;
 }) {
-  const t = tonal(colors, 'secondary');
+  const t = tonal(colors, "secondary");
   return (
     <Surface
       color={colors.surfaceContainerHigh}
       shape={shape}
       modifiers={[fillMaxWidth()]}
       checked={value}
-      onCheckedChange={onValueChange}
+      onCheckedChange={(value) => {
+        onValueChange(value);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      }}
     >
-      <ListItem colors={{ containerColor: 'transparent' }} modifiers={[fillMaxWidth()]}>
+      <ListItem
+        colors={{ containerColor: "transparent" }}
+        modifiers={[fillMaxWidth()]}
+      >
         <ListItem.LeadingContent>
           <IconCircle source={icon} container={t.container} on={t.on} />
         </ListItem.LeadingContent>
         <ListItem.HeadlineContent>
-          <Text color={colors.onSurface} style={{ typography: 'bodyLarge', fontWeight: '500' }}>
+          <Text
+            color={colors.onSurface}
+            style={{ typography: "bodyLarge", fontWeight: "500" }}
+          >
             {label}
           </Text>
         </ListItem.HeadlineContent>
         {hint ? (
           <ListItem.SupportingContent>
-            <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+            <Text
+              color={colors.onSurfaceVariant}
+              style={{ typography: "bodyMedium" }}
+            >
               {hint}
             </Text>
           </ListItem.SupportingContent>
@@ -251,7 +301,7 @@ function ActionRow({
   onPress: () => void;
   shape?: RowShape;
 }) {
-  const t = tonal(colors, destructive ? 'error' : 'secondary');
+  const t = tonal(colors, destructive ? "error" : "secondary");
   const labelColor = destructive ? colors.error : colors.onSurface;
   return (
     <Surface
@@ -260,18 +310,27 @@ function ActionRow({
       modifiers={[fillMaxWidth()]}
       onClick={onPress}
     >
-      <ListItem colors={{ containerColor: 'transparent' }} modifiers={[fillMaxWidth()]}>
+      <ListItem
+        colors={{ containerColor: "transparent" }}
+        modifiers={[fillMaxWidth()]}
+      >
         <ListItem.LeadingContent>
           <IconCircle source={icon} container={t.container} on={t.on} />
         </ListItem.LeadingContent>
         <ListItem.HeadlineContent>
-          <Text color={labelColor} style={{ typography: 'bodyLarge', fontWeight: '500' }}>
+          <Text
+            color={labelColor}
+            style={{ typography: "bodyLarge", fontWeight: "500" }}
+          >
             {label}
           </Text>
         </ListItem.HeadlineContent>
         {hint ? (
           <ListItem.SupportingContent>
-            <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+            <Text
+              color={colors.onSurfaceVariant}
+              style={{ typography: "bodyMedium" }}
+            >
               {hint}
             </Text>
           </ListItem.SupportingContent>
@@ -295,20 +354,33 @@ function InfoRow({
   value: string;
   shape?: RowShape;
 }) {
-  const t = tonal(colors, 'secondary');
+  const t = tonal(colors, "secondary");
   return (
-    <Surface color={colors.surfaceContainerHigh} shape={shape} modifiers={[fillMaxWidth()]}>
-      <ListItem colors={{ containerColor: 'transparent' }} modifiers={[fillMaxWidth()]}>
+    <Surface
+      color={colors.surfaceContainerHigh}
+      shape={shape}
+      modifiers={[fillMaxWidth()]}
+    >
+      <ListItem
+        colors={{ containerColor: "transparent" }}
+        modifiers={[fillMaxWidth()]}
+      >
         <ListItem.LeadingContent>
           <IconCircle source={icon} container={t.container} on={t.on} />
         </ListItem.LeadingContent>
         <ListItem.HeadlineContent>
-          <Text color={colors.onSurface} style={{ typography: 'bodyLarge', fontWeight: '500' }}>
+          <Text
+            color={colors.onSurface}
+            style={{ typography: "bodyLarge", fontWeight: "500" }}
+          >
             {label}
           </Text>
         </ListItem.HeadlineContent>
         <ListItem.TrailingContent>
-          <Text color={colors.onSurfaceVariant} style={{ typography: 'labelLarge', fontWeight: '600' }}>
+          <Text
+            color={colors.onSurfaceVariant}
+            style={{ typography: "labelLarge", fontWeight: "600" }}
+          >
             {value}
           </Text>
         </ListItem.TrailingContent>
