@@ -1,93 +1,91 @@
 # Link to macOS
 
-Bidirectional **clipboard synchronization between Android and macOS** — in the spirit of
-Microsoft's "Link to Windows", but self-hosted and end-to-end encrypted. Copy on the
-phone, paste on the Mac, and vice versa.
+Connect your Android phone to your Mac. **Sync your clipboard both ways, lock your Mac
+from your phone, and let it lock itself when you walk away** — all through a relay you host
+yourself. In the spirit of Microsoft's "Link to Windows", but self-hosted.
 
 > Personal-use project. Not intended for the Play Store / App Store.
+
+## Features
+
+- 📋 **Two-way clipboard** — copy on the phone, paste on the Mac, and vice versa.
+- 🔒 **Lock from your phone** — one tap on the Home screen locks your Mac.
+- 🚶 **Auto-lock when you leave** — the Mac locks itself once your phone is out of
+  Bluetooth range. (Locking only — macOS has no way to auto-*unlock*.)
+- 🔗 **Pair once** with a QR code shown on the Mac.
+- 🏠 **Self-hosted** — the relay runs on your own server; nothing goes through a third party.
 
 ## How it works
 
 ```
-ANDROID (phone)                            CLOUD               macOS
-┌──────────────────────────────┐                      ┌─────────────────────┐
-│ RN App (Expo, DevClient)     │                      │ Swift menubar app   │
-│  ┌────────────────────────┐  │                      │  NSPasteboard watch │
-│  │ Foreground Service     │  │   ┌────────────┐     │  /write (changeCount│
-│  │  • WS client ──────────┼──┼──►│ Node ws    │◄────┼─  poll)             │
-│  │  • self-ADB (libadb)   │  │   │ relay      │     │  WS client          │
-│  │  • watchdog            │  │   │ room route │     │  secretbox E2E      │
-│  │  • secretbox E2E       │  │   └────────────┘     │  login item         │
-│  └─────────┬──────────────┘  │    only carries      └─────────────────────┘
-│   connect  │ 127.0.0.1:PORT  │    encrypted bytes
-│  ┌─────────▼──────────────┐  │
-│  │ Clipboard agent (JAR)  │  │
-│  │  shell UID · clipboard │  │
-│  │  I/O · localhost socket│  │
-│  └────────────────────────┘  │
-└──────────────────────────────┘
+  Android phone                 your relay              Mac
+  ┌────────────────┐           ┌───────────┐        ┌───────────────┐
+  │ background app  │  ◄─────►  │  tiny WS   │  ◄───► │  menubar app   │
+  │  clipboard ·    │           │  server    │        │  clipboard ·   │
+  │  lock command   │           │ (room id)  │        │  lock · QR     │
+  └───────┬─────────┘           └───────────┘        └──────┬────────┘
+          │                                                   │
+          └───────────  Bluetooth presence beacon  ───────────┘
+                      (proximity auto-lock — fully local)
 ```
 
-A clipboard change on either end is captured, sealed into an
-`{ origin, seq, text }` envelope encrypted with **libsodium secretbox**, and pushed
-through a tiny WebSocket relay to the other device, which decrypts it and writes it to
-its own clipboard. The relay is a "dumb pipe": it routes by `roomId` only and never
-sees plaintext or metadata.
+A small **menu bar app** on the Mac and a **background app** on Android stay connected
+through a tiny **relay server you host**. Clipboard changes and the "Lock Mac" command
+travel through the relay, routed only by a shared room id. **Proximity auto-lock** doesn't
+use the relay at all: the phone broadcasts a Bluetooth presence beacon and the Mac locks
+itself when that signal fades — so it works even with no internet.
 
-### The Android trick: self-ADB
-
-Regular Android apps cannot read the clipboard in the background. This project works
-around that by having the app connect to the phone's **own ADB daemon** over Wireless
-Debugging (the LADB pattern, via `libadb-android` with TLS + SPAKE2 pairing) and launch
-a small dex'd JAR with `app_process` under the **shell UID**, which *can* do clipboard
-I/O. The JAR runs as a detached daemon, listens for clipboard changes, and talks to the
-app over a localhost socket (NDJSON) — so it survives ADB disconnects and app restarts.
+> **The Android trick:** regular apps can't read the clipboard in the background, so the app
+> connects to the phone's *own* ADB over Wireless Debugging and runs a tiny helper with the
+> permissions to do clipboard I/O. It keeps working after the app is swiped away.
 
 ## Components
 
 | Directory | What it is |
 |---|---|
-| [`mobile/`](mobile/) | Expo (SDK 56, DevClient) React Native app. UI/pairing in JS; the hot data path lives in a native Kotlin foreground service (`modules/selfadb/`). The shell-UID clipboard agent JAR sources are in `native-src/clipboard-agent/`. |
-| [`mac/`](mac/) | Swift menu bar app (`MenuBarExtra`). Polls `NSPasteboard.changeCount`, writes incoming clips, generates the pairing QR, stores secrets in Keychain, auto-starts as a login item. |
-| [`server/`](server/) | Minimal Node.js WebSocket relay. Room-based routing, max 2 peers per room, auth token, rate limiting, 256 KB payload cap. Docker + reverse-proxy (wss) ready. See [`server/README.md`](server/README.md). |
+| [`mobile/`](mobile/) | Expo (SDK 56) React Native app — pairing, settings, and the background service that does clipboard sync + the Bluetooth beacon. |
+| [`mac/`](mac/) | Swift menu bar app — clipboard sync, remote lock, proximity auto-lock, pairing QR, login-item auto-start. |
+| [`server/`](server/) | Minimal Node.js WebSocket relay (room routing, auth token, rate limiting). Docker-ready. See [`server/README.md`](server/README.md). |
 | [`docs/`](docs/) | Design documents and implementation plans. |
-| [`workflow.md`](workflow.md) | Full architecture & decision log (in Turkish) — the source of truth for design decisions. |
-
-## Pairing & security
-
-- **Pairing:** the Mac generates a random 256-bit `roomId` and a separate 256-bit
-  encryption key, and shows them as a QR code. The phone scans it once; both sides
-  persist the secrets (Keychain on macOS, Keystore-backed secure storage on Android).
-- **End-to-end encryption:** every clip is sealed with libsodium secretbox
-  (XSalsa20-Poly1305, random 24-byte nonce). `origin`, `seq`, and the text itself are
-  all inside the ciphertext — the relay sees only the `roomId`, ciphertext size, and
-  timing.
-- **Echo/loop prevention:** each end tags messages with `{ origin, seq }` (a version
-  vector) and drops its own echoes and stale sequence numbers. The Mac additionally
-  suppresses the `changeCount` bump caused by its own remote writes.
-- **Relay hardening:** bearer `roomId` + a server-wide auth token, per-room connection
-  cap, rate limiting, payload cap, heartbeat with dead-connection cleanup. TLS (`wss`)
-  is terminated by your reverse proxy (e.g. Caddy).
-- Clipboard content is never persistently logged; the UI shows only short previews.
 
 ## Getting started
 
-Each component has its own setup:
+1. **Relay** — `cd server && npm install && npm run dev` (or `docker compose up -d`). See
+   [`server/README.md`](server/README.md) for env vars and reverse-proxy (wss) setup.
+2. **Mac app** — open `mac/LinkToMac.xcodeproj` (generated from `project.yml` via XcodeGen)
+   and run. Use the menu bar item to show the pairing QR.
+3. **Android app** — `cd mobile && bun install`, then build a dev client
+   (`npx expo run:android`). Expo Go isn't supported (custom native module). Turn on
+   **Wireless Debugging** and pair once by scanning the Mac's QR.
 
-1. **Relay** — `cd server && npm install && npm run dev` (or `docker compose up -d`).
-   Details, env vars, and reverse-proxy config: [`server/README.md`](server/README.md).
-2. **Mac app** — open `mac/LinkToMac.xcodeproj` (generated from `mac/project.yml` via
-   XcodeGen) and run. Use the menu bar item to show the pairing QR.
-3. **Android app** — `cd mobile && bun install`, then build a DevClient
-   (`npx expo run:android`). Expo Go is not supported (custom native module). Enable
-   **Wireless Debugging** on the phone and pair once from the app.
+## Using the features
+
+- **Clipboard** — just copy on either device; the other one follows. You can pause sending
+  from the phone in Settings while still receiving the Mac's copies.
+- **Lock Mac** — tap **Lock Mac** on the phone's Home screen (needs the Mac connected).
+- **Auto-lock when you leave** — turn it on in **both** apps: the phone's Settings
+  (*Auto-lock Mac when I leave*) and the Mac menu (*Lock when phone leaves*). On the Mac you
+  can tune **Sensitivity** (Near / Balanced / Far) and **Lock after** (10–60s), and watch the
+  live signal to calibrate for your space.
+
+## Security & privacy
+
+- **Pair once:** the Mac generates a random room id + key and shows them as a QR; the phone
+  scans it once. Secrets are stored in the Keychain (macOS) and Keystore-backed storage
+  (Android).
+- **You own the relay:** it routes messages by room id and never stores clipboard content.
+  Run it over TLS (`wss`) on infrastructure you trust.
+- **Proximity lock is local:** it uses Bluetooth only and never touches the relay or internet.
+- **Heads-up:** clipboard payloads currently travel **base64-encoded, not yet encrypted**.
+  End-to-end encryption (libsodium secretbox) is designed into the wire format but not active
+  yet — it's on the roadmap.
 
 ## Scope & status
 
-v1 syncs **text only** between **one phone and one Mac**; images, files, and rich
-content are out of scope. The relay, Mac agent, mobile UI, and the self-ADB +
-clipboard-agent pipeline are implemented; lifecycle hardening (reboot re-arm UX,
-watchdog edge cases) is ongoing. See `workflow.md` for the roadmap and open questions.
+v1 links **one phone and one Mac** and syncs **text only** (images/files are out of scope).
+Clipboard sync, remote lock, and proximity auto-lock are implemented; encryption and some
+lifecycle hardening are still on the roadmap. A separate technical document covers the
+internals in depth.
 
 ## License
 
