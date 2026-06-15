@@ -34,6 +34,12 @@ class SelfAdbModule : Module() {
   private val appCtx: Context get() = appContext.reactContext!!.applicationContext
   private val adb by lazy { AdbManager(appCtx) }
 
+  private companion object {
+    // Cap the daemon-log read so a single adb transfer never exceeds libadb's
+    // maxdata-sized read buffer (which would throw BufferOverflowException).
+    const val LOG_TAIL_BYTES = 65536
+  }
+
   override fun definition() = ModuleDefinition {
     Name("SelfAdb")
 
@@ -310,8 +316,16 @@ class SelfAdbModule : Module() {
           return@AsyncFunction "adb bağlanılamadı ($host:${ep.second}) — eşleştirme düşmüş olabilir."
         }
         val alive = adb.runShort("pgrep -f ${AdbManager.NICE_NAME} >/dev/null 2>&1 && echo ÇALIŞIYOR || echo ÖLÜ")
-        val log = adb.runShort("cat /data/local/tmp/clip.log 2>/dev/null || echo '(clip.log yok — daemon hiç başlamamış olabilir)'")
-        "daemon süreci: $alive\nbridge socket: ${if (socketUp) "açık" else "KAPALI"}\n\n$log"
+        // Only the tail: clip.log grows unbounded over a long session, and a single
+        // adb WRTE payload larger than the negotiated maxdata buffer throws
+        // BufferOverflowException in libadb. 64 KB is the most-recent (most useful)
+        // slice and stays well under the buffer on every API level.
+        val log = adb.runShort("tail -c $LOG_TAIL_BYTES /data/local/tmp/clip.log 2>/dev/null || echo '(clip.log yok — daemon hiç başlamamış olabilir)'")
+        "daemon süreci: $alive\nbridge socket: ${if (socketUp) "açık" else "KAPALI"}\n" +
+          "(clip.log son ${LOG_TAIL_BYTES / 1024} KB)\n\n$log"
+      } catch (e: Exception) {
+        "Cihaz logu okunamadı: ${e.message ?: e.javaClass.simpleName}\n" +
+          "bridge socket: ${if (socketUp) "açık" else "KAPALI"}"
       } finally {
         if (toggled) setWifiDebug(false)
       }
