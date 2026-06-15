@@ -6,12 +6,14 @@ struct LinkToMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
+        // Window-style menu bar extra: the dropdown is a soft native popover panel, which
+        // (unlike a .menu) can host real switches and a designed layout. See `MenuPanel`.
         MenuBarExtra {
-            MenuContent(client: delegate.client, onShowPairing: delegate.showPairingWindow)
+            MenuPanel(client: delegate.client, onShowPairing: delegate.showPairingWindow)
         } label: {
             Image(systemName: delegate.client.menuBarSymbol)
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
     }
 }
 

@@ -29,6 +29,13 @@ final class RelayClient {
     /// Generated once and persisted; the room we join and show as a QR for the phone.
     private(set) var pairing: Pairing = PairingStore.loadOrCreate()
 
+    /// Outbound gate: when off, local copies are not forwarded to the phone (inbound still
+    /// works). Persisted across launches; defaults to on so existing behaviour is preserved.
+    /// `@Observable` makes the menu Toggle reflect changes live.
+    var sendToAndroid: Bool = UserDefaults.standard.object(forKey: "sendCopiesToAndroid") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sendToAndroid, forKey: "sendCopiesToAndroid") }
+    }
+
     /// Whether the user wants to be connected; drives reconnect behaviour.
     private var shouldStay = false
 
@@ -56,7 +63,11 @@ final class RelayClient {
         shouldStay = true
         reconnectAttempt = 0
         if pasteboard == nil {
-            pasteboard = PasteboardWatcher { [weak self] text in self?.sendClip(text) }
+            // Read the gate at call time so toggling "Send copies to Android" takes effect live.
+            pasteboard = PasteboardWatcher { [weak self] text in
+                guard let self, self.sendToAndroid else { return }
+                self.sendClip(text)
+            }
         }
         pasteboard?.start()
         openSocket()
