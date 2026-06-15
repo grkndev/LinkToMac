@@ -97,8 +97,8 @@ export default function SettingsScreen() {
           <SwitchRow
             colors={colors}
             icon={icons.contentCopy}
-            label="Clipboard sync"
-            hint="Copies from the clipboard will be sent to the Mac."
+            label="Send copies to Mac"
+            hint="Copies on this phone are sent to your Mac. You'll still receive the Mac's copies when off."
             value={!paused}
             onValueChange={(on) => setPaused(!on)}
           />

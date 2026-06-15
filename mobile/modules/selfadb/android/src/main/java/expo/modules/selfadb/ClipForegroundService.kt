@@ -29,6 +29,11 @@ class ClipForegroundService : Service() {
   /** Last text we wrote to the device clipboard; its echo `onClip` is swallowed. */
   @Volatile private var lastWritten: String? = null
 
+  /** Outbound gate: when true, captured clips are NOT forwarded to the Mac (inbound still
+   *  works). Seeded from PREFS_UI in onStartCommand so a START_STICKY restart with no JS
+   *  keeps honoring the user's choice. */
+  @Volatile private var sendPaused: Boolean = false
+
   override fun onCreate() {
     super.onCreate()
     startInForeground()
@@ -37,6 +42,7 @@ class ClipForegroundService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     val port = intent?.getIntExtra(EXTRA_PORT, DEFAULT_PORT) ?: DEFAULT_PORT
     instance = this
+    sendPaused = getClipSendPaused(this)
     if (bridge == null) {
       ClipBus.log("service: starting bridge on :$port")
       bridge = ClipBridge(
@@ -47,7 +53,7 @@ class ClipForegroundService : Service() {
           } else {
             ClipBus.log("clip: ${text.take(60)}")
             ClipBus.clip(text, ts)
-            relay?.sendClip(text)
+            if (!sendPaused) relay?.sendClip(text)
           }
         },
         onLog = { ClipBus.log(it) }
@@ -94,16 +100,14 @@ class ClipForegroundService : Service() {
     updateNotification(peerOnline = false)
   }
 
-  /** Live pause/resume; does not touch persisted config. */
+  /**
+   * Live toggle of the outbound (Mac-bound) clip forwarding. The relay stays connected so
+   * the Mac's clips keep arriving even while paused — only our own sends are suppressed.
+   * Persisted so a START_STICKY restart with no JS keeps honoring it.
+   */
   fun setPaused(paused: Boolean) {
-    if (paused) {
-      relay?.shutdown()
-      relay = null
-      ClipBus.relay("disconnected", false, null)
-      updateNotification(peerOnline = false)
-    } else {
-      reloadRelay()
-    }
+    sendPaused = paused
+    setClipSendPaused(this, paused)
   }
 
   private fun maybeStartRelay() {
@@ -238,6 +242,7 @@ class ClipForegroundService : Service() {
     // Separate prefs file: clearConfig() wipes PREFS on unpair, UI settings must survive that.
     private const val PREFS_UI = "linktomac_ui"
     private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"
+    private const val KEY_CLIP_SEND_PAUSED = "clipSendPaused"
     const val DEFAULT_PORT = 53123
 
     /** Whether the foreground notification should show a status-bar icon (default true). */
@@ -248,6 +253,17 @@ class ClipForegroundService : Service() {
     fun setStatusNotificationVisible(ctx: Context, visible: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_STATUS_NOTIF_VISIBLE, visible)
+        .apply()
+    }
+
+    /** Whether outbound (Mac-bound) clip forwarding is paused (default false = sending). */
+    fun getClipSendPaused(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getBoolean(KEY_CLIP_SEND_PAUSED, false)
+
+    fun setClipSendPaused(ctx: Context, paused: Boolean) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_CLIP_SEND_PAUSED, paused)
         .apply()
     }
 

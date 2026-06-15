@@ -211,9 +211,19 @@ class SelfAdbModule : Module() {
       ClipBus.lastRelay ?: mapOf("status" to "disconnected", "peerOnline" to false, "lastError" to null)
     }
 
-    /** Live pause/resume of relay forwarding. */
+    /** Live pause/resume of outbound (Mac-bound) forwarding; stays connected to receive. */
     AsyncFunction("relaySetPaused") { paused: Boolean ->
-      ClipForegroundService.instance?.setPaused(paused)
+      val svc = ClipForegroundService.instance
+      if (svc != null) {
+        svc.setPaused(paused)
+      } else {
+        ClipForegroundService.setClipSendPaused(appCtx, paused)
+      }
+    }
+
+    /** Whether outbound forwarding to the Mac is currently paused (persisted). */
+    AsyncFunction("relayIsSendPaused") {
+      ClipForegroundService.getClipSendPaused(appCtx)
     }
 
     /** Whether the FGS notification can be shown (POST_NOTIFICATIONS, Android 13+). */

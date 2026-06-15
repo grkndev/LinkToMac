@@ -57,11 +57,11 @@ export default function HomeScreen() {
   const scheme = useColorScheme();
   const colors = useM3Colors();
   const icons = useIcons();
-  const { pairing, paused } = usePairing();
+  const { pairing } = usePairing();
   const { relay, lastClip } = useRelayStatus();
 
-  const connected = relay.peerOnline && !paused;
-  const statusLabel = paused ? 'Paused' : connected ? 'Connected' : 'Not connected';
+  const connected = relay.peerOnline;
+  const statusLabel = connected ? 'Connected' : 'Disconnected';
 
   return (
     <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>

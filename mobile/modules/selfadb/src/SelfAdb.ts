@@ -36,8 +36,10 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */
   relayGetStatus(): Promise<RelayEvent>;
-  /** live pause/resume of relay forwarding (does not touch persisted config). */
+  /** pause/resume outbound (Mac-bound) forwarding; stays connected to receive. Persisted. */
   relaySetPaused(paused: boolean): Promise<void>;
+  /** whether outbound forwarding to the Mac is currently paused (persisted, default false). */
+  relayIsSendPaused(): Promise<boolean>;
   /** hide/show the FGS notification's status-bar icon (re-posts on a MIN/LOW importance channel). */
   setStatusNotificationVisible(visible: boolean): Promise<void>;
   /** whether the status-bar icon is currently shown (persisted, default true). */

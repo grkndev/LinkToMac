@@ -35,6 +35,8 @@ export function PairingProvider({ children }: { children: ReactNode }) {
     loadPairing()
       .then(setPairingState)
       .catch(() => setPairingState(null));
+    // Seed the send gate from the persisted native value so it survives app/service restarts.
+    SelfAdb.relayIsSendPaused().then(setPausedState).catch(() => {});
   }, []);
 
   useEffect(() => {
