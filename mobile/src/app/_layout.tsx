@@ -108,7 +108,7 @@ function RootNavigator({
             name="settings"
             options={{
               headerShown: true,
-              title: "Settings",
+              headerBackTitle: "Settings",
               headerShadowVisible: false,
               headerStyle: { backgroundColor: background },
               headerTintColor: onSurface,
