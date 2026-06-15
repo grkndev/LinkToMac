@@ -203,6 +203,12 @@ class SelfAdbModule : Module() {
       }
     }
 
+    /** Send a remote action to the Mac over the relay (e.g. "lock"). Needs the service running. */
+    AsyncFunction("sendCommand") { action: String ->
+      val svc = ClipForegroundService.instance ?: throw Exception("service not running")
+      svc.sendCmd(action)
+    }
+
     /** Unpair: forget the persisted relay config and drop the WS connection. */
     AsyncFunction("clearRelay") {
       val svc = ClipForegroundService.instance

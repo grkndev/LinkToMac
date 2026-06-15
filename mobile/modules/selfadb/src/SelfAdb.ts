@@ -32,6 +32,8 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   writeClipboard(text: string): Promise<void>;
   /** persist relay config (url/token/room/peer name) and (re)connect the native WS to the Mac. */
   setRelay(url: string, token: string, room: string, peerName: string | null): Promise<void>;
+  /** send a remote action to the Mac over the relay (e.g. "lock"). Needs the service running. */
+  sendCommand(action: string): Promise<void>;
   /** unpair: forget the persisted relay config and disconnect the native WS. */
   clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */

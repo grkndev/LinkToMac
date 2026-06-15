@@ -22,6 +22,7 @@ import {
   verticalScroll,
   weight,
 } from '@expo/ui/jetpack-compose/modifiers';
+import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { Alert, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +40,7 @@ import {
 } from '@/components/m3';
 import { useIcons, type IconSource } from '@/components/icons';
 import { Spacing } from '@/constants/theme';
+import SelfAdb from '@/features/selfadb/client';
 import { useClipHistory } from '@/features/clip-history/use-clip-history';
 import { usePairing } from '@/features/relay/pairing-context';
 import { useRelayStatus } from '@/features/relay/use-relay-status';
@@ -131,9 +133,18 @@ export default function HomeScreen() {
           </Row>
         </Column>
 
-        {/* Quick actions — connected button group; placeholders, so dimmed + "coming soon". */}
+        {/* Quick actions — Lock Mac is live (needs a connected Mac); Cast is still a placeholder. */}
         <ButtonGroup>
-          <ActionTile colors={colors} icon={icons.lock} label="Lock Mac" />
+          <ActionTile
+            colors={colors}
+            icon={icons.lock}
+            label="Lock Mac"
+            enabled={connected}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              SelfAdb.sendCommand('lock').catch(() => {});
+            }}
+          />
           <ActionTile colors={colors} icon={icons.cast} label="Cast Screen" />
         </ButtonGroup>
 
@@ -153,26 +164,39 @@ export default function HomeScreen() {
   );
 }
 
-/** Equal-width quick action; functionality lands in a later update, so it's dimmed. */
-function 
-ActionTile({
+/**
+ * Equal-width quick action. Live when given an `onPress` and `enabled`; otherwise dimmed —
+ * either a placeholder (no `onPress` → "Soon") or an action that needs a connected Mac
+ * (`enabled={false}` → "Not connected").
+ */
+function ActionTile({
   colors,
   icon,
   label,
+  onPress,
+  enabled = true,
   shape = groupShapeH(true, true),
 }: {
   colors: MaterialColors;
   icon: IconSource;
   label: string;
+  onPress?: () => void;
+  enabled?: boolean;
   shape?: RowShape;
 }) {
   const t = tonal(colors, 'secondary');
+  const active = onPress != null && enabled;
+  const handleClick = active
+    ? onPress
+    : onPress != null
+      ? () => Alert.alert('Not connected', 'Connect to your Mac first.')
+      : () => Alert.alert('Soon', 'This feature is not available yet.');
   return (
     <Surface
       color={colors.surfaceContainerHigh}
       shape={shape}
-      onClick={() => Alert.alert('Soon', 'This feature is not available yet.')}
-      modifiers={[weight(1), alpha(0.5)]}
+      onClick={handleClick}
+      modifiers={active ? [weight(1)] : [weight(1), alpha(0.5)]}
     >
       <Column
         modifiers={[fillMaxWidth(), padding(Spacing.two, Spacing.three, Spacing.two, Spacing.three)]}

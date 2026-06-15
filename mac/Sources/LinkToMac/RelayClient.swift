@@ -234,8 +234,21 @@ final class RelayClient {
             } else {
                 log("clip with undecodable ct")
             }
+        case let .cmd(action):
+            handleCommand(action)
         case .pong:
             break
+        }
+    }
+
+    /// Run a remote action requested by the phone. Kept off the clipboard path entirely.
+    private func handleCommand(_ action: String) {
+        switch action {
+        case "lock":
+            log("cmd: lock screen")
+            ScreenLock.lock()
+        default:
+            log("cmd: ignoring unknown action \(action)")
         }
     }
 

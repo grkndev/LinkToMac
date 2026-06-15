@@ -16,6 +16,13 @@ export interface ClipMsg {
   ct: string;
 }
 
+// A remote action targeting the peer (e.g. lock the Mac). The relay forwards it
+// verbatim and never interprets `action`, so new actions need no server change.
+export interface CmdMsg {
+  t: 'cmd';
+  action: string;
+}
+
 export interface PingMsg {
   t: 'ping';
 }
@@ -24,7 +31,7 @@ export interface PongMsg {
   t: 'pong';
 }
 
-export type ClientMessage = JoinMsg | ClipMsg | PingMsg | PongMsg;
+export type ClientMessage = JoinMsg | ClipMsg | CmdMsg | PingMsg | PongMsg;
 
 // --- relay -> client ---
 export type ErrorCode =
@@ -57,6 +64,7 @@ export type ServerMessage = JoinedMsg | PeerMsg | ErrorMsg | PongMsg;
 const DEVICES: readonly string[] = ['android', 'mac'];
 const ROOM_MIN = 16;
 const ROOM_MAX = 128;
+const ACTION_MAX = 32;
 
 function isDevice(v: unknown): v is Device {
   return typeof v === 'string' && DEVICES.includes(v);
@@ -85,6 +93,11 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
       if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
       return { t: 'clip', nonce: obj.nonce, ct: obj.ct };
+    case 'cmd':
+      if (typeof obj.action !== 'string' || obj.action.length === 0 || obj.action.length > ACTION_MAX) {
+        return null;
+      }
+      return { t: 'cmd', action: obj.action };
     case 'ping':
       return { t: 'ping' };
     case 'pong':
