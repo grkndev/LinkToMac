@@ -124,6 +124,7 @@ class ClipForegroundService : Service() {
       onClipReceived = { text ->
         lastWritten = text
         bridge?.write(text)
+        ClipBus.macClip(text, System.currentTimeMillis().toDouble())
         ClipBus.log("relay -> clipboard (${text.length})")
       },
       onStatus = { status, peerOnline, error ->

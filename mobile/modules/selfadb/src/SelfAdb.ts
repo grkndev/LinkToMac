@@ -1,6 +1,6 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import type { RelayEvent, SelfAdbModuleEvents } from './SelfAdb.types';
+import type { ClipEvent, RelayEvent, SelfAdbModuleEvents } from './SelfAdb.types';
 
 /** Boot state returned by autoStart(): drives the JS gate. */
 export type AutoStartState = 'ready' | 'need-pair' | 'need-connect';
@@ -54,6 +54,10 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   requestIgnoreBatteryOptimizations(): Promise<void>;
   /** true if a pairing key already exists on disk. */
   isPaired(): Promise<boolean>;
+  /** retained history of clips received FROM the Mac (newest-first), across the JS-runtime gap. */
+  getClipHistory(): Promise<ClipEvent[]>;
+  /** clear the retained Mac-clip history buffer. */
+  clearClipHistory(): Promise<void>;
   /** snapshot of the in-app log ring buffer (oldest first), retained across the JS gap. */
   getLogs(): Promise<string[]>;
   /** clear the in-app log ring buffer. */

@@ -26,6 +26,8 @@ export type RelayEvent = {
 
 export type SelfAdbModuleEvents = {
   onClip: (event: ClipEvent) => void;
+  /** a clip received FROM the Mac (written to this device's clipboard) */
+  onMacClip: (event: ClipEvent) => void;
   onLog: (event: LogEvent) => void;
   onStatus: (event: StatusEvent) => void;
   onRelay: (event: RelayEvent) => void;

@@ -39,6 +39,7 @@ import {
 } from '@/components/m3';
 import { useIcons, type IconSource } from '@/components/icons';
 import { Spacing } from '@/constants/theme';
+import { useClipHistory } from '@/features/clip-history/use-clip-history';
 import { usePairing } from '@/features/relay/pairing-context';
 import { useRelayStatus } from '@/features/relay/use-relay-status';
 
@@ -58,10 +59,18 @@ export default function HomeScreen() {
   const colors = useM3Colors();
   const icons = useIcons();
   const { pairing } = usePairing();
-  const { relay, lastClip } = useRelayStatus();
+  const { relay } = useRelayStatus();
+  const { items: clipItems } = useClipHistory();
 
   const connected = relay.peerOnline;
   const statusLabel = connected ? 'Connected' : 'Disconnected';
+
+  const latestMacClip = clipItems?.[0]?.text;
+  const clipValue = latestMacClip
+    ? truncate(latestMacClip)
+    : clipItems === null
+      ? ''
+      : 'No items received yet';
 
   return (
     <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>
@@ -135,7 +144,8 @@ export default function HomeScreen() {
             colors={colors}
             icon={icons.clipboard}
             label="Clipboard"
-            value={lastClip ? truncate(lastClip) : 'No items copied yet'}
+            value={clipValue}
+            onClick={() => router.push('/clipboard-history')}
           />
         </Group>
       </Column>
@@ -187,17 +197,19 @@ function InfoRow({
   icon,
   label,
   value,
+  onClick,
   shape = groupShape(true, true),
 }: {
   colors: MaterialColors;
   icon: IconSource;
   label: string;
   value: string;
+  onClick?: () => void;
   shape?: RowShape;
 }) {
   const t = tonal(colors, 'secondary');
   return (
-    <Surface color={colors.surfaceContainerHigh} shape={shape} modifiers={[fillMaxWidth()]}>
+    <Surface color={colors.surfaceContainerHigh} shape={shape} modifiers={[fillMaxWidth()]} onClick={onClick}>
       <ListItem colors={{ containerColor: 'transparent' }} modifiers={[fillMaxWidth()]}>
         <ListItem.LeadingContent>
           <IconCircle source={icon} container={t.container} on={t.on} />

@@ -15,6 +15,7 @@ import java.util.Locale
  */
 object ClipBus {
   @Volatile var onClip: ((String, Double) -> Unit)? = null
+  @Volatile var onMacClip: ((String, Double) -> Unit)? = null
   @Volatile var onLog: ((String) -> Unit)? = null
   @Volatile var onRelay: ((Map<String, Any?>) -> Unit)? = null
 
@@ -33,9 +34,35 @@ object ClipBus {
   private val buffer = ArrayDeque<String>(MAX_LINES)
   private val tsFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
+  /**
+   * In-process ring buffer of clips received FROM the Mac (text + capture ts). Retained for the
+   * lifetime of the process so the clipboard-history UI can show items that arrived before the
+   * JS runtime attached its onMacClip callback (the FGS receives Mac clips even while the app is
+   * swiped away). Bounded; lost on a process restart, by design.
+   */
+  private const val MAX_CLIPS = 100
+  private val clipBuffer = ArrayDeque<Map<String, Any?>>(MAX_CLIPS)
+
   fun clip(text: String, ts: Double) {
     onClip?.invoke(text, ts)
   }
+
+  /** Record + emit a clip received from the Mac. Skips blanks and immediate duplicates. */
+  fun macClip(text: String, ts: Double) {
+    if (text.isEmpty()) return
+    synchronized(clipBuffer) {
+      if (clipBuffer.peekLast()?.get("text") == text) return // dedupe immediate repeat
+      if (clipBuffer.size >= MAX_CLIPS) clipBuffer.pollFirst()
+      clipBuffer.addLast(mapOf("text" to text, "ts" to ts))
+    }
+    onMacClip?.invoke(text, ts)
+  }
+
+  /** Snapshot of received clips, newest-first (matches the UI list order). */
+  fun clipHistory(): List<Map<String, Any?>> =
+    synchronized(clipBuffer) { clipBuffer.toList().asReversed() }
+
+  fun clearClipHistory() = synchronized(clipBuffer) { clipBuffer.clear() }
 
   fun log(msg: String) {
     Log.i("LinkToMac", msg) // always in logcat, even when the app is closed
