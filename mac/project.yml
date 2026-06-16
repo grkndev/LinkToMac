@@ -21,6 +21,11 @@ targets:
   LinkToMac:
     type: application
     platform: macOS
+    # Relay host/port/token come from Config.xcconfig, which optionally includes the
+    # gitignored Secrets.xcconfig (real values). Keeps secrets out of tracked source.
+    configFiles:
+      Debug: Config.xcconfig
+      Release: Config.xcconfig
     sources:
       - path: Sources
     settings:

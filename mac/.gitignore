@@ -5,6 +5,9 @@ LinkToMac.xcodeproj/
 DerivedData/
 build/
 
+# Local relay secrets (host + token) — see Config.xcconfig / Secrets.example.xcconfig
+Secrets.xcconfig
+
 # macOS / Xcode cruft
 .DS_Store
 *.xcuserstate

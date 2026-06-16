@@ -28,5 +28,13 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- Relay endpoint, substituted from build settings (Config.xcconfig / Secrets.xcconfig)
+	     at build time and read by Config.swift. Keeps the host + token out of tracked source. -->
+	<key>RelayHost</key>
+	<string>$(RELAY_HOST)</string>
+	<key>RelayPort</key>
+	<string>$(RELAY_PORT)</string>
+	<key>RelayAuthToken</key>
+	<string>$(RELAY_AUTH_TOKEN)</string>
 </dict>
 </plist>

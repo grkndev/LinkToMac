@@ -1,0 +1,13 @@
+// Relay endpoint build settings, injected into Info.plist (RelayHost / RelayPort /
+// RelayAuthToken) and read at runtime by Config.swift.
+//
+// The values below are PLACEHOLDERS. Put your real host + token in Secrets.xcconfig
+// (gitignored) — the optional include at the bottom overrides these. A fresh checkout
+// without that file still generates + builds, just with non-working placeholders.
+
+RELAY_HOST = YOUR_RELAY_HOST
+RELAY_PORT = 59183
+RELAY_AUTH_TOKEN = YOUR_RELAY_AUTH_TOKEN
+
+// Real secrets live here, out of version control. `?` makes the include optional.
+#include? "Secrets.xcconfig"

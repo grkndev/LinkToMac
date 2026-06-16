@@ -30,7 +30,8 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files (real relay secrets live here; see .env.example)
+.env
 .env*.local
 
 # typescript
