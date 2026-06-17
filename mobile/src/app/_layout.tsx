@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import { useEffect, useMemo } from "react";
 import { StyleSheet, useColorScheme } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import * as SystemUI from "expo-system-ui";
 import {
   Host,
@@ -46,16 +47,18 @@ export default function RootLayout() {
   }, [m3.background]);
 
   return (
-    <ThemeProvider value={navTheme}>
-      <ClipBootProvider>
-        <PairingProvider>
-          <IconsProvider>
-            <StatusBar style="auto" />
-            <RootNavigator background={m3.background} onSurface={m3.onSurface} />
-          </IconsProvider>
-        </PairingProvider>
-      </ClipBootProvider>
-    </ThemeProvider>
+    <KeyboardProvider>
+      <ThemeProvider value={navTheme}>
+        <ClipBootProvider>
+          <PairingProvider>
+            <IconsProvider>
+              <StatusBar style="auto" />
+              <RootNavigator background={m3.background} onSurface={m3.onSurface} />
+            </IconsProvider>
+          </PairingProvider>
+        </ClipBootProvider>
+      </ThemeProvider>
+    </KeyboardProvider>
   );
 }
 

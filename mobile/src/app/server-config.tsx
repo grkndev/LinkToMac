@@ -1,20 +1,12 @@
+import { Host, Switch } from "@expo/ui/jetpack-compose";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, Pressable, StyleSheet, Text, TextInput, useColorScheme, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useM3Colors } from "@/components/m3";
+import { SEED, useM3Colors } from "@/components/m3";
 import { Spacing } from "@/constants/theme";
 import { usePairing } from "@/features/relay/pairing-context";
 import { blankServerConfig } from "@/features/relay/server-config";
@@ -22,13 +14,14 @@ import { blankServerConfig } from "@/features/relay/server-config";
 /**
  * Manual relay server configuration: host / port / password / TLS. Seeds from the saved
  * ServerConfig (which a v2 QR scan can fill in for you) or the defaults, and re-pushes the
- * native relay connection on save. Plain RN form (not an @expo/ui Host) so it can host
- * controlled TextInputs. This screen is also the entry point the future LAN-direct mode reuses
- * (type a local IP, toggle TLS off, or pin a self-signed cert).
+ * native relay connection on save. RN form (controlled TextInputs) with the native Jetpack
+ * Compose Switch for the TLS toggle. This screen is also the entry point the future LAN-direct
+ * mode reuses (type a local IP, toggle TLS off, or pin a self-signed cert).
  */
 export default function ServerConfigScreen() {
   const router = useRouter();
   const colors = useM3Colors();
+  const scheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const { server, setServer } = usePairing();
 
@@ -38,6 +31,13 @@ export default function ServerConfigScreen() {
   const [token, setToken] = useState(initial.token);
   const [secure, setSecure] = useState(initial.secure);
   const [saving, setSaving] = useState(false);
+
+  // Tapping anywhere on the row (or the switch) sets the same target value + haptic, matching
+  // the Settings rows. Both call this with the new value, so a stray double-fire is idempotent.
+  const onSecureChange = (next: boolean) => {
+    setSecure(next);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  };
 
   const onSave = async () => {
     const trimmedHost = host.trim();
@@ -67,17 +67,15 @@ export default function ServerConfigScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
+    <KeyboardAwareScrollView
       style={[styles.root, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      contentContainerStyle={{ padding: Spacing.four, paddingBottom: insets.bottom + Spacing.five, gap: Spacing.four }}
+      keyboardShouldPersistTaps="handled"
+      // Park the focused input this many px above the keyboard (auto-scrolls on focus).
+      bottomOffset={Spacing.three}
     >
-      <ScrollView
-        contentContainerStyle={{ padding: Spacing.four, paddingBottom: insets.bottom + Spacing.five, gap: Spacing.four }}
-        keyboardShouldPersistTaps="handled"
-      >
         <Text style={[styles.intro, { color: colors.onSurfaceVariant }]}>
-          Point the app at your relay server. The password must match the server's
-          RELAY_AUTH_TOKEN. Use TLS (wss://) for any server reachable over the internet.
+          Point the app at your relay server. The password must match the server's password. Use TLS (wss://) for any server reachable over the internet.
         </Text>
 
         <Field label="Server address" hint="Domain (for TLS) or IP" colors={colors}>
@@ -104,7 +102,7 @@ export default function ServerConfigScreen() {
           />
         </Field>
 
-        <Field label="Password" hint="The server's RELAY_AUTH_TOKEN" colors={colors}>
+        <Field label="Password" hint="The server's password" colors={colors}>
           <TextInput
             value={token}
             onChangeText={setToken}
@@ -117,15 +115,23 @@ export default function ServerConfigScreen() {
           />
         </Field>
 
-        <View style={[styles.switchRow, { backgroundColor: colors.surfaceContainerHigh }]}>
+        <Pressable
+          onPress={() => onSecureChange(!secure)}
+          style={({ pressed }) => [
+            styles.switchRow,
+            { backgroundColor: colors.surfaceContainerHigh, opacity: pressed ? 0.9 : 1 },
+          ]}
+        >
           <View style={styles.switchText}>
             <Text style={[styles.switchLabel, { color: colors.onSurface }]}>Use TLS (wss://)</Text>
             <Text style={[styles.hint, { color: colors.onSurfaceVariant }]}>
               Encrypts the connection. Required over the internet; turn off only on a trusted LAN.
             </Text>
           </View>
-          <Switch value={secure} onValueChange={setSecure} />
-        </View>
+          <Host style={styles.switchHost} seedColor={SEED} colorScheme={scheme}>
+            <Switch value={secure} onCheckedChange={onSecureChange} />
+          </Host>
+        </Pressable>
 
         <Pressable
           onPress={onSave}
@@ -134,8 +140,7 @@ export default function ServerConfigScreen() {
         >
           <Text style={[styles.saveText, { color: colors.onPrimary }]}>Save</Text>
         </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollView>
   );
 }
 
@@ -179,6 +184,9 @@ const styles = StyleSheet.create({
   },
   switchText: { flex: 1, gap: Spacing.one },
   switchLabel: { fontSize: 15, fontWeight: "600" },
+  // Fixed-size Host for the native Jetpack Compose Switch (~52x32dp). Fixed (not matchContents)
+  // to avoid the @expo/ui Host NPE when a short-lived screen unmounts mid-measure.
+  switchHost: { width: 56, height: 36, backgroundColor: "transparent" },
   save: {
     borderRadius: 999,
     paddingVertical: Spacing.three,
