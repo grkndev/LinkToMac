@@ -9,7 +9,7 @@ import {
   Surface,
   Shape,
 } from "@expo/ui/jetpack-compose";
-import { AnimatedSplashOverlay } from "@/components/animated-icon";
+
 import { IconsProvider } from "@/components/icons";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -51,7 +51,6 @@ export default function RootLayout() {
         <PairingProvider>
           <IconsProvider>
             <StatusBar style="auto" />
-            <AnimatedSplashOverlay />
             <RootNavigator background={m3.background} onSurface={m3.onSurface} />
           </IconsProvider>
         </PairingProvider>
@@ -109,6 +108,16 @@ function RootNavigator({
             options={{
               headerShown: true,
               headerTitle: "Settings",
+              headerShadowVisible: false,
+              headerStyle: { backgroundColor: background },
+              headerTintColor: onSurface,
+            }}
+          />
+          <Stack.Screen
+            name="server-config"
+            options={{
+              headerShown: true,
+              headerTitle: "Relay server",
               headerShadowVisible: false,
               headerStyle: { backgroundColor: background },
               headerTintColor: onSurface,

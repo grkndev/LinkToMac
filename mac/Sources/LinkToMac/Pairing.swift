@@ -4,7 +4,8 @@ import AppKit
 import CoreImage.CIFilterBuiltins
 
 /// The shared secret established at pairing. `room` is the relay bearer (also the QR's
-/// room); `key` is the 256-bit E2E secret carried for later (unused until crypto lands).
+/// room); `key` is the 256-bit secret the E2E `ClipCodec` (ChaCha20-Poly1305) uses to
+/// encrypt/decrypt clipboard payloads.
 struct Pairing: Codable {
     let room: String // base64(32 random bytes)
     let key: String  // base64(32 random bytes)
@@ -38,12 +39,23 @@ enum PairingStore {
         SecItemDelete(baseQuery() as CFDictionary)
     }
 
-    /// JSON the phone scans: `{"v":1,"room":"...","key":"...","name":"grkn's MacBook Air"}`.
-    /// `name` is this Mac's current computer name, read fresh on every QR render — it is
-    /// not part of the persisted pairing.
+    /// JSON the phone scans (v2): `{"v":2,"room","key","name","host","port","secure","token"}`.
+    /// `name` is this Mac's current computer name, read fresh on every QR render. The relay
+    /// endpoint + password (`host`/`port`/`secure`/`token`, from `Config`) ride along so the
+    /// phone auto-configures the server on scan — the QR already carries the E2E `key`, so
+    /// adding the token doesn't widen its exposure. The phone still accepts legacy v1 payloads.
     static func qrPayload(_ pairing: Pairing) -> String {
         let name = Host.current().localizedName ?? "Mac"
-        let payload = QRPayload(v: 1, room: pairing.room, key: pairing.key, name: name)
+        let payload = QRPayload(
+            v: 2,
+            room: pairing.room,
+            key: pairing.key,
+            name: name,
+            host: Config.host,
+            port: Config.port,
+            secure: Config.secure,
+            token: Config.authToken
+        )
         let data = (try? JSONEncoder().encode(payload)) ?? Data()
         return String(decoding: data, as: UTF8.self)
     }
@@ -53,6 +65,10 @@ enum PairingStore {
         let room: String
         let key: String
         let name: String
+        let host: String
+        let port: Int
+        let secure: Bool
+        let token: String
     }
 
     private static func randomBase64(_ count: Int) -> String {

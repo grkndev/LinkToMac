@@ -13,6 +13,7 @@ struct LinkToMacApp: App {
                 client: delegate.client,
                 proximity: delegate.proximity,
                 onShowPairing: delegate.showPairingWindow,
+                onShowServerSettings: delegate.showServerSettingsWindow,
             )
         } label: {
             Image(systemName: delegate.client.menuBarSymbol)
@@ -28,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// BLE presence watcher; self-gates on its persisted `enabled`, so this is cheap when off.
     let proximity = ProximityMonitor()
     private var pairingWindow: NSWindow?
+    private var serverSettingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         client.connect()
@@ -48,5 +50,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         pairingWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Lazily build and front the runtime relay configuration window (host/port/TLS/password).
+    func showServerSettingsWindow() {
+        if serverSettingsWindow == nil {
+            let hosting = NSHostingController(
+                rootView: ServerSettingsView(client: client) { [weak self] in
+                    self?.serverSettingsWindow?.close()
+                }
+            )
+            hosting.sizingOptions = [.preferredContentSize]
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "LinkToMac — Server Settings"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            serverSettingsWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        serverSettingsWindow?.makeKeyAndOrderFront(nil)
     }
 }

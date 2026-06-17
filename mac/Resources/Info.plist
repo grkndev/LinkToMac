@@ -22,19 +22,12 @@
 	<!-- Bluetooth: scan for the phone's presence beacon to auto-lock when it leaves. -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>LinkToMac scans for your paired phone over Bluetooth to lock this Mac when you walk away.</string>
-	<!-- Allow cleartext ws:// to localhost / local network for the dev relay. -->
+	<!-- Allow cleartext ws:// to a LAN/dev relay. The relay endpoint itself (host/port/TLS/
+	     password) is configured at runtime in the "Server Settings…" window — not baked in. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<!-- Relay endpoint, substituted from build settings (Config.xcconfig / Secrets.xcconfig)
-	     at build time and read by Config.swift. Keeps the host + token out of tracked source. -->
-	<key>RelayHost</key>
-	<string>$(RELAY_HOST)</string>
-	<key>RelayPort</key>
-	<string>$(RELAY_PORT)</string>
-	<key>RelayAuthToken</key>
-	<string>$(RELAY_AUTH_TOKEN)</string>
 </dict>
 </plist>

@@ -11,6 +11,7 @@ struct MenuPanel: View {
     let client: RelayClient
     let proximity: ProximityMonitor
     let onShowPairing: () -> Void
+    let onShowServerSettings: () -> Void
 
     private var deviceName: String { Host.current().localizedName ?? "This Mac" }
 
@@ -118,6 +119,8 @@ struct MenuPanel: View {
             SectionTitle("GENERAL")
             Card {
                 ButtonRow(icon: "qrcode", title: "Pairing QR…", showsChevron: true, action: onShowPairing)
+                RowDivider()
+                ButtonRow(icon: "server.rack", title: "Server Settings…", showsChevron: true, action: onShowServerSettings)
                 RowDivider()
                 ButtonRow(
                     icon: client.isActive ? "bolt.horizontal.fill" : "bolt.horizontal",

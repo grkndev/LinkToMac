@@ -23,7 +23,7 @@ final class RelayClient {
     private(set) var peerOnline = false
     private(set) var lastError: String?
 
-    /// Most recent clipboard text received from the peer (decoded; no crypto yet).
+    /// Most recent clipboard text received from the peer (decrypted via `ClipCodec`).
     private(set) var lastClip: String?
 
     /// Generated once and persisted; the room we join and show as a QR for the phone.
@@ -84,15 +84,27 @@ final class RelayClient {
         lastError = nil
     }
 
-    /// Encode + send local clipboard text to the peer. No-op if the socket isn't open.
+    /// Encrypt + send local clipboard text to the peer. No-op if the socket isn't open or the
+    /// pairing key is malformed (fail closed — never fall back to sending plaintext).
     func sendClip(_ text: String) {
         guard !text.isEmpty else { return }
-        let (nonce, ct) = ClipCodec.encode(text)
+        guard let (nonce, ct) = ClipCodec.encode(text, keyBase64: pairing.key) else {
+            log("encrypt failed (bad pairing key); not sending")
+            return
+        }
         Task { [weak self] in try? await self?.send(.clip(nonce: nonce, ct: ct)) }
     }
 
     func toggle() {
         shouldStay ? disconnect() : connect()
+    }
+
+    /// Re-open the socket to pick up changed Server Settings (host/port/secure/token). No-op if
+    /// the user isn't currently connected; otherwise tears down and reconnects with fresh config.
+    func reconnect() {
+        guard shouldStay else { return }
+        reconnectAttempt = 0
+        openSocket()
     }
 
     /// Forget the current pairing: drop the connection, delete the Keychain secret, and
@@ -111,6 +123,15 @@ final class RelayClient {
     // MARK: - Socket lifecycle
 
     private func openSocket() {
+        // No baked-in endpoint: stay idle (no reconnect loop) until the user sets a server.
+        guard !Config.host.isEmpty else {
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            teardown()
+            status = .error("not configured")
+            lastError = "Set the relay server in Server Settings…"
+            return
+        }
         reconnectTask?.cancel()
         reconnectTask = nil
         teardown()
@@ -123,6 +144,9 @@ final class RelayClient {
         var request = URLRequest(url: Config.relayURL)
         request.setValue("Bearer \(Config.authToken)", forHTTPHeaderField: "Authorization")
 
+        // `wss://` with a publicly-trusted (Let's Encrypt) cert works out of the box. For the
+        // future LAN-direct mode (self-signed cert on the Mac), pin it via a URLSessionDelegate
+        // `urlSession(_:didReceive:completionHandler:)` trust callback built from the QR fingerprint.
         let session = URLSession(configuration: .default)
         let task = session.webSocketTask(with: request)
         self.session = session
@@ -225,14 +249,15 @@ final class RelayClient {
             status = .error(code)
             lastError = message
             log("relay error: \(code) \(message)")
-        case let .clip(_, ct):
-            // Placeholder codec: ct is base64(utf8(text)); nonce ignored until crypto lands.
-            if let text = ClipCodec.decode(ct: ct) {
+        case let .clip(nonce, ct):
+            // ChaCha20-Poly1305, keyed by the pairing secret. Drops anything that fails to
+            // authenticate (corrupt, tampered, or a key mismatch after a re-pair).
+            if let text = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
                 pasteboard?.write(text)
                 lastClip = text
                 log("clip received (\(text.count) chars)")
             } else {
-                log("clip with undecodable ct")
+                log("clip decrypt failed (key mismatch or corrupt)")
             }
         case let .cmd(action):
             handleCommand(action)

@@ -14,8 +14,8 @@ export default function QrScanScreen() {
 
   return (
     <PairScanner
-      onPaired={async (pairing) => {
-        await setPairing(pairing);
+      onPaired={async ({ pairing, server }) => {
+        await setPairing(pairing, server);
         router.replace('/');
       }}
       onCancel={() => router.back()}

@@ -8,14 +8,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 
-import { parsePairingQR, type Pairing } from './pairing-store';
+import { parsePairingQR, type PairingScan } from './pairing-store';
 
-/** Full-screen QR scanner that resolves a valid pairing from the Mac's QR. */
+/** Full-screen QR scanner that resolves a valid pairing (+ optional server config) from the Mac's QR. */
 export function PairScanner({
   onPaired,
   onCancel,
 }: {
-  onPaired: (pairing: Pairing) => void;
+  onPaired: (scan: PairingScan) => void;
   onCancel: () => void;
 }) {
   const [permission, requestPermission] = useCameraPermissions();
@@ -25,7 +25,7 @@ export function PairScanner({
     return (
       <Centered>
         <ThemedText type="small" themeColor="textSecondary">
-          Kamera hazırlanıyor…
+          Camera is preparing…
         </ThemedText>
       </Centered>
     );
@@ -34,12 +34,17 @@ export function PairScanner({
   if (!permission.granted) {
     return (
       <Centered>
-        <ThemedText type="smallBold">Kamera izni gerekli</ThemedText>
+        <ThemedText type="smallBold">Camera permission required</ThemedText>
         <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-          QR kodunu okutmak için kamera erişimi ver.
+          QR code scanning requires camera access.
         </ThemedText>
-        <Button title="İzin ver" onPress={requestPermission} />
-        <Button title="İptal" onPress={onCancel} />
+        <Pressable onPress={requestPermission} className='bg-blue-500 w-full py-3 rounded-full items-center'>
+          <Text className='text-white'>Grant Permission</Text>
+        </Pressable>
+        <Pressable onPress={onCancel} className='bg-gray-500 w-full py-3 rounded-full items-center'>
+          <Text className='text-white'>Cancel</Text>
+        </Pressable>
+
       </Centered>
     );
   }
@@ -52,10 +57,10 @@ export function PairScanner({
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         onBarcodeScanned={({ data }) => {
           if (handled.current) return;
-          const pairing = parsePairingQR(data);
-          if (!pairing) return; // ignore non-pairing QR codes
+          const scan = parsePairingQR(data);
+          if (!scan) return; // ignore non-pairing QR codes
           handled.current = true;
-          onPaired(pairing);
+          onPaired(scan);
         }}
       />
       <SafeAreaView edges={['bottom']} style={styles.footer}>

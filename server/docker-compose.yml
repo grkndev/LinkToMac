@@ -5,11 +5,27 @@ services:
     container_name: linktomac-relay
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "${PORT:-8080}:${PORT:-8080}"
+    # No published host port: the relay is NOT reachable from the public internet. It lives only
+    # on the shared reverse-proxy network and is reached by container name (linktomac-relay:$PORT).
+    # nginx-proxy-manager (on the same network) terminates TLS and proxies wss:// -> ws:// to it.
+    # `expose` just documents the internal port; it does not publish to the host.
+    expose:
+      - "${PORT:-8080}"
+    # To debug the relay directly without exposing it publicly, temporarily publish to loopback:
+    #   ports:
+    #     - "127.0.0.1:${PORT:-8080}:${PORT:-8080}"
+    networks:
+      - shared-db
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${PORT:-8080}/health >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 5s
+
+networks:
+  # Shared with nginx-proxy-manager so it can reach the relay by name. The network is created by
+  # the NPM stack; `external: true` makes compose attach to it instead of creating its own.
+  # The name must match `docker network ls` (here: shared-db).
+  shared-db:
+    external: true

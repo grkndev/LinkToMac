@@ -26,10 +26,15 @@ class RelayClient(
   private val url: String,
   private val token: String,
   private val room: String,
+  /** 32-byte pairing secret (base64) for the E2E ClipCodec. */
+  private val key: String,
   private val onClipReceived: (String) -> Unit,
   private val onStatus: (status: String, peerOnline: Boolean, error: String?) -> Unit,
   private val log: (String) -> Unit,
 ) {
+  // `wss://` with a publicly-trusted (Let's Encrypt) cert works out of the box. For the future
+  // LAN-direct mode (self-signed cert on the Mac), pin it here via a CertificatePinner / custom
+  // trust manager built from the QR's `certFingerprint`.
   private val http = OkHttpClient.Builder()
     .pingInterval(20, TimeUnit.SECONDS)
     .build()
@@ -79,8 +84,13 @@ class RelayClient(
 
   fun sendClip(text: String) {
     if (text.isEmpty()) return
-    val (nonce, ct) = ClipCodec.encode(text)
-    val msg = JSONObject().put("t", "clip").put("nonce", nonce).put("ct", ct)
+    // Fail closed: never send plaintext if the pairing key is malformed.
+    val enc = ClipCodec.encode(text, key)
+    if (enc == null) {
+      log("encrypt failed (bad pairing key); not sending")
+      return
+    }
+    val msg = JSONObject().put("t", "clip").put("nonce", enc.first).put("ct", enc.second)
     ws?.send(msg.toString())
   }
 
@@ -150,8 +160,8 @@ class RelayClient(
       }
       "error" -> onStatus("error", peerOnline, o.optString("code") + ": " + o.optString("message"))
       "clip" -> {
-        val decoded = ClipCodec.decode(o.optString("ct"))
-        if (decoded != null) onClipReceived(decoded)
+        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
+        if (decoded != null) onClipReceived(decoded) else log("clip decrypt failed (key mismatch or corrupt)")
       }
       "pong" -> {}
     }

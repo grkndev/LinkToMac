@@ -72,23 +72,32 @@ A `clip` is forwarded to the *other* peer only — the sender never receives its
 
 ## Docker
 
+The relay runs behind a reverse proxy on a **shared Docker network** and does **not** publish
+a host port — only the proxy can reach it (by container name `linktomac-relay:$PORT`).
+
 ```bash
 cd server
-cp .env.example .env          # set a real RELAY_AUTH_TOKEN
+cp .env.example .env          # set a real RELAY_AUTH_TOKEN (and PORT if not 8080)
+# `shared-db` is the proxy's network and must already exist:
+docker network ls | grep shared-db || docker network create shared-db
 docker compose up -d --build
 docker compose ps             # STATUS should become "healthy"
 docker compose logs -f relay
 docker compose down           # graceful shutdown (SIGTERM)
 ```
 
-The container serves **plain `ws`**. TLS is terminated by your existing reverse proxy.
+In **nginx-proxy-manager**, add a Proxy Host: forward to **`linktomac-relay`** : **`$PORT`**,
+scheme **`http`**, **Websockets support ON**, request a Let's Encrypt cert. The container serves
+**plain `ws`**; the proxy terminates TLS, so clients connect to `wss://<your-domain>/ws`.
+(The relay's network name in `docker-compose.yml` must match the proxy's — here `shared-db`.)
 
 ## Behind a reverse proxy (VPS, wss)
 
 The relay needs the proxy to forward the WebSocket `Upgrade`. The public endpoint
 becomes `wss://<your-domain>/ws`.
 
-**Caddy** (automatic Let's Encrypt):
+**Caddy** (automatic Let's Encrypt) — a ready-to-edit [`./Caddyfile`](./Caddyfile) is
+committed; replace the domain and run `caddy run --config ./Caddyfile`:
 
 ```caddy
 relay.example.com {
@@ -97,6 +106,15 @@ relay.example.com {
 ```
 
 Caddy forwards WebSocket upgrades automatically — no extra config needed.
+
+**In the app:** set `host = relay.example.com`, `port = 443`, **TLS on** (Mac:
+`RELAY_SECURE = true` in `Secrets.xcconfig`). The Mac embeds host/port/TLS/password into the
+pairing QR, so the phone auto-fills the server config on scan (it's also editable under
+Settings → Relay server).
+
+> **LAN-direct (future):** a Let's Encrypt cert can't be issued for a private LAN IP. That mode
+> will instead pin a **self-signed** cert via the QR (the app's `certFingerprint` field), using
+> the same `wss://` path — no public domain required.
 
 **Nginx:**
 
@@ -115,7 +133,9 @@ location /ws {
 
 - The relay is a dumb pipe: `nonce`/`ct` are **never** parsed or logged. Clipboard
   content is end-to-end encrypted by the Android/Mac clients (libsodium secretbox).
-- `roomId` is an unguessable 256-bit bearer; `RELAY_AUTH_TOKEN` adds a second gate so
-  strangers can't open sockets against your VPS.
+- `roomId` is an unguessable 256-bit bearer; `RELAY_AUTH_TOKEN` is the operator-defined
+  **relay password** — a second gate so strangers can't open sockets against your VPS. The
+  clients no longer bake it in: the Mac reads it from `Secrets.xcconfig` and ships it to the
+  phone in the pairing QR (and it's editable in the app), so each operator sets their own.
 - Per-room cap (2), per-connection rate limit, 256 KB payload cap, ws-level heartbeat
   with dead-connection cleanup, and slow-consumer backpressure handling.

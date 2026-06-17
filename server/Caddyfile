@@ -1,0 +1,25 @@
+# LinkToMac relay — TLS termination + WebSocket reverse proxy.
+#
+# Caddy automatically provisions and renews a Let's Encrypt certificate for the domain below,
+# then proxies traffic to the relay, which keeps listening plain `ws://` behind it. Clients
+# (phone + Mac) connect over `wss://` so the relay password and `cmd` frames aren't sniffable.
+#
+# WHY a domain (not a bare IP): a publicly-trusted (Let's Encrypt) cert can only be issued for
+# a domain name, not a raw IP. The future LAN-direct mode can't use this — it will pin a
+# self-signed cert via the QR (`certFingerprint`) instead. See ../docs / the app's ServerConfig.
+#
+# Usage:
+#   1. Point a DNS A/AAAA record for relay.example.com at this host (ports 80 + 443 open).
+#   2. Replace relay.example.com below with your domain; match the upstream to your PORT.
+#   3. Run Caddy on the host:        caddy run --config ./Caddyfile
+#      ...or alongside the relay in Docker (see server/README.md "TLS / wss://").
+#
+# In the app, set: host=relay.example.com, port=443, TLS on. (443 is the wss:// default.)
+
+relay.example.com {
+	# Caddy proxies WebSocket upgrades transparently. Point this at the relay:
+	#   - host-run relay:   localhost:8080
+	#   - docker compose:   relay:8080   (same compose network; service name `relay`)
+	# Keep the port in sync with PORT in server/.env (default 8080).
+	reverse_proxy localhost:8080
+}

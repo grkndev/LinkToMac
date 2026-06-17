@@ -4,12 +4,21 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import SelfAdb from '@/features/selfadb/client';
 
 import { clearPairing, loadPairing, savePairing, type Pairing } from './pairing-store';
-import { RELAY_TOKEN, relayUrl } from './relay-config';
+import {
+  clearServerConfig,
+  loadServerConfig,
+  saveServerConfig,
+  serverWsUrl,
+  type ServerConfig,
+} from './server-config';
 
 type PairingContextValue = {
   /** undefined while the SecureStore load is in flight. */
   pairing: Pairing | null | undefined;
-  setPairing: (pairing: Pairing) => Promise<void>;
+  /** Persisted relay server config; null when none saved yet (falls back to defaults). */
+  server: ServerConfig | null | undefined;
+  setPairing: (pairing: Pairing, server?: ServerConfig | null) => Promise<void>;
+  setServer: (server: ServerConfig) => Promise<void>;
   unpair: () => Promise<void>;
   paused: boolean;
   setPaused: (paused: boolean) => void;
@@ -18,14 +27,17 @@ type PairingContextValue = {
 const PairingContext = createContext<PairingContextValue | null>(null);
 
 /**
- * Single reactive source of truth for the Mac pairing. Seeds from SecureStore and
- * pushes the relay config (url/token/room/name) to the native foreground service
- * whenever a pairing exists — that covers both app launch (refreshing the
- * dev-server-derived Mac IP) and a fresh QR scan. The root layout's route guards
- * key off `pairing`, so setPairing/unpair flip the visible screen automatically.
+ * Single reactive source of truth for the Mac pairing + relay server config. Seeds both from
+ * SecureStore and pushes the relay config (url/token/room/name) to the native foreground
+ * service whenever a pairing AND a saved ServerConfig both exist — covering app launch, a
+ * fresh QR scan (v2 carries the server config), and a manual server-config edit in Settings.
+ * There is no baked-in fallback: paired-but-unconfigured stays idle until the user sets the
+ * server. The root layout's route guards key off `pairing`, so setPairing/unpair flip the
+ * visible screen automatically.
  */
 export function PairingProvider({ children }: { children: ReactNode }) {
   const [pairing, setPairingState] = useState<Pairing | null | undefined>(undefined);
+  const [server, setServerState] = useState<ServerConfig | null | undefined>(undefined);
   const [paused, setPausedState] = useState(false);
 
   useEffect(() => {
@@ -35,24 +47,42 @@ export function PairingProvider({ children }: { children: ReactNode }) {
     loadPairing()
       .then(setPairingState)
       .catch(() => setPairingState(null));
+    loadServerConfig()
+      .then(setServerState)
+      .catch(() => setServerState(null));
     // Seed the send gate from the persisted native value so it survives app/service restarts.
     SelfAdb.relayIsSendPaused().then(setPausedState).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!pairing) return;
-    SelfAdb.setRelay(relayUrl(), RELAY_TOKEN, pairing.room, pairing.name ?? null).catch(() => {});
-  }, [pairing]);
+    // No baked-in server: connect only once a ServerConfig has been saved (from a v2 QR scan or
+    // Settings -> Relay server). `undefined` = still loading; `null` = paired but unconfigured
+    // (e.g. a legacy v1 QR) -> stay idle until the user sets the server.
+    if (!server) return;
+    SelfAdb.setRelay(serverWsUrl(server), server.token, pairing.room, pairing.key, pairing.name ?? null).catch(() => {});
+  }, [pairing, server]);
 
-  const setPairing = useCallback(async (next: Pairing) => {
+  const setPairing = useCallback(async (next: Pairing, nextServer?: ServerConfig | null) => {
     await savePairing(next);
+    if (nextServer) {
+      await saveServerConfig(nextServer);
+      setServerState(nextServer);
+    }
     setPairingState(next);
+  }, []);
+
+  const setServer = useCallback(async (next: ServerConfig) => {
+    await saveServerConfig(next);
+    setServerState(next);
   }, []);
 
   const unpair = useCallback(async () => {
     await clearPairing();
+    await clearServerConfig();
     await SelfAdb.clearRelay().catch(() => {});
     setPairingState(null);
+    setServerState(null);
     setPausedState(false);
   }, []);
 
@@ -62,8 +92,8 @@ export function PairingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ pairing, setPairing, unpair, paused, setPaused }),
-    [pairing, setPairing, unpair, paused, setPaused],
+    () => ({ pairing, server, setPairing, setServer, unpair, paused, setPaused }),
+    [pairing, server, setPairing, setServer, unpair, paused, setPaused],
   );
 
   return <PairingContext.Provider value={value}>{children}</PairingContext.Provider>;

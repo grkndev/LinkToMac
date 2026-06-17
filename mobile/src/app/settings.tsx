@@ -194,6 +194,13 @@ export default function SettingsScreen() {
           )}
           <ActionRow
             colors={colors}
+            icon={icons.cast}
+            label="Relay server"
+            hint="Set the server address, port and password."
+            onPress={() => router.push("/server-config")}
+          />
+          <ActionRow
+            colors={colors}
             icon={icons.qr}
             label="Re-pair (Scan QR)"
             hint="Scan the Pairing QR from your Mac."
