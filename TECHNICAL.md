@@ -64,7 +64,7 @@ completely independent — it works with no internet at all.
 |---|---|---|
 | `server/` | Node ≥ 20, TypeScript (ESM) | `ws`, `pino`, `dotenv` |
 | `mac/` | Swift 6 (strict concurrency), SwiftUI | AppKit, CoreBluetooth, CryptoKit, Security, ServiceManagement — all system frameworks, **no third-party deps** |
-| `mobile/` (JS) | Expo SDK 56, React Native 0.85, Expo Router, React 19 | `expo-secure-store`, `expo-camera`, `uniwind` |
+| `mobile/` (JS) | Expo SDK 56, React Native 0.85, Expo Router, React 19 | `expo-secure-store`, `expo-camera`, `react-native-keyboard-controller`, `uniwind` |
 | `mobile/modules/selfadb` (native) | Kotlin (Expo Module) | `libadb-android` 3.1.1, BouncyCastle, Conscrypt, OkHttp 4.12 |
 | `clipboard-agent` | Java → dex | none (reflects into framework `IClipboard`) |
 
@@ -77,9 +77,9 @@ between them. It never stores anything and never inspects clipboard content.
 
 ### Connection lifecycle
 
-1. Client connects to `ws://host:PORT/ws`, authenticated by a `RELAY_AUTH_TOKEN` passed as
-   `Authorization: Bearer <token>` or `?token=`. The check uses `crypto.timingSafeEqual`
-   (`server/src/index.ts`).
+1. Client connects to `ws(s)://host:PORT/ws`, authenticated by a `RELAY_AUTH_TOKEN` (the
+   operator-defined relay password) passed as `Authorization: Bearer <token>` or `?token=`.
+   The check uses `crypto.timingSafeEqual` (`server/src/index.ts`).
 2. The first frame **must** be `join` (a `JOIN_TIMEOUT_MS`, default 10 s, drops silent
    sockets). `join` carries `{ room, device }` where `device` is `"android"` or `"mac"`.
 3. The relay keeps an in-memory `Map<roomId, Map<device, Conn>>`. A room is capped at
@@ -114,13 +114,17 @@ between them. It never stores anything and never inspects clipboard content.
 
 Ships as a Docker image (`server/Dockerfile`, `docker-compose.yml`) serving **plain `ws`**.
 TLS (`wss`) is terminated by a reverse proxy — the README shows Caddy (automatic Let's
-Encrypt) and Nginx configs. Public endpoint becomes `wss://<domain>/ws`.
+Encrypt) and Nginx configs; nginx-proxy-manager works too. Public endpoint becomes
+`wss://<domain>/ws`. The compose file attaches the relay to the proxy's shared Docker network
+and **publishes no host port**, so only the reverse proxy can reach it.
 
-> **Current reality:** both clients connect over plain `ws://` (not `wss://`). The host +
-> bearer token are **not** in tracked source: the Mac reads them from `Config.xcconfig` →
-> `Secrets.xcconfig` (gitignored) → Info.plist → `Config.swift`, and the phone reads them
-> from a gitignored `.env` via `app.config.ts` → `expoConfig.extra` → `relay-config.ts`.
-> Productionizing means moving to `wss://`; the secret-injection seam is already in place.
+> **Runtime-configured endpoint (no baked-in secrets).** The relay address, port, TLS, and
+> password are entered at runtime and carried in the pairing QR — nothing is injected at build
+> time. The Mac stores them via **Server Settings…** (`ServerSettings.swift`: UserDefaults +
+> Keychain) and embeds them in the QR; the phone reads them from the QR (or **Settings → Relay
+> server**) into a `ServerConfig` (`server-config.ts`, SecureStore). A `secure` flag selects
+> `ws://` vs `wss://`. Only the server still keeps an env file (`server/.env`) for its
+> `RELAY_AUTH_TOKEN` / `HOST` / `PORT`.
 
 ---
 
@@ -300,9 +304,11 @@ without a Developer team.
 | `ClipCodec.swift` | E2E clip encryption — ChaCha20-Poly1305 (CryptoKit) |
 | `ProximityMonitor.swift` | CoreBluetooth central; RSSI → lock decision |
 | `ScreenLock.swift` | Locks the screen |
-| `Pairing.swift` | Room/key generation, Keychain, QR rendering |
+| `Pairing.swift` | Room/key generation, Keychain, QR rendering (v2 also embeds the server config) |
+| `ServerSettings.swift` | Runtime relay endpoint store — host/port/TLS in `UserDefaults`, password in Keychain |
+| `ServerSettingsView.swift` | "Server Settings…" window (host / port / TLS / password) |
 | `LoginItem.swift` | `SMAppService` auto-start at login |
-| `MenuPanel.swift` / `PairingView.swift` | UI |
+| `MenuPanel.swift` / `PairingView.swift` | UI (menu: Pairing QR + Server Settings) |
 
 ### 4.1 RelayClient (Swift)
 
@@ -311,7 +317,10 @@ to a replaced socket bail out instead of corrupting current state — important 
 receive/heartbeat run as detached `Task`s. App-level ping every 25 s; exponential backoff
 reconnect capped at 30 s. Joins as `"mac"`. On a received `clip` it writes to the pasteboard;
 on a `cmd` it dispatches to a handler (currently only `"lock"`). A persisted `sendToAndroid`
-flag is the Mac-side equivalent of the phone's pause toggle.
+flag is the Mac-side equivalent of the phone's pause toggle. The endpoint comes from
+`ServerSettingsStore`, so it stays **idle until configured** rather than dialing a placeholder;
+`reconnect()` re-dials on a Server Settings change, and `wss://` is used when the `secure`
+flag is set.
 
 ### 4.2 Clipboard watching + echo suppression
 
@@ -447,14 +456,18 @@ generates:
 - `room` — base64 of 32 random bytes; the relay bearer / room id.
 - `key` — base64 of 32 random bytes; the E2E secret the `ClipCodec` (ChaCha20-Poly1305) keys on.
 
-Both are stored in the macOS **Keychain** (generic-password item). The Mac shows a QR encoding
-`{"v":1,"room":"…","key":"…","name":"<computer name>"}` via CoreImage's `CIQRCodeGenerator`
-(`Pairing.swift`).
+Both are stored in the macOS **Keychain** (generic-password item). The Mac shows a **v2** QR
+encoding `{"v":2,"room":"…","key":"…","name":"<computer name>","host":"…","port":…,
+"secure":true,"token":"…"}` via CoreImage's `CIQRCodeGenerator` (`Pairing.swift`) — it carries
+both the pairing *and* the relay endpoint + password, so one scan fully configures the phone.
+(Legacy v1 QRs without the server fields are still accepted; the phone then keeps its existing
+server config.)
 
-The phone scans it with `expo-camera`, validates it (`parsePairingQR`), and stores it in
-**`expo-secure-store`** (Android Keystore-backed). The room/token are then pushed into the
-native service via `setRelay`, which persists them to `SharedPreferences` so the
-`START_STICKY` service can reconnect without JS.
+The phone scans it with `expo-camera`, validates it (`parsePairingQR`), and stores the pairing
+plus the server config in two **`expo-secure-store`** entries (Android Keystore-backed). The
+derived URL (`ws(s)://host:port/ws`) + token + room/key are then pushed into the native service
+via `setRelay`, which persists them to `SharedPreferences` so the `START_STICKY` service can
+reconnect without JS.
 
 **Unpair** on the Mac deletes the Keychain item, mints a fresh room/key, and reconnects into
 the new (empty) room — leaving the old phone stranded in the abandoned room. The rotated room
@@ -476,8 +489,11 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   12-byte nonce per message; the relay sees only `nonce` + ciphertext. **Fails closed:** a
   tampered or wrong-key frame fails the Poly1305 tag and is dropped, never written to a clipboard.
 - The relay is a dumb pipe: it never stores content and never parses `nonce`/`ct`.
-- `roomId` is an unguessable 256-bit bearer; `RELAY_AUTH_TOKEN` is a second gate so strangers
-  can't even open sockets. Per-room cap of 2, rate limiting, and payload caps limit abuse.
+- `roomId` is an unguessable 256-bit bearer; the **operator-defined relay password**
+  (`RELAY_AUTH_TOKEN`) is a second gate so strangers can't even open sockets. It is no longer
+  baked into the build — the Mac operator sets it and it rides in the pairing QR (acceptable,
+  since the QR already carries the more-sensitive E2E key) or is typed into the app. Per-room
+  cap of 2, rate limiting, and payload caps limit abuse.
 - Secrets live in the platform secure stores (Keychain / Keystore-backed SecureStore).
 - Proximity is BLE-only and never touches the network.
 - Remote lock uses no entitlement and can't *unlock*.
@@ -488,12 +504,15 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   re-pair) and there's no per-message sequence number, so a captured ciphertext could in
   principle be re-injected by someone who can write to the relay. Low impact for a clipboard
   (last-writer-wins, and the bearer `roomId` + auth token gate relay access), but noted.
-- 🟠 **Transport is plain `ws`.** Both clients use `ws://<host>:<port>`, not `wss://`. TLS
-  exists only if you put the relay behind the documented reverse proxy and repoint the clients.
-- 🟢 **Relay host + token are out of tracked source.** They're injected at build time from
-  gitignored files (`mac/Secrets.xcconfig`, `mobile/.env`) — see §12. Rotating the token is a
-  one-line change in those files plus `server/.env`. Note the *old* token still lives in git
-  history, so a rotation is only complete once the relay restarts with the new one.
+- 🟢 **Transport supports `wss`.** A per-server `secure` flag selects `wss://` vs `ws://`:
+  point the app at a domain behind a TLS-terminating reverse proxy (Let's Encrypt) and toggle
+  TLS on. `ws://` remains available for a trusted LAN. Once TLS is on, the relay password and
+  `cmd` frames travel inside the encrypted tunnel.
+- 🟢 **No secrets baked into the build.** The relay address, password, and TLS setting are
+  configured at runtime (Mac **Server Settings…** → `UserDefaults`/Keychain; phone **Settings →
+  Relay server** / pairing QR → SecureStore). Only `server/.env` holds the server's
+  `RELAY_AUTH_TOKEN`. Rotating the password means updating `server/.env` and re-scanning the QR
+  (or re-entering it in the app); nothing sensitive sits in tracked source.
 - 🟠 **Wireless Debugging is a device-wide loosening.** Any client on the network holding an
   authorized key can reach adbd. Mitigation here is that it's your own device and the only
   trusted key lives in the app; the app turns Wireless Debugging back *off* after deploying.
@@ -516,29 +535,28 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 
 ## 12. Build & run
 
-Each component reads its relay host + token from a **gitignored** secret file you create once
-from a committed template:
+Only the **relay** keeps a secret file; the Mac and phone are configured at runtime, so a
+fresh checkout builds and runs with nothing to fill in — you just enter the server in the app.
 
-| Component | Secret file (gitignored) | Template |
+| Component | Config | Where |
 |---|---|---|
-| Relay | `server/.env` | `server/.env.example` |
-| Mac | `mac/Secrets.xcconfig` | `mac/Secrets.example.xcconfig` |
-| Android | `mobile/.env` | `mobile/.env.example` |
+| Relay | `server/.env` (gitignored, from `server/.env.example`) | `RELAY_AUTH_TOKEN` (the relay password, `openssl rand -hex 32`), `HOST`, `PORT` |
+| Mac | **Server Settings…** window | host/port/TLS in `UserDefaults`, password in Keychain (`ServerSettings.swift`) |
+| Android | **Settings → Relay server**, or the pairing QR | `ServerConfig` in SecureStore (`server-config.ts`) |
 
-All three carry the same `RELAY_AUTH_TOKEN` (generate with `openssl rand -hex 32`). The Mac
-flows it through `Config.xcconfig` → Info.plist → `Config.swift`; the phone through
-`app.config.ts` → `expoConfig.extra` → `relay-config.ts`. A fresh checkout still generates and
-builds without the secret files — it just connects with non-working placeholders.
+The Mac embeds its endpoint + password in the pairing QR, so scanning it configures the phone
+in one step. The relay's `RELAY_AUTH_TOKEN` must match the password you set on the Mac/phone.
 
 | Component | Command |
 |---|---|
 | Relay | `cd server && cp .env.example .env && npm install && npm run dev` (or `docker compose up -d`) |
-| Mac | `cd mac && cp Secrets.example.xcconfig Secrets.xcconfig && xcodegen generate && open LinkToMac.xcodeproj` → Run |
-| Android | `cd mobile && cp .env.example .env && bun install && npx expo run:android` (custom native module → **no Expo Go**) |
+| Mac | `cd mac && xcodegen generate && open LinkToMac.xcodeproj` → Run, then set **Server Settings…** |
+| Android | `cd mobile && bun install && npx expo run:android` (custom native module → **no Expo Go**) |
 | Clipboard agent | rebuild dex with `native-src/clipboard-agent/build-dex.sh` only if `ClipboardAgent.java` changes |
 
-First run: show the pairing QR from the Mac's menu bar, scan it on the phone, open Android's
-*Pair device with pairing code* dialog, and enter the 6-digit code once.
+First run: enter your relay in the Mac's **Server Settings…**, show the pairing QR, scan it on
+the phone (the QR carries the server config, so the phone is configured in one scan), then open
+Android's *Pair device with pairing code* dialog and enter the 6-digit code once.
 
 ---
 
@@ -546,9 +564,11 @@ First run: show the pairing QR from the Mac's menu bar, scan it on the phone, op
 
 v1 links **one phone and one Mac** and syncs **text only** (images/files out of scope; the
 256 KB payload cap reflects that). Implemented: two-way clipboard (end-to-end encrypted with
-ChaCha20-Poly1305), remote lock, proximity auto-lock. On the roadmap (`RoadMap.md`): notification
-sync, screen mirroring, file transfer, and read-only access to gallery/messages/calls from the
-Mac.
+ChaCha20-Poly1305), remote lock, proximity auto-lock. On the roadmap (`RoadMap.md`):
+**relay-less LAN-direct** mode (phone ↔ Mac over the local network with no relay — the
+`ServerConfig.certFingerprint` field is already reserved to pin the Mac's self-signed cert),
+notification sync, screen mirroring, file transfer, and read-only access to
+gallery/messages/calls from the Mac.
 
 ---
 
@@ -571,7 +591,9 @@ mac/Sources/LinkToMac/
   ProximityMonitor.swift BLE central, RSSI → lock
   ProximityConfig.swift  UUID derivation + tunables
   ScreenLock.swift       SACLockScreenImmediate / CGSession
-  Pairing.swift          room/key, Keychain, QR
+  Pairing.swift          room/key, Keychain, QR (v2 embeds the server config)
+  ServerSettings.swift   runtime relay endpoint store (UserDefaults + Keychain)
+  ServerSettingsView.swift  "Server Settings…" window
   LoginItem.swift        SMAppService auto-start
 
 mobile/modules/selfadb/android/.../selfadb/
@@ -591,6 +613,8 @@ mobile/native-src/clipboard-agent/
 
 mobile/src/features/
   selfadb/use-clip-boot.ts  boot state machine (JS gate)
-  relay/pairing-store.ts    SecureStore pairing + QR parse
-  relay/relay-config.ts     relay host/port/token resolution
+  relay/pairing-store.ts    SecureStore pairing + v2 QR parse (pairing + server config)
+  relay/server-config.ts    SecureStore relay endpoint (host/port/TLS/password)
+mobile/src/app/
+  server-config.tsx         Relay server settings screen
 ```

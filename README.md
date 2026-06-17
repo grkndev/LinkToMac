@@ -53,10 +53,13 @@ itself when that signal fades — so it works even with no internet.
 1. **Relay** — `cd server && npm install && npm run dev` (or `docker compose up -d`). See
    [`server/README.md`](server/README.md) for env vars and reverse-proxy (wss) setup.
 2. **Mac app** — open `mac/LinkToMac.xcodeproj` (generated from `project.yml` via XcodeGen)
-   and run. Use the menu bar item to show the pairing QR.
+   and run. In the menu bar, open **Server Settings…** to enter your relay's address, port,
+   TLS (`wss`) toggle, and password, then show the **pairing QR**.
 3. **Android app** — `cd mobile && bun install`, then build a dev client
    (`npx expo run:android`). Expo Go isn't supported (custom native module). Turn on
-   **Wireless Debugging** and pair once by scanning the Mac's QR.
+   **Wireless Debugging** and pair once by scanning the Mac's QR — it carries the relay
+   address and password, so the phone configures itself (editable later under
+   **Settings → Relay server**).
 
 ## Using the features
 
@@ -70,11 +73,12 @@ itself when that signal fades — so it works even with no internet.
 
 ## Security & privacy
 
-- **Pair once:** the Mac generates a random room id + key and shows them as a QR; the phone
-  scans it once. Secrets are stored in the Keychain (macOS) and Keystore-backed storage
-  (Android).
+- **Pair once:** the Mac generates a random room id + key and shows them as a QR — along with
+  the relay address, port, TLS setting, and password — so the phone configures itself in one
+  scan. Secrets are stored in the Keychain (macOS) and Keystore-backed storage (Android).
 - **You own the relay:** it routes messages by room id and never stores clipboard content.
-  Run it over TLS (`wss`) on infrastructure you trust.
+  The endpoint, password, and TLS are configured at runtime (nothing is baked into the build);
+  run it over **TLS (`wss`)** behind a reverse proxy on infrastructure you trust.
 - **Proximity lock is local:** it uses Bluetooth only and never touches the relay or internet.
 - **End-to-end encrypted:** clipboard payloads are sealed with **ChaCha20-Poly1305**, keyed by
   the secret exchanged at pairing. The relay only ever sees opaque ciphertext — never your
