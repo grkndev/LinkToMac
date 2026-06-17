@@ -12,6 +12,9 @@ import SelfAdb, { CLIP_PORT } from './client';
  */
 const AUTOSTART_TIMEOUT_MS = 20_000;
 
+/** How often we re-probe the on-device daemon while we believe we're connected. */
+const DAEMON_POLL_MS = 5_000;
+
 /** Distinguishes "native call stalled" from a real native error in the catch. */
 class TimeoutError extends Error {}
 
@@ -99,6 +102,47 @@ export function useClipBoot(): ClipBoot {
     });
     return () => sub.remove();
   }, [refresh]);
+
+  // While we believe we're connected, make sure the on-device daemon is actually alive. It
+  // doesn't survive a reboot, and a launch can silently fail (a false "ready"), leaving the
+  // bridge looping ECONNREFUSED with no signal. Probe it; after two confirmed misses, re-run
+  // autoStart -> it self-heals (re-enable wireless debugging + redeploy -> back to 'ready')
+  // or surfaces the reconnect/pair screen via 'need-connect'/'need-pair'.
+  useEffect(() => {
+    if (state !== 'ready') return;
+    let misses = 0;
+    let cancelled = false;
+
+    const check = async () => {
+      if (cancelled || busy.current) return; // a refresh is already in flight
+      if (AppState.currentState !== 'active') return; // the foreground service owns background recovery
+      let alive = false;
+      try {
+        alive = await SelfAdb.isDaemonAlive();
+      } catch {
+        alive = false;
+      }
+      if (cancelled) return;
+      if (alive) {
+        misses = 0;
+        return;
+      }
+      if (++misses >= 2) {
+        misses = 0;
+        refresh(); // autoStart -> 'ready' (silent heal) | 'need-connect' | 'need-pair'
+      }
+    };
+
+    const interval = setInterval(check, DAEMON_POLL_MS);
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') check();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [state, refresh]);
 
   return { state, error, refresh, pair };
 }

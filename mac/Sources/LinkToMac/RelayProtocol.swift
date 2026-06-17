@@ -9,7 +9,7 @@ enum ClientMessage: Encodable {
     case join(room: String, device: String)
     case ping
     case pong
-    /// Defined to match the wire protocol; unused until clipboard sync lands.
+    /// Encrypted clipboard payload: `nonce` + `ct` from `ClipCodec` (ChaCha20-Poly1305).
     case clip(nonce: String, ct: String)
 
     private enum CodingKeys: String, CodingKey {

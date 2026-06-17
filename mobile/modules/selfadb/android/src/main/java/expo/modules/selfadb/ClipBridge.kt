@@ -81,6 +81,9 @@ class ClipBridge(
     }
   }
 
+  /** Whether we currently hold a live connection to the daemon (vs. retrying). */
+  fun isConnected(): Boolean = running && out != null
+
   fun stop() {
     running = false
     thread?.interrupt()

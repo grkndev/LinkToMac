@@ -38,6 +38,10 @@ class SelfAdbModule : Module() {
     // Cap the daemon-log read so a single adb transfer never exceeds libadb's
     // maxdata-sized read buffer (which would throw BufferOverflowException).
     const val LOG_TAIL_BYTES = 65536
+
+    // How long deploy() waits for the freshly launched daemon to bind its socket before
+    // declaring the launch a failure (-> need-connect, instead of a false "ready").
+    const val DAEMON_START_TIMEOUT_MS = 4000L
   }
 
   override fun definition() = ModuleDefinition {
@@ -91,7 +95,7 @@ class SelfAdbModule : Module() {
      */
     AsyncFunction("autoStart") { clipPort: Int ->
       // 1. Daemon still alive from a previous run? Attach, touch no adb.
-      if (probe(clipPort)) {
+      if (daemonAlive(clipPort)) {
         log("daemon already alive on :$clipPort")
         ClipForegroundService.start(appCtx, clipPort)
         status("connected", "running")
@@ -132,6 +136,12 @@ class SelfAdbModule : Module() {
         if (canToggle) setWifiDebug(false) // detached daemon survives; minimise surface
         status("connected", "running")
         "ready"
+      } catch (e: DaemonNotStartedException) {
+        // Connected over adb but the daemon never bound its socket (flaky first session
+        // after a reboot). Surface the reconnect screen instead of a false "ready".
+        log("daemon did not start -> need-connect (${e.message})")
+        status("failed", "idle")
+        "need-connect"
       } catch (e: AdbPairingRequiredException) {
         // adbd no longer trusts our stored key (common on Samsung/One UI after a
         // wireless-debugging toggle or reboot, which wipes the paired-keys list).
@@ -191,15 +201,25 @@ class SelfAdbModule : Module() {
       svc.write(text)
     }
 
+    /**
+     * Liveness of the on-device clipboard daemon, polled by the JS boot hook while "ready".
+     * Uses [daemonAlive] (bridge-first), NOT a raw probe: the daemon's ServerSocket has
+     * backlog 1 and only serves the bridge, so a competing probe would wrongly fail while the
+     * daemon is healthy (and pile up in the accept queue).
+     */
+    AsyncFunction("isDaemonAlive") {
+      daemonAlive(ClipForegroundService.DEFAULT_PORT)
+    }
+
     // ---- Relay (native WS to the Mac, runs in the foreground service) --------
 
     /** Persist relay config (url/token/room/peer name) and (re)connect the WS if the service is up. */
-    AsyncFunction("setRelay") { url: String, token: String, room: String, peerName: String? ->
+    AsyncFunction("setRelay") { url: String, token: String, room: String, key: String, peerName: String? ->
       val svc = ClipForegroundService.instance
       if (svc != null) {
-        svc.applyRelayConfig(url, token, room, peerName)
+        svc.applyRelayConfig(url, token, room, key, peerName)
       } else {
-        ClipForegroundService.saveConfig(appCtx, url, token, room, peerName)
+        ClipForegroundService.saveConfig(appCtx, url, token, room, key, peerName)
       }
     }
 
@@ -360,7 +380,7 @@ class SelfAdbModule : Module() {
      * off. The detached daemon survives that toggle.
      */
     AsyncFunction("readDaemonLog") {
-      val socketUp = probe(ClipForegroundService.DEFAULT_PORT)
+      val socketUp = daemonAlive(ClipForegroundService.DEFAULT_PORT)
       val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
       try {
         val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
@@ -413,15 +433,22 @@ class SelfAdbModule : Module() {
 
   /** Push (if needed) + launch the detached daemon, then own the bridge in the FGS. */
   private fun deploy(clipPort: Int) {
-    if (probe(clipPort)) {
+    if (daemonAlive(clipPort)) {
       log("daemon already alive on :$clipPort")
     } else {
       log("pushing clipboard-agent.dex -> /data/local/tmp")
       adb.pushAsset("clipboard-agent.dex", "/data/local/tmp/clipboard-agent.dex") { log(it) }
       log("launching detached daemon...")
       log("launch: " + adb.launchDaemon(clipPort))
+      // launchDaemon only echoes LAUNCHED; confirm the daemon actually bound its socket.
+      // On the half-trusted first adb session after a reboot the launch can silently fail,
+      // and without this check autoStart would report a false "ready" while the bridge loops
+      // ECONNREFUSED with no signal to the user.
+      if (!waitForDaemon(clipPort, DAEMON_START_TIMEOUT_MS)) {
+        throw DaemonNotStartedException("daemon launched but never bound :$clipPort")
+      }
     }
-    // Bridge + (future) relay run in a foreground service -> survives app swipe.
+    // Bridge + relay run in a foreground service -> survives app swipe.
     ClipForegroundService.start(appCtx, clipPort)
   }
 
@@ -445,7 +472,35 @@ class SelfAdbModule : Module() {
     false
   }
 
+  /**
+   * Daemon liveness WITHOUT opening a competing socket when possible. The daemon's
+   * ServerSocket has backlog 1 and only ever serves the bridge's one connection, so a second
+   * probe connection piles up in the accept queue and starts failing even while the daemon is
+   * healthy. So: trust the bridge when it's connected; only probe directly when it isn't (then
+   * the daemon is back at accept() and a probe is reliable). Bridge is checked first so we
+   * never probe in the steady, working state.
+   */
+  private fun daemonAlive(port: Int): Boolean =
+    ClipForegroundService.instance?.isBridgeConnected() == true || probe(port)
+
+  /** Poll until the daemon binds its socket (or the bridge reconnects) or [timeoutMs] elapses. */
+  private fun waitForDaemon(port: Int, timeoutMs: Long): Boolean {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (System.currentTimeMillis() < deadline) {
+      if (daemonAlive(port)) return true
+      try {
+        Thread.sleep(300)
+      } catch (e: InterruptedException) {
+        return daemonAlive(port)
+      }
+    }
+    return daemonAlive(port)
+  }
+
   private fun log(message: String) = ClipBus.log(message)
   private fun status(adbState: String, clipState: String) =
     sendEvent("onStatus", mapOf("adb" to adbState, "clip" to clipState))
 }
+
+/** Thrown by deploy() when the daemon was launched but never bound its socket. */
+private class DaemonNotStartedException(message: String) : Exception(message)

@@ -30,8 +30,13 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   openWirelessDebuggingSettings(): Promise<void>;
   /** send text down to the shell process to set the system clipboard. */
   writeClipboard(text: string): Promise<void>;
-  /** persist relay config (url/token/room/peer name) and (re)connect the native WS to the Mac. */
-  setRelay(url: string, token: string, room: string, peerName: string | null): Promise<void>;
+  /** adb-free liveness probe of the on-device clipboard daemon (localhost socket). */
+  isDaemonAlive(): Promise<boolean>;
+  /**
+   * persist relay config (url/token/room/key/peer name) and (re)connect the native WS to the Mac.
+   * `key` is the 32-byte pairing secret (base64) used by the native E2E ClipCodec.
+   */
+  setRelay(url: string, token: string, room: string, key: string, peerName: string | null): Promise<void>;
   /** send a remote action to the Mac over the relay (e.g. "lock"). Needs the service running. */
   sendCommand(action: string): Promise<void>;
   /** enable/disable the BLE presence beacon (Mac auto-locks when this phone leaves). Persisted. */

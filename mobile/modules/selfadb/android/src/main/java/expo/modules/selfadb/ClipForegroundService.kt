@@ -72,6 +72,9 @@ class ClipForegroundService : Service() {
     bridge?.write(text)
   }
 
+  /** Whether the localhost bridge currently holds a live connection to the daemon. */
+  fun isBridgeConnected(): Boolean = bridge?.isConnected() == true
+
   /**
    * Send a remote action to the Mac (e.g. "lock"). Independent of [sendPaused]: the pause
    * toggle only gates outbound *clipboard* forwarding, not commands. No-op if not connected.
@@ -83,13 +86,14 @@ class ClipForegroundService : Service() {
   // ---- Relay (WS to the Mac) -----------------------------------------------
 
   /** Persist config and (re)connect — but skip the restart if nothing changed. */
-  fun applyRelayConfig(url: String, token: String, room: String, peerName: String?) {
+  fun applyRelayConfig(url: String, token: String, room: String, key: String, peerName: String?) {
     val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val unchanged = p.getString("url", null) == url &&
       p.getString("token", null) == token &&
       p.getString("room", null) == room &&
+      p.getString("key", null) == key &&
       p.getString("peerName", null) == peerName
-    saveConfig(this, url, token, room, peerName)
+    saveConfig(this, url, token, room, key, peerName)
     if (unchanged && relay != null) return
     reloadRelay()
     reloadAdvertiser() // room may have changed -> re-derive the beacon UUID
@@ -130,11 +134,15 @@ class ClipForegroundService : Service() {
     val url = p.getString("url", null) ?: return
     val token = p.getString("token", null) ?: return
     val room = p.getString("room", null) ?: return
+    // Fail closed: without the pairing key we can't E2E-encrypt, so don't connect. The JS
+    // pairing context re-pushes setRelay(...key) on launch, which then starts us.
+    val key = p.getString("key", null) ?: run { ClipBus.log("relay: waiting for pairing key"); return }
     ClipBus.log("relay starting -> $url")
     relay = RelayClient(
       url = url,
       token = token,
       room = room,
+      key = key,
       onClipReceived = { text ->
         lastWritten = text
         bridge?.write(text)
@@ -332,11 +340,12 @@ class ClipForegroundService : Service() {
     }
 
     /** Persist relay config so the service (incl. a START_STICKY restart) can connect. */
-    fun saveConfig(ctx: Context, url: String, token: String, room: String, peerName: String?) {
+    fun saveConfig(ctx: Context, url: String, token: String, room: String, key: String, peerName: String?) {
       ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
         .putString("url", url)
         .putString("token", token)
         .putString("room", room)
+        .putString("key", key)
         .putString("peerName", peerName)
         .apply()
     }
