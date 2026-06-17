@@ -196,7 +196,7 @@ export default function SettingsScreen() {
             colors={colors}
             icon={icons.cast}
             label="Relay server"
-            hint="Set the server address, port and password."
+            hint="Set the server configuration."
             onPress={() => router.push("/server-config")}
           />
           <ActionRow
