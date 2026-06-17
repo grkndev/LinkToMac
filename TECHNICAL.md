@@ -10,9 +10,9 @@ README says *"the Android app reads the clipboard through its own ADB"*, this do
 explains the dex'd `app_process` daemon, the localhost NDJSON bridge, and the
 `WRITE_SECURE_SETTINGS` self-grant that make it survive a reboot.
 
-> **Honesty note up front:** clipboard payloads currently travel **base64-encoded, not
-> encrypted**. The wire format, the pairing `key`, and a `ClipCodec` seam are all in place
-> for libsodium secretbox, but the crypto is not wired up yet. See
+> **Security note up front:** clipboard payloads are **end-to-end encrypted** with
+> ChaCha20-Poly1305 (RFC 8439), keyed by the 32-byte secret established at pairing. The relay
+> only ever sees opaque ciphertext — never the key or the plaintext. See
 > [§10 Security model](#10-security-model--current-limitations).
 
 ---
@@ -297,7 +297,7 @@ without a Developer team.
 |---|---|
 | `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect |
 | `PasteboardWatcher.swift` | Polls `NSPasteboard.changeCount`; echo suppression |
-| `ClipCodec.swift` | base64 placeholder codec (crypto seam) |
+| `ClipCodec.swift` | E2E clip encryption — ChaCha20-Poly1305 (CryptoKit) |
 | `ProximityMonitor.swift` | CoreBluetooth central; RSSI → lock decision |
 | `ScreenLock.swift` | Locks the screen |
 | `Pairing.swift` | Room/key generation, Keychain, QR rendering |
@@ -368,8 +368,8 @@ get a `bad-message` error and are dropped.
 2. The agent reads the clip and emits `{"type":"clip", …}` over localhost to `ClipBridge`.
 3. The foreground service checks it isn't the echo of its own write, records history, and
    (unless `sendPaused`) calls `RelayClient.sendClip`.
-4. `ClipCodec.encode` → `{ t:"clip", nonce, ct }` → relay → Mac.
-5. The Mac decodes `ct`, stamps `lastChangeCount`, and writes `NSPasteboard`.
+4. `ClipCodec.encode` **encrypts** (ChaCha20-Poly1305) → `{ t:"clip", nonce, ct }` → relay → Mac.
+5. The Mac **decrypts** `ct`, stamps `lastChangeCount`, and writes `NSPasteboard`.
 
 **Mac → Phone (copy on macOS):**
 
@@ -445,7 +445,7 @@ The **Mac is the pairing initiator**. On first launch (`PairingStore.loadOrCreat
 generates:
 
 - `room` — base64 of 32 random bytes; the relay bearer / room id.
-- `key` — base64 of 32 random bytes; the future E2E secret.
+- `key` — base64 of 32 random bytes; the E2E secret the `ClipCodec` (ChaCha20-Poly1305) keys on.
 
 Both are stored in the macOS **Keychain** (generic-password item). The Mac shows a QR encoding
 `{"v":1,"room":"…","key":"…","name":"<computer name>"}` via CoreImage's `CIQRCodeGenerator`
@@ -470,6 +470,11 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 
 **What holds today:**
 
+- **End-to-end encrypted clipboard.** `clip` payloads are sealed with **ChaCha20-Poly1305**
+  (RFC 8439), keyed by the 32-byte pairing secret — `CryptoKit.ChaChaPoly` on the Mac,
+  `javax.crypto "ChaCha20-Poly1305"` on Android (no third-party crypto deps). A fresh random
+  12-byte nonce per message; the relay sees only `nonce` + ciphertext. **Fails closed:** a
+  tampered or wrong-key frame fails the Poly1305 tag and is dropped, never written to a clipboard.
 - The relay is a dumb pipe: it never stores content and never parses `nonce`/`ct`.
 - `roomId` is an unguessable 256-bit bearer; `RELAY_AUTH_TOKEN` is a second gate so strangers
   can't even open sockets. Per-room cap of 2, rate limiting, and payload caps limit abuse.
@@ -479,11 +484,10 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 
 **What does NOT hold yet (be explicit about this):**
 
-- 🔴 **No end-to-end encryption.** `ClipCodec` on all three sides is a placeholder:
-  `ct = base64(utf8(text))` and `nonce` is random filler so the wire shape already matches
-  secretbox. The pairing `key` is carried but **unused**. Anyone who can read the relay's
-  traffic (or runs the relay) can read clipboard content. The seam is designed so that
-  swapping in **libsodium secretbox** touches only `ClipCodec.{swift,kt,ts}`.
+- 🟠 **Static key, no replay protection.** The pairing key is long-lived (rotates only on
+  re-pair) and there's no per-message sequence number, so a captured ciphertext could in
+  principle be re-injected by someone who can write to the relay. Low impact for a clipboard
+  (last-writer-wins, and the bearer `roomId` + auth token gate relay access), but noted.
 - 🟠 **Transport is plain `ws`.** Both clients use `ws://<host>:<port>`, not `wss://`. TLS
   exists only if you put the relay behind the documented reverse proxy and repoint the clients.
 - 🟢 **Relay host + token are out of tracked source.** They're injected at build time from
@@ -541,8 +545,8 @@ First run: show the pairing QR from the Mac's menu bar, scan it on the phone, op
 ## 13. Scope & roadmap
 
 v1 links **one phone and one Mac** and syncs **text only** (images/files out of scope; the
-256 KB payload cap reflects that). Implemented: two-way clipboard, remote lock, proximity
-auto-lock. On the roadmap (`RoadMap.md`): **E2E encryption (libsodium secretbox)**, notification
+256 KB payload cap reflects that). Implemented: two-way clipboard (end-to-end encrypted with
+ChaCha20-Poly1305), remote lock, proximity auto-lock. On the roadmap (`RoadMap.md`): notification
 sync, screen mirroring, file transfer, and read-only access to gallery/messages/calls from the
 Mac.
 
@@ -563,7 +567,7 @@ mac/Sources/LinkToMac/
   LinkToMacApp.swift     MenuBarExtra + AppDelegate
   RelayClient.swift      WS client, reconnect, cmd dispatch
   PasteboardWatcher.swift changeCount poll + echo stamp
-  ClipCodec.swift        base64 placeholder (crypto seam)
+  ClipCodec.swift        E2E clip encryption (ChaCha20-Poly1305 / CryptoKit)
   ProximityMonitor.swift BLE central, RSSI → lock
   ProximityConfig.swift  UUID derivation + tunables
   ScreenLock.swift       SACLockScreenImmediate / CGSession
@@ -579,7 +583,7 @@ mobile/modules/selfadb/android/.../selfadb/
   RelayClient.kt            OkHttp WS to the relay
   BleAdvertiser.kt          BLE presence beacon
   ClipBus.kt                service ↔ module bridge + ring buffers
-  ClipCodec.kt              base64 placeholder (crypto seam)
+  ClipCodec.kt              E2E clip encryption (ChaCha20-Poly1305 / javax.crypto)
 
 mobile/native-src/clipboard-agent/
   ClipboardAgent.java       the privileged daemon source

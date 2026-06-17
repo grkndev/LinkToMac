@@ -76,16 +76,16 @@ itself when that signal fades — so it works even with no internet.
 - **You own the relay:** it routes messages by room id and never stores clipboard content.
   Run it over TLS (`wss`) on infrastructure you trust.
 - **Proximity lock is local:** it uses Bluetooth only and never touches the relay or internet.
-- **Heads-up:** clipboard payloads currently travel **base64-encoded, not yet encrypted**.
-  End-to-end encryption (libsodium secretbox) is designed into the wire format but not active
-  yet — it's on the roadmap.
+- **End-to-end encrypted:** clipboard payloads are sealed with **ChaCha20-Poly1305**, keyed by
+  the secret exchanged at pairing. The relay only ever sees opaque ciphertext — never your
+  clipboard or the key.
 
 ## Scope & status
 
 v1 links **one phone and one Mac** and syncs **text only** (images/files are out of scope).
-Clipboard sync, remote lock, and proximity auto-lock are implemented; encryption and some
-lifecycle hardening are still on the roadmap. A separate technical document covers the
-internals in depth.
+Clipboard sync (end-to-end encrypted), remote lock, and proximity auto-lock are implemented;
+some lifecycle hardening is still on the roadmap. A separate technical document
+([`TECHNICAL.md`](TECHNICAL.md)) covers the internals in depth.
 
 ## License
 
