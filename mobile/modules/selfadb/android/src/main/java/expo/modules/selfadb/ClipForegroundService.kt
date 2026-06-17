@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import expo.modules.selfadb.R
 
 /**
  * Hosts the clipboard pipeline so it survives the app being swiped away.
@@ -233,7 +234,10 @@ class ClipForegroundService : Service() {
     return builder
       .setContentTitle(title)
       .setContentText(text)
-      .setSmallIcon(android.R.drawable.stat_notify_sync)
+      // Status-bar glyph: a tightly-cropped white silhouette of the app mark (res/drawable-*/
+      // ic_stat_link.png), tinted by Android to the device theme. Cropped from the monochrome
+      // adaptive icon, whose safe-zone padding made the bare mipmap render tiny in the bar.
+      .setSmallIcon(R.drawable.ic_stat_link)
       .setOngoing(true)
       .build()
   }
