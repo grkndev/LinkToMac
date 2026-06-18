@@ -213,13 +213,19 @@ class SelfAdbModule : Module() {
 
     // ---- Relay (native WS to the Mac, runs in the foreground service) --------
 
-    /** Persist relay config (url/token/room/peer name) and (re)connect the WS if the service is up. */
-    AsyncFunction("setRelay") { url: String, token: String, room: String, key: String, peerName: String? ->
+    /**
+     * Persist connection config and (re)connect if the service is up. Carries both the relay
+     * endpoint (`url` may be empty for LAN-only) and the LAN-direct params: `lanEnabled` +
+     * `lanPort` (0 = LAN off) and an optional `lanHost` manual seed (mDNS is used otherwise).
+     */
+    AsyncFunction("setRelay") {
+      url: String, token: String, room: String, key: String, peerName: String?,
+      lanEnabled: Boolean, lanPort: Int, lanHost: String? ->
       val svc = ClipForegroundService.instance
       if (svc != null) {
-        svc.applyRelayConfig(url, token, room, key, peerName)
+        svc.applyRelayConfig(url, token, room, key, peerName, lanEnabled, lanPort, lanHost)
       } else {
-        ClipForegroundService.saveConfig(appCtx, url, token, room, key, peerName)
+        ClipForegroundService.saveConfig(appCtx, url, token, room, key, peerName, lanEnabled, lanPort, lanHost)
       }
     }
 

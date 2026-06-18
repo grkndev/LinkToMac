@@ -25,7 +25,7 @@ import expo.modules.selfadb.R
 class ClipForegroundService : Service() {
 
   private var bridge: ClipBridge? = null
-  private var relay: RelayClient? = null
+  private var conn: ConnectionManager? = null
   private var bleAdvertiser: BleAdvertiser? = null
 
   /** Last text we wrote to the device clipboard; its echo `onClip` is swallowed. */
@@ -55,15 +55,15 @@ class ClipForegroundService : Service() {
           } else {
             ClipBus.log("clip: ${text.take(60)}")
             ClipBus.clip(text, ts)
-            if (!sendPaused) relay?.sendClip(text)
+            if (!sendPaused) conn?.sendClip(text)
           }
         },
         onLog = { ClipBus.log(it) }
       ).also { it.start() }
     }
-    // Auto-start the relay from persisted config. Also covers the null-intent START_STICKY
+    // Auto-start the connection from persisted config. Also covers the null-intent START_STICKY
     // restart after the app is killed -> reconnects to the Mac with no JS runtime.
-    maybeStartRelay()
+    maybeStartConnection()
     // Same for the BLE presence beacon (proximity auto-lock), if the user opted in.
     maybeStartAdvertising()
     return START_STICKY
@@ -81,38 +81,44 @@ class ClipForegroundService : Service() {
    * toggle only gates outbound *clipboard* forwarding, not commands. No-op if not connected.
    */
   fun sendCmd(action: String) {
-    relay?.sendCmd(action)
+    conn?.sendCmd(action)
   }
 
-  // ---- Relay (WS to the Mac) -----------------------------------------------
+  // ---- Connection (LAN-direct preferred, relay fallback) -------------------
 
   /** Persist config and (re)connect — but skip the restart if nothing changed. */
-  fun applyRelayConfig(url: String, token: String, room: String, key: String, peerName: String?) {
+  fun applyRelayConfig(
+    url: String, token: String, room: String, key: String, peerName: String?,
+    lanEnabled: Boolean, lanPort: Int, lanHost: String?,
+  ) {
     val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val unchanged = p.getString("url", null) == url &&
       p.getString("token", null) == token &&
       p.getString("room", null) == room &&
       p.getString("key", null) == key &&
-      p.getString("peerName", null) == peerName
-    saveConfig(this, url, token, room, key, peerName)
-    if (unchanged && relay != null) return
-    reloadRelay()
+      p.getString("peerName", null) == peerName &&
+      p.getBoolean("lanEnabled", true) == lanEnabled &&
+      p.getInt("lanPort", 0) == lanPort &&
+      p.getString("lanHost", null) == lanHost
+    saveConfig(this, url, token, room, key, peerName, lanEnabled, lanPort, lanHost)
+    if (unchanged && conn != null) return
+    reloadConnection()
     reloadAdvertiser() // room may have changed -> re-derive the beacon UUID
   }
 
-  /** (Re)apply persisted relay config, replacing any running client. */
-  fun reloadRelay() {
-    relay?.shutdown()
-    relay = null
-    maybeStartRelay()
+  /** (Re)apply persisted config, replacing any running connection. */
+  fun reloadConnection() {
+    conn?.shutdown()
+    conn = null
+    maybeStartConnection()
   }
 
   /** Unpair: drop the persisted config and the live connection. Stays disconnected
    *  (including across START_STICKY restarts) until a new pairing is pushed. */
   fun clearRelayConfig() {
     clearConfig(this)
-    relay?.shutdown()
-    relay = null
+    conn?.shutdown()
+    conn = null
     bleAdvertiser?.stop() // room is gone -> nothing to advertise
     bleAdvertiser = null
     ClipBus.relay("disconnected", false, null)
@@ -129,29 +135,41 @@ class ClipForegroundService : Service() {
     setClipSendPaused(this, paused)
   }
 
-  private fun maybeStartRelay() {
-    if (relay != null) return
+  private fun maybeStartConnection() {
+    if (conn != null) return
     val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    val url = p.getString("url", null) ?: return
-    val token = p.getString("token", null) ?: return
     val room = p.getString("room", null) ?: return
     // Fail closed: without the pairing key we can't E2E-encrypt, so don't connect. The JS
     // pairing context re-pushes setRelay(...key) on launch, which then starts us.
     val key = p.getString("key", null) ?: run { ClipBus.log("relay: waiting for pairing key"); return }
-    ClipBus.log("relay starting -> $url")
-    relay = RelayClient(
-      url = url,
+    val url = p.getString("url", null) ?: ""
+    val token = p.getString("token", null) ?: ""
+    val lanEnabled = p.getBoolean("lanEnabled", true)
+    val lanPort = p.getInt("lanPort", 0)
+    val lanHost = p.getString("lanHost", null)
+    val lanReady = lanEnabled && lanPort > 0
+    if (url.isEmpty() && !lanReady) {
+      ClipBus.log("connection: nothing configured (no relay, LAN off)")
+      return
+    }
+    ClipBus.log("connection starting (relay=${if (url.isEmpty()) "none" else url}, lan=${if (lanReady) lanPort else "off"})")
+    conn = ConnectionManager(
+      context = this,
+      relayUrl = url,
       token = token,
       room = room,
       key = key,
+      lanEnabled = lanEnabled,
+      lanPort = lanPort,
+      lanHost = lanHost,
       onClipReceived = { text ->
         lastWritten = text
         bridge?.write(text)
         ClipBus.macClip(text, System.currentTimeMillis().toDouble())
-        ClipBus.log("relay -> clipboard (${text.length})")
+        ClipBus.log("clip -> clipboard (${text.length})")
       },
-      onStatus = { status, peerOnline, error ->
-        ClipBus.relay(status, peerOnline, error)
+      onStatus = { transport, status, peerOnline, error, attempt ->
+        ClipBus.relay(status, peerOnline, error, transport, attempt)
         updateNotification(peerOnline)
       },
       log = { ClipBus.log(it) },
@@ -190,8 +208,8 @@ class ClipForegroundService : Service() {
   }
 
   override fun onDestroy() {
-    relay?.shutdown()
-    relay = null
+    conn?.shutdown()
+    conn = null
     bleAdvertiser?.stop()
     bleAdvertiser = null
     bridge?.stop()
@@ -343,14 +361,20 @@ class ClipForegroundService : Service() {
         .apply()
     }
 
-    /** Persist relay config so the service (incl. a START_STICKY restart) can connect. */
-    fun saveConfig(ctx: Context, url: String, token: String, room: String, key: String, peerName: String?) {
+    /** Persist connection config so the service (incl. a START_STICKY restart) can connect. */
+    fun saveConfig(
+      ctx: Context, url: String, token: String, room: String, key: String, peerName: String?,
+      lanEnabled: Boolean, lanPort: Int, lanHost: String?,
+    ) {
       ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
         .putString("url", url)
         .putString("token", token)
         .putString("room", room)
         .putString("key", key)
         .putString("peerName", peerName)
+        .putBoolean("lanEnabled", lanEnabled)
+        .putInt("lanPort", lanPort)
+        .putString("lanHost", lanHost)
         .apply()
     }
 

@@ -38,7 +38,13 @@
   <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
     tools:ignore="ProtectedPermissions" />
 
-  <application>
+  <!--
+    LAN-direct mode talks plain ws:// to the Mac on the local network (no TLS on the LAN), and
+    the relay can also be configured as ws://. Content is still E2E-encrypted (ChaCha20-Poly1305),
+    so the cleartext transport carries only opaque ciphertext. API 28+ blocks cleartext by default;
+    this re-permits it. Merges into the app's <application>.
+  -->
+  <application android:usesCleartextTraffic="true">
     <service
       android:name=".ClipForegroundService"
       android:exported="false"

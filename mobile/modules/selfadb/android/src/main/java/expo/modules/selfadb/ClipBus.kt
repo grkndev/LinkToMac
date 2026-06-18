@@ -80,8 +80,14 @@ object ClipBus {
 
   fun clearBuffer() = synchronized(buffer) { buffer.clear() }
 
-  fun relay(status: String, peerOnline: Boolean, error: String?) {
-    val payload = mapOf("status" to status, "peerOnline" to peerOnline, "lastError" to error)
+  fun relay(status: String, peerOnline: Boolean, error: String?, transport: String? = null, attempt: Int = 0) {
+    val payload = mapOf(
+      "status" to status,
+      "peerOnline" to peerOnline,
+      "lastError" to error,
+      "transport" to transport, // "lan" | "relay" | null (disconnected)
+      "attempt" to attempt,     // consecutive reconnect attempts on the active link (0 once joined)
+    )
     lastRelay = payload
     onRelay?.invoke(payload)
   }

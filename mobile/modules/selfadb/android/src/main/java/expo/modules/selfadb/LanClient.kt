@@ -1,5 +1,6 @@
 package expo.modules.selfadb
 
+import android.util.Base64
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -11,30 +12,33 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
- * Native relay WebSocket client (OkHttp). Lives in [ClipForegroundService] so it keeps
- * running when the app is backgrounded or swiped away. Connects, joins as "android", and
- * reconnects with exponential backoff. Mirrors the (removed) JS relay-client.ts.
+ * Relay-less **LAN-direct** transport: a WebSocket client straight to the Mac's [LanServer] over
+ * the local network (plain `ws://`, no relay, no TLS). Mirrors [RelayClient] (OkHttp, single-thread
+ * executor, exponential backoff) but instead of a relay `join` it runs the Mac's challenge-response
+ * handshake:
  *
- * OkHttp's `pingInterval` keeps the socket alive and detects a dead peer (it fails the
- * connection if a pong doesn't come back) — so we don't run an app-level ping and don't
- * trip the default read timeout. All state runs on a single-thread executor; OkHttp
- * listener callbacks hop onto it. `sendClip` is safe from any thread.
+ *   Mac  -> { t:"hello", nonce }
+ *   us   -> { t:"auth",  proof = base64(HMAC-SHA256(key, nonce)) }
+ *   Mac  -> { t:"ready" }
+ *
+ * Content frames (`clip`/`cmd`) are still E2E-encrypted with the pairing key via [ClipCodec], so a
+ * LAN sniffer learns nothing even without TLS. Once `ready` arrives the Mac peer is considered
+ * online (it is the server, so presence == connected).
  */
-class RelayClient(
-  private val url: String,
-  private val token: String,
-  private val room: String,
-  /** 32-byte pairing secret (base64) for the E2E ClipCodec. */
+class LanClient(
+  host: String,
+  port: Int,
+  /** 32-byte pairing secret (base64): proves identity in the handshake AND keys the E2E ClipCodec. */
   private val key: String,
   private val onClipReceived: (String) -> Unit,
   private val onStatus: (status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
   private val log: (String) -> Unit,
 ) {
-  // `wss://` with a publicly-trusted (Let's Encrypt) cert works out of the box. For the future
-  // LAN-direct mode (self-signed cert on the Mac), pin it here via a CertificatePinner / custom
-  // trust manager built from the QR's `certFingerprint`.
+  private val url = "ws://$host:$port/ws"
   private val http = OkHttpClient.Builder()
     .pingInterval(20, TimeUnit.SECONDS)
     .build()
@@ -42,7 +46,7 @@ class RelayClient(
 
   @Volatile private var ws: WebSocket? = null
   @Volatile private var running = false
-  private var peerOnline = false
+  private var authed = false
   private var attempt = 0
   private var reconnectFuture: ScheduledFuture<*>? = null
 
@@ -58,17 +62,12 @@ class RelayClient(
       cancelReconnect()
       ws?.close(1000, "client stop")
       ws = null
-      peerOnline = false
+      authed = false
       onStatus("disconnected", false, null, 0)
     }
   }
 
-  /**
-   * Post to the state thread, dropping the task if the executor was shut down. After
-   * `shutdown()`, closing the socket still triggers OkHttp's onClosed/onFailure on its own
-   * thread; an unguarded execute() there throws RejectedExecutionException and kills the
-   * process (crash on pause).
-   */
+  /** Post to the state thread, dropping the task if the executor was shut down (see RelayClient). */
   private fun post(task: Runnable) {
     try {
       exec.execute(task)
@@ -84,23 +83,21 @@ class RelayClient(
 
   fun sendClip(text: String) {
     if (text.isEmpty()) return
-    // Fail closed: never send plaintext if the pairing key is malformed.
     val enc = ClipCodec.encode(text, key)
     if (enc == null) {
-      log("encrypt failed (bad pairing key); not sending")
+      log("lan encrypt failed (bad pairing key); not sending")
       return
     }
     val msg = JSONObject().put("t", "clip").put("nonce", enc.first).put("ct", enc.second)
     ws?.send(msg.toString())
   }
 
-  /** Send a remote action to the Mac (e.g. "lock"). E2E-encrypted like a clip so the relay
-   *  never sees the action; no-op if the socket isn't open or the pairing key is malformed. */
+  /** Send a remote action to the Mac (e.g. "lock"), E2E-encrypted like a clip. */
   fun sendCmd(action: String) {
     if (action.isEmpty()) return
     val enc = ClipCodec.encode(action, key)
     if (enc == null) {
-      log("encrypt failed (bad pairing key); not sending cmd")
+      log("lan encrypt failed (bad pairing key); not sending cmd")
       return
     }
     val msg = JSONObject().put("t", "cmd").put("nonce", enc.first).put("ct", enc.second)
@@ -109,26 +106,19 @@ class RelayClient(
 
   private fun open() {
     cancelReconnect()
-    onStatus("connecting", peerOnline, null, attempt)
-    val request = Request.Builder()
-      .url(url)
-      .addHeader("Authorization", "Bearer $token")
-      .build()
+    authed = false
+    onStatus("connecting", false, null, attempt)
+    val request = Request.Builder().url(url).build()
     ws = http.newWebSocket(request, listener)
   }
 
   private val listener = object : WebSocketListener() {
     override fun onOpen(webSocket: WebSocket, response: Response) {
-      post {
-        if (!running) return@post
-        val join = JSONObject().put("t", "join").put("room", room).put("device", "android")
-        webSocket.send(join.toString())
-        onStatus("connected", peerOnline, null, attempt)
-      }
+      post { if (running) onStatus("connected", false, null, attempt) } // awaiting hello/auth
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
-      post { handle(text) }
+      post { handle(webSocket, text) }
     }
 
     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -144,48 +134,62 @@ class RelayClient(
     }
   }
 
-  private fun handle(text: String) {
+  private fun handle(webSocket: WebSocket, text: String) {
     val o = try {
       JSONObject(text)
     } catch (e: Exception) {
       return
     }
     when (o.optString("t")) {
-      "joined" -> {
-        attempt = 0
-        peerOnline = false
-        val peers = o.optJSONArray("peers")
-        if (peers != null) {
-          for (i in 0 until peers.length()) if (peers.optString(i) == "mac") peerOnline = true
+      "hello" -> {
+        val proof = authProof(o.optString("nonce"))
+        if (proof == null) {
+          fail("auth: bad pairing key")
+          return
         }
-        onStatus("joined", peerOnline, null, attempt)
+        webSocket.send(JSONObject().put("t", "auth").put("proof", proof).toString())
       }
-      "peer" -> {
-        if (o.optString("device") == "mac") peerOnline = o.optString("state") == "online"
-        onStatus("joined", peerOnline, null, attempt)
+      "ready" -> {
+        attempt = 0
+        authed = true
+        onStatus("joined", true, null, 0)
+        log("lan authenticated")
       }
-      "error" -> onStatus("error", peerOnline, o.optString("code") + ": " + o.optString("message"), attempt)
       "clip" -> {
         val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
-        if (decoded != null) onClipReceived(decoded) else log("clip decrypt failed (key mismatch or corrupt)")
+        if (decoded != null) onClipReceived(decoded) else log("lan clip decrypt failed")
       }
       "pong" -> {}
     }
   }
 
+  /** base64(HMAC-SHA256(key, nonce)) — proves we hold the pairing secret without sending it. */
+  private fun authProof(nonceB64: String): String? = try {
+    val keyBytes = Base64.decode(key, Base64.DEFAULT)
+    if (keyBytes.size != 32) null else {
+      val nonce = Base64.decode(nonceB64, Base64.DEFAULT)
+      val mac = Mac.getInstance("HmacSHA256")
+      mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+      Base64.encodeToString(mac.doFinal(nonce), Base64.NO_WRAP)
+    }
+  } catch (e: Exception) {
+    null
+  }
+
   private fun fail(reason: String) {
-    log("relay $reason")
+    log("lan $reason")
     ws = null
+    authed = false
     if (!running) return
     val pending = reconnectFuture
     if (pending != null && !pending.isDone) return
     val delay = minOf(1L shl minOf(attempt, 5), 30L) // 1,2,4,8,16,32 -> cap 30s
     attempt++
-    onStatus("connecting", peerOnline, reason, attempt)
+    onStatus("connecting", false, reason, attempt)
     reconnectFuture = try {
       exec.schedule({ if (running) open() }, delay, TimeUnit.SECONDS)
     } catch (e: RejectedExecutionException) {
-      null // shut down while failing; no reconnect
+      null
     }
   }
 
