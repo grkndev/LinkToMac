@@ -47,10 +47,20 @@ import { useRelayStatus } from '@/features/relay/use-relay-status';
 
 /** Brand green for the "online" status dot — M3 has no green role, so this stays a literal. */
 const ONLINE = '#2ECC71';
+/** Amber for the transient connecting/reconnecting state (M3 has no amber role). */
+const RECONNECTING = '#F39C12';
+/** How many failed reconnect attempts before the UI gives up and shows "Disconnected".
+ *  The link keeps retrying in the background regardless; this is purely the label threshold. */
+const RECONNECT_LIMIT = 3;
 
 /** 28dp "extra-large" rounded square for the expressive hero tile. */
 const HERO_SHAPE = Shape.RoundedCorner({
   cornerRadii: { topStart: 28, topEnd: 28, bottomStart: 28, bottomEnd: 28 },
+});
+
+/** Pill for the LAN/Relay transport chip next to the connection status. */
+const CHIP_SHAPE = Shape.RoundedCorner({
+  cornerRadii: { topStart: 8, topEnd: 8, bottomStart: 8, bottomEnd: 8 },
 });
 
 /** Home: paired Mac's identity + connection state, plus quick actions. */
@@ -65,7 +75,30 @@ export default function HomeScreen() {
   const { items: clipItems } = useClipHistory();
 
   const connected = relay.peerOnline;
-  const statusLabel = connected ? 'Connected' : 'Disconnected';
+  // The link auto-reconnects with backoff; show "Reconnecting" while it's actively retrying, and
+  // only fall back to "Disconnected" once it's tried RECONNECT_LIMIT times (or hit a dead end).
+  const retrying = !connected && (relay.status === 'connecting' || relay.status === 'connected');
+  const attempt = relay.attempt ?? 0;
+  const connState: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' = connected
+    ? 'connected'
+    : retrying && attempt < RECONNECT_LIMIT
+      ? attempt === 0
+        ? 'connecting'
+        : 'reconnecting'
+      : 'disconnected';
+  const statusLabel =
+    connState === 'connected'
+      ? 'Connected'
+      : connState === 'connecting'
+        ? 'Connecting…'
+        : connState === 'reconnecting'
+          ? 'Reconnecting…'
+          : 'Disconnected';
+  const statusColor =
+    connState === 'connected' ? ONLINE : connState === 'disconnected' ? colors.error : RECONNECTING;
+  // How the link is carried: direct over the LAN, or via the relay. Only meaningful while connected.
+  const transportLabel =
+    relay.transport === 'lan' ? 'LAN' : relay.transport === 'relay' ? 'Relay' : null;
 
   const latestMacClip = clipItems?.[0]?.text;
   const clipValue = latestMacClip
@@ -122,7 +155,7 @@ export default function HomeScreen() {
           </Text>
           <Row verticalAlignment="center" horizontalArrangement={{ spacedBy: Spacing.two }}>
             <Box
-              modifiers={[size(8, 8), clip(Shapes.Circle), background(connected ? ONLINE : colors.error)]}
+              modifiers={[size(8, 8), clip(Shapes.Circle), background(statusColor)]}
             />
             <Text
               color={colors.onSurfaceVariant}
@@ -130,6 +163,18 @@ export default function HomeScreen() {
             >
               {statusLabel}
             </Text>
+            {connected && transportLabel ? (
+              <Surface color={colors.secondaryContainer} shape={CHIP_SHAPE}>
+                <Box modifiers={[padding(Spacing.two, Spacing.one, Spacing.two, Spacing.one)]}>
+                  <Text
+                    color={colors.onSecondaryContainer}
+                    style={{ typography: 'labelMedium', fontWeight: '700' }}
+                  >
+                    {transportLabel}
+                  </Text>
+                </Box>
+              </Surface>
+            ) : null}
           </Row>
         </Column>
 

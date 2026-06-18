@@ -2,7 +2,15 @@ import { useEffect, useState } from 'react';
 
 import SelfAdb from '@/features/selfadb/client';
 
-export type RelayUi = { status: string; peerOnline: boolean; lastError?: string | null };
+export type RelayUi = {
+  status: string;
+  peerOnline: boolean;
+  lastError?: string | null;
+  /** which transport is carrying the connection: 'lan' (direct) | 'relay' | null when down. */
+  transport?: 'lan' | 'relay' | null;
+  /** consecutive reconnect attempts on the active link; 0 once joined. */
+  attempt?: number;
+};
 
 /**
  * Mirrors the native relay status + the last synced clipboard text for display.
@@ -15,11 +23,11 @@ export function useRelayStatus(): { relay: RelayUi; lastClip: string | null } {
 
   useEffect(() => {
     const r = SelfAdb.addListener('onRelay', (e) =>
-      setRelay({ status: e.status, peerOnline: e.peerOnline, lastError: e.lastError }),
+      setRelay({ status: e.status, peerOnline: e.peerOnline, lastError: e.lastError, transport: e.transport, attempt: e.attempt }),
     );
     const c = SelfAdb.addListener('onClip', (e) => setLastClip(e.text));
     SelfAdb.relayGetStatus()
-      .then((e) => setRelay({ status: e.status, peerOnline: e.peerOnline, lastError: e.lastError }))
+      .then((e) => setRelay({ status: e.status, peerOnline: e.peerOnline, lastError: e.lastError, transport: e.transport, attempt: e.attempt }))
       .catch(() => {});
     return () => {
       r.remove();

@@ -22,6 +22,10 @@ export type RelayEvent = {
   /** whether the Mac peer is present in the room */
   peerOnline: boolean;
   lastError?: string | null;
+  /** which transport is active: "lan" (relay-less, same network) | "relay" | null when down */
+  transport?: 'lan' | 'relay' | null;
+  /** consecutive reconnect attempts on the active link; 0 once joined. Drives Reconnecting vs Disconnected. */
+  attempt?: number;
 };
 
 export type SelfAdbModuleEvents = {

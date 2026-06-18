@@ -6,9 +6,9 @@ import SelfAdb from '@/features/selfadb/client';
 import { clearPairing, loadPairing, savePairing, type Pairing } from './pairing-store';
 import {
   clearServerConfig,
+  connectionArgs,
   loadServerConfig,
   saveServerConfig,
-  serverWsUrl,
   type ServerConfig,
 } from './server-config';
 
@@ -56,11 +56,13 @@ export function PairingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!pairing) return;
-    // No baked-in server: connect only once a ServerConfig has been saved (from a v2 QR scan or
+    // No baked-in server: connect only once a ServerConfig has been saved (from a QR scan or
     // Settings -> Relay server). `undefined` = still loading; `null` = paired but unconfigured
-    // (e.g. a legacy v1 QR) -> stay idle until the user sets the server.
+    // (e.g. a legacy v1 QR) -> stay idle until the user sets the server. The config may carry a
+    // relay endpoint, the LAN-direct params, or both — `connectionArgs` derives all of them.
     if (!server) return;
-    SelfAdb.setRelay(serverWsUrl(server), server.token, pairing.room, pairing.key, pairing.name ?? null).catch(() => {});
+    const c = connectionArgs(server);
+    SelfAdb.setRelay(c.url, c.token, pairing.room, pairing.key, pairing.name ?? null, c.lanEnabled, c.lanPort, c.lanHost).catch(() => {});
   }, [pairing, server]);
 
   const setPairing = useCallback(async (next: Pairing, nextServer?: ServerConfig | null) => {
