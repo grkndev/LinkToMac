@@ -111,7 +111,7 @@ export default function AboutScreen() {
         <Group>
           <ActionRow
             colors={colors}
-            icon={icons.update}
+            icon={icons.sourcenotes}
             label="Release notes"
             hint="Changelog and latest releases on GitHub."
             onPress={() => open(RELEASES_URL)}

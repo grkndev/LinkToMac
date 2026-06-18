@@ -34,7 +34,7 @@ const MODULES = {
   code: require('../../assets/icons/code.xml'),
   person: require('../../assets/icons/account_circle.xml'),
   openInNew: require('../../assets/icons/open_in_new.xml'),
-  update: require('../../assets/icons/update.xml'),
+  sourcenotes: require('../../assets/icons/source_notes.xml'),
 } as const;
 
 export type IconName = keyof typeof MODULES;
