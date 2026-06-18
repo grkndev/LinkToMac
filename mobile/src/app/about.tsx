@@ -15,7 +15,9 @@ import {
   verticalScroll,
 } from "@expo/ui/jetpack-compose/modifiers";
 import Constants from "expo-constants";
-import { Image, Linking, useColorScheme, View } from "react-native";
+import * as Updates from "expo-updates";
+import { useState } from "react";
+import { Alert, Image, Linking, useColorScheme, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useIcons } from "@/components/icons";
@@ -45,6 +47,53 @@ export default function AboutScreen() {
   const icons = useIcons();
 
   const version = Constants.expoConfig?.version ?? "—";
+
+  const [checking, setChecking] = useState(false);
+
+  // Manual OTA check: query EAS Update, then offer to download + restart. The whole flow is a
+  // no-op outside release builds (Updates.isEnabled is false in dev / Expo Go).
+  const checkForUpdates = async () => {
+    if (checking) return;
+    if (!Updates.isEnabled) {
+      Alert.alert(
+        "Updates unavailable",
+        "Over-the-air updates only run in release builds.",
+      );
+      return;
+    }
+    setChecking(true);
+    try {
+      const result = await Updates.checkForUpdateAsync();
+      if (!result.isAvailable) {
+        Alert.alert("You're up to date", "No new update is available.");
+        return;
+      }
+      Alert.alert("Update available", "Download it and restart the app now?", [
+        { text: "Later", style: "cancel" },
+        {
+          text: "Update",
+          onPress: async () => {
+            try {
+              await Updates.fetchUpdateAsync();
+              await Updates.reloadAsync();
+            } catch {
+              Alert.alert(
+                "Update failed",
+                "Couldn't download the update. Try again later.",
+              );
+            }
+          },
+        },
+      ]);
+    } catch {
+      Alert.alert(
+        "Check failed",
+        "Couldn't check for updates. Try again later.",
+      );
+    } finally {
+      setChecking(false);
+    }
+  };
 
   return (
     <Host
@@ -104,6 +153,23 @@ export default function AboutScreen() {
             icon={icons.info}
             label="App Version"
             value={version}
+          />
+        </Group>
+
+        {/* Over-the-air updates. */}
+        <Group>
+          <ActionRow
+            colors={colors}
+            icon={icons.update}
+            label="Check for updates"
+            hint={
+              checking
+                ? "Checking…"
+                : Updates.isEnabled
+                  ? `Channel: ${Updates.channel ?? "—"}`
+                  : "Available in release builds only."
+            }
+            onPress={checkForUpdates}
           />
         </Group>
 

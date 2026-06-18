@@ -35,6 +35,7 @@ const MODULES = {
   person: require('../../assets/icons/account_circle.xml'),
   openInNew: require('../../assets/icons/open_in_new.xml'),
   sourcenotes: require('../../assets/icons/source_notes.xml'),
+  update: require('../../assets/icons/update.xml'),
 } as const;
 
 export type IconName = keyof typeof MODULES;
@@ -57,13 +58,20 @@ export function useIcons(): IconMap {
 }
 
 /**
- * Downloads every icon XML to the on-device cache once, then swaps the map over to local
- * `file://` URIs so subsequent screen mounts read icons off disk instead of refetching them.
+ * Dev-only warm-up: downloads every icon XML to the on-device cache once, then swaps the map over
+ * to local `file://` URIs so subsequent screen mounts read icons off disk instead of refetching
+ * them from Metro (the per-mount HTTP round-trip only happens in development).
+ *
+ * In release there is no Metro server: the raw `require()` modules in `INITIAL` resolve to the
+ * bundled drawables that `@expo/ui`'s `Icon` loads natively — that's the supported path. Swapping
+ * them for cache `file://` URIs there instead leaves every icon blank, so we skip the warm-up
+ * entirely outside dev and keep the bundled modules.
  */
 export function IconsProvider({ children }: { children: ReactNode }) {
   const [icons, setIcons] = useState<IconMap>(INITIAL);
 
   useEffect(() => {
+    if (!__DEV__) return;
     let cancelled = false;
     Asset.loadAsync(NAMES.map((n) => MODULES[n]))
       .then((assets) => {
