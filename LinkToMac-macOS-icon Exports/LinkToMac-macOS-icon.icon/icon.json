@@ -6,22 +6,21 @@
     {
       "layers" : [
         {
+          "blend-mode" : "normal",
+          "fill" : {
+            "solid" : "srgb:0.98144,1.00000,0.98764,1.00000"
+          },
+          "glass" : false,
           "hidden" : false,
-          "image-name" : "expo-symbol 2.svg",
-          "name" : "expo-symbol 2",
+          "image-name" : "android-icon-monochrome 2.png",
+          "name" : "android-icon-monochrome 2",
           "position" : {
-            "scale" : 1,
+            "scale" : 1.25,
             "translation-in-points" : [
-              1.1008400065293245e-05,
-              -16.046875
+              0,
+              0
             ]
           }
-        },
-        {
-          "glass" : true,
-          "hidden" : false,
-          "image-name" : "grid.png",
-          "name" : "grid"
         }
       ],
       "shadow" : {
@@ -35,9 +34,8 @@
     }
   ],
   "supported-platforms" : {
-    "circles" : [
-      "watchOS"
-    ],
-    "squares" : "shared"
+    "squares" : [
+      "macOS"
+    ]
   }
 }
