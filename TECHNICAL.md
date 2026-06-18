@@ -51,12 +51,13 @@ fourth is a stock-Android system service the Android app talks to through a tric
 
 | Path | Transport | Touches the relay? | Direction |
 |---|---|---|---|
-| **Clipboard sync** | WebSocket `clip` frames | Yes | Both ways |
-| **Remote lock** | WebSocket `cmd` frames | Yes | Phone → Mac |
+| **Clipboard sync** | WebSocket `clip` frames | Yes — *or* LAN-direct (§5.1) | Both ways |
+| **Remote lock** | WebSocket `cmd` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
 
-The clipboard and lock paths share one relay connection per device. The proximity path is
-completely independent — it works with no internet at all.
+The clipboard and lock paths share one connection per device — the relay, or, on the same
+network, a **direct link to the Mac** with no relay (§5.1). The proximity path is completely
+independent — it works with no internet at all.
 
 ### Tech stack
 
@@ -93,8 +94,9 @@ between them. It never stores anything and never inspects clipboard content.
 
 - `clip` and `cmd` frames are `JSON.stringify`'d and sent **verbatim to the *other* peer
   only** — the sender never receives its own echo.
-- `cmd.action` is treated as **opaque**: the relay forwards `"lock"` (or any future action)
-  without interpreting it, so new remote commands never require a server change.
+- `cmd` is **fully opaque**: the action plaintext is E2E-encrypted into `nonce`/`ct` (same AEAD
+  as `clip`), so the relay can't tell one command from another and forwards it verbatim — new
+  remote commands never require a server change, and a malicious relay/room can't forge one.
 - **Backpressure:** if a peer's `ws.bufferedAmount` exceeds `maxPayloadBytes * 8`, it is
   declared a slow consumer and dropped (close code `4003`) instead of buffering unbounded.
 - Logs are privacy-preserving: the `roomId` is redacted to a 6-char prefix, and only
@@ -350,14 +352,14 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 // client → relay
 { "t": "join", "room": "<roomId>", "device": "android" | "mac" }
 { "t": "clip", "nonce": "<base64>", "ct": "<base64>" }   // forwarded verbatim
-{ "t": "cmd",  "action": "lock" }                         // forwarded verbatim, action ≤ 32 chars
+{ "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // action E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
 // relay → client
 { "t": "joined", "peers": ["mac"] }
 { "t": "peer",   "state": "online" | "offline", "device": "mac" }
 { "t": "clip",   "nonce": "...", "ct": "..." }            // the peer's frame, relayed
-{ "t": "cmd",    "action": "lock" }
+{ "t": "cmd",    "nonce": "...", "ct": "..." }            // the peer's command, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
@@ -365,6 +367,34 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 
 `room` is validated to 16–128 chars (the base64 of 32 random bytes is 44). Malformed frames
 get a `bad-message` error and are dropped.
+
+### 5.1 LAN-direct transport (relay-less)
+
+On the same network the phone can skip the relay entirely and talk **straight to the Mac**. The
+roles invert: the **Mac becomes the WebSocket server** (`LanServer.swift`, `Network.framework`
+`NWListener` + `NWProtocolWebSocket` — all system frameworks, no third-party deps) and the phone
+is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on the LAN), but
+`clip`/`cmd` stay E2E-encrypted, so a sniffer sees only opaque ciphertext.
+
+- **Discovery (hybrid).** The Mac advertises Bonjour `_linktomac._tcp` on its LAN port (default
+  **53124**) with TXT `rid = base64url(SHA256(room))[:16]` + `name`. The phone recomputes the same
+  `rid` from its stored room and connects only to a matching service (`LanDiscovery.kt`,
+  `NsdManager`) — so it finds *its* Mac on a multi-Mac LAN and re-finds it after a DHCP change. A
+  manual Mac IP (Settings → Relay server) is the escape hatch when mDNS is blocked.
+- **Auth handshake** (LAN has no relay token/room gate): on connect the Mac sends
+  `{ t:"hello", nonce }`; the phone replies `{ t:"auth", proof }` where
+  `proof = base64(HMAC-SHA256(key, nonce))`; the Mac verifies in constant time and replies
+  `{ t:"ready" }` (else drops the socket). No secret crosses the wire; replay is bounded to a
+  single fresh nonce.
+- **Auto-switch.** The phone's `ConnectionManager.kt` keeps exactly **one** link live: it prefers
+  LAN and falls back to the relay after a short grace window or when LAN drops, switching back
+  when the Mac reappears. With no relay configured it's LAN-only. The Mac runs both the LAN server
+  and (if configured) the relay client at once; the phone being the sole arbiter prevents
+  double-delivery.
+- **Config.** Carried in QR **v3** (`lport`, `lan`) alongside the relay fields; persisted in
+  `ServerConfig` (`lanEnabled`/`lanPort`/`lanHost`). Cleartext `ws://` is permitted via the
+  module manifest's `usesCleartextTraffic` (Android) and `NSAllowsLocalNetworking` (macOS); the
+  Mac also declares `NSLocalNetworkUsageDescription` + `NSBonjourServices`.
 
 ---
 
@@ -398,14 +428,15 @@ the sender, so only local write-backs need suppressing).
 ## 7. Remote lock — end to end
 
 1. The user taps **Lock Mac** on the phone's Home screen.
-2. JS calls `SelfAdb.sendCommand("lock")` → the foreground service's `RelayClient.sendCmd` →
-   `{ t:"cmd", action:"lock" }`.
-3. The relay forwards it verbatim to the `mac` peer.
-4. The Mac's `RelayClient` routes `cmd("lock")` to `ScreenLock.lock()`.
+2. JS calls `SelfAdb.sendCommand("lock")` → the active link's `sendCmd` **encrypts** the action
+   (`ClipCodec`, ChaCha20-Poly1305) → `{ t:"cmd", nonce, ct }`.
+3. The relay (or, on the LAN, the Mac directly) forwards it verbatim to the `mac` peer.
+4. The Mac **decrypts** `ct` and routes `cmd("lock")` to `ScreenLock.lock()`; a frame that fails
+   to authenticate (forged / wrong key) is dropped.
 
 The lock path is intentionally kept **off the clipboard path** and the `pause sending` toggle
-doesn't affect it. Because the relay forwards `action` opaquely, adding new remote commands is
-a client-only change.
+doesn't affect it. Because the action is opaque ciphertext end to end, adding new remote commands
+is a client-only change.
 
 ---
 
@@ -506,8 +537,14 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   (last-writer-wins, and the bearer `roomId` + auth token gate relay access), but noted.
 - 🟢 **Transport supports `wss`.** A per-server `secure` flag selects `wss://` vs `ws://`:
   point the app at a domain behind a TLS-terminating reverse proxy (Let's Encrypt) and toggle
-  TLS on. `ws://` remains available for a trusted LAN. Once TLS is on, the relay password and
-  `cmd` frames travel inside the encrypted tunnel.
+  TLS on. `ws://` remains available for a trusted LAN. The relay password still benefits from the
+  TLS tunnel; **`cmd` is now E2E-encrypted (AEAD) regardless of transport**, so a forged or
+  replayed command fails the Poly1305 tag and is dropped even on plaintext `ws://`.
+- 🟢 **LAN-direct needs no relay or TLS to stay confidential.** In relay-less LAN mode (§5.1)
+  the transport is plain `ws://`, but `clip`/`cmd` remain ChaCha20-Poly1305-encrypted and the
+  socket is gated by an HMAC challenge-response over the pairing key — so a stranger on the LAN
+  can neither read traffic nor occupy the peer slot. The unencrypted `room`/`rid` it could
+  observe are non-secret routing ids.
 - 🟢 **No secrets baked into the build.** The relay address, password, and TLS setting are
   configured at runtime (Mac **Server Settings…** → `UserDefaults`/Keychain; phone **Settings →
   Relay server** / pairing QR → SecureStore). Only `server/.env` holds the server's
@@ -564,11 +601,10 @@ Android's *Pair device with pairing code* dialog and enter the 6-digit code once
 
 v1 links **one phone and one Mac** and syncs **text only** (images/files out of scope; the
 256 KB payload cap reflects that). Implemented: two-way clipboard (end-to-end encrypted with
-ChaCha20-Poly1305), remote lock, proximity auto-lock. On the roadmap (`RoadMap.md`):
-**relay-less LAN-direct** mode (phone ↔ Mac over the local network with no relay — the
-`ServerConfig.certFingerprint` field is already reserved to pin the Mac's self-signed cert),
-notification sync, screen mirroring, file transfer, and read-only access to
-gallery/messages/calls from the Mac.
+ChaCha20-Poly1305), remote lock, proximity auto-lock, and **relay-less LAN-direct** mode (§5.1 —
+phone ↔ Mac over the local network with no relay, auto-preferred over the relay on the same
+Wi-Fi). On the roadmap (`RoadMap.md`): notification sync, screen mirroring, file transfer, and
+read-only access to gallery/messages/calls from the Mac.
 
 ---
 
@@ -585,13 +621,14 @@ server/src/
 
 mac/Sources/LinkToMac/
   LinkToMacApp.swift     MenuBarExtra + AppDelegate
-  RelayClient.swift      WS client, reconnect, cmd dispatch
+  RelayClient.swift      WS client, reconnect, cmd dispatch; owns the pasteboard
+  LanServer.swift        LAN-direct WS server (NWListener) + Bonjour + HMAC handshake
   PasteboardWatcher.swift changeCount poll + echo stamp
   ClipCodec.swift        E2E clip encryption (ChaCha20-Poly1305 / CryptoKit)
   ProximityMonitor.swift BLE central, RSSI → lock
   ProximityConfig.swift  UUID derivation + tunables
   ScreenLock.swift       SACLockScreenImmediate / CGSession
-  Pairing.swift          room/key, Keychain, QR (v2 embeds the server config)
+  Pairing.swift          room/key, Keychain, QR (v3 embeds server + LAN config)
   ServerSettings.swift   runtime relay endpoint store (UserDefaults + Keychain)
   ServerSettingsView.swift  "Server Settings…" window
   LoginItem.swift        SMAppService auto-start
@@ -600,9 +637,12 @@ mobile/modules/selfadb/android/.../selfadb/
   SelfAdbModule.kt          Expo module: autoStart/pair/relay/proximity APIs
   AdbManager.kt             libadb wrapper: pair/connect/discover/push/launch
   ClipboardAgent (java)     → built to assets/clipboard-agent.dex
-  ClipForegroundService.kt  START_STICKY host for bridge+relay+BLE
+  ClipForegroundService.kt  START_STICKY host for bridge+connection+BLE
   ClipBridge.kt             localhost NDJSON client to the daemon
+  ConnectionManager.kt      LAN-preferred / relay-fallback link arbiter
   RelayClient.kt            OkHttp WS to the relay
+  LanClient.kt              OkHttp WS straight to the Mac (LAN-direct) + HMAC handshake
+  LanDiscovery.kt           NsdManager mDNS discovery of the Mac (rid-matched)
   BleAdvertiser.kt          BLE presence beacon
   ClipBus.kt                service ↔ module bridge + ring buffers
   ClipCodec.kt              E2E clip encryption (ChaCha20-Poly1305 / javax.crypto)
