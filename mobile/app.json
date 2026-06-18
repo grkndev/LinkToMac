@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "LinkToMac",
+    "name": "Link To Mac",
     "slug": "linktomac",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -30,7 +30,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#ffffff",
           "android": {
             "image": "./assets/images/splash-icon.png",
             "imageWidth": 76

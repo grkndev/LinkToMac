@@ -28,6 +28,13 @@ const MODULES = {
   qr: require('../../assets/icons/qr_code_scanner.xml'),
   linkOff: require('../../assets/icons/link_off.xml'),
   terminal: require('../../assets/icons/terminal.xml'),
+  // About
+  info: require('../../assets/icons/info.xml'),
+  mail: require('../../assets/icons/mail.xml'),
+  code: require('../../assets/icons/code.xml'),
+  person: require('../../assets/icons/account_circle.xml'),
+  openInNew: require('../../assets/icons/open_in_new.xml'),
+  update: require('../../assets/icons/update.xml'),
 } as const;
 
 export type IconName = keyof typeof MODULES;

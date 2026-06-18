@@ -14,6 +14,7 @@ struct LinkToMacApp: App {
                 proximity: delegate.proximity,
                 onShowPairing: delegate.showPairingWindow,
                 onShowServerSettings: delegate.showServerSettingsWindow,
+                onShowAbout: delegate.showAboutWindow,
             )
         } label: {
             // The app mark as a template image (monochrome; the system tints it for the menu bar).
@@ -37,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lan: LanServer?
     private var pairingWindow: NSWindow?
     private var serverSettingsWindow: NSWindow?
+    private var aboutWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         client.connect()
@@ -100,5 +102,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         serverSettingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Lazily build and front the About window (version + developer/contact links).
+    func showAboutWindow() {
+        if aboutWindow == nil {
+            let hosting = NSHostingController(rootView: AboutView())
+            hosting.sizingOptions = [.preferredContentSize]
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "About LinkToMac"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            aboutWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        aboutWindow?.makeKeyAndOrderFront(nil)
     }
 }

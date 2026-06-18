@@ -1,13 +1,4 @@
-import {
-  Column,
-  Host,
-  ListItem,
-  Surface,
-  Switch,
-  Text,
-  type MaterialColors,
-} from "@expo/ui/jetpack-compose";
-import * as Haptics from "expo-haptics";
+import { Column, Host } from "@expo/ui/jetpack-compose";
 import {
   fillMaxWidth,
   padding,
@@ -18,16 +9,9 @@ import { useEffect, useState } from "react";
 import { Alert, AppState, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useIcons, type IconSource } from "@/components/icons";
-import {
-  Group,
-  IconCircle,
-  SEED,
-  groupShape,
-  tonal,
-  useM3Colors,
-  type RowShape,
-} from "@/components/m3";
+import { useIcons } from "@/components/icons";
+import { ActionRow, InfoRow, SwitchRow } from "@/components/settings-rows";
+import { Group, SEED, useM3Colors } from "@/components/m3";
 import { Spacing } from "@/constants/theme";
 import { usePairing } from "@/features/relay/pairing-context";
 import SelfAdb from "@/features/selfadb/client";
@@ -221,177 +205,15 @@ export default function SettingsScreen() {
             hint="View ADB and device logs."
             onPress={() => router.push("/logs")}
           />
+          <ActionRow
+            colors={colors}
+            icon={icons.info}
+            label="About"
+            hint="Version, developer, and contact."
+            onPress={() => router.push("/about")}
+          />
         </Group>
       </Column>
     </Host>
-  );
-}
-
-/** Rounded tonal card that toggles its switch when tapped anywhere on the row. */
-function SwitchRow({
-  colors,
-  icon,
-  label,
-  hint,
-  value,
-  onValueChange,
-  shape = groupShape(true, true),
-}: {
-  colors: MaterialColors;
-  icon: IconSource;
-  label: string;
-  hint?: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-  shape?: RowShape;
-}) {
-  const t = tonal(colors, "secondary");
-  return (
-    <Surface
-      color={colors.surfaceContainerHigh}
-      shape={shape}
-      modifiers={[fillMaxWidth()]}
-      checked={value}
-      onCheckedChange={(value) => {
-        onValueChange(value);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      }}
-    >
-      <ListItem
-        colors={{ containerColor: "transparent" }}
-        modifiers={[fillMaxWidth()]}
-      >
-        <ListItem.LeadingContent>
-          <IconCircle source={icon} container={t.container} on={t.on} />
-        </ListItem.LeadingContent>
-        <ListItem.HeadlineContent>
-          <Text
-            color={colors.onSurface}
-            style={{ typography: "bodyLarge", fontWeight: "500" }}
-          >
-            {label}
-          </Text>
-        </ListItem.HeadlineContent>
-        {hint ? (
-          <ListItem.SupportingContent>
-            <Text
-              color={colors.onSurfaceVariant}
-              style={{ typography: "bodyMedium" }}
-            >
-              {hint}
-            </Text>
-          </ListItem.SupportingContent>
-        ) : null}
-        <ListItem.TrailingContent>
-          <Switch value={value} onCheckedChange={onValueChange} />
-        </ListItem.TrailingContent>
-      </ListItem>
-    </Surface>
-  );
-}
-
-/** Rounded tonal card with a tappable ripple over the whole row. */
-function ActionRow({
-  colors,
-  icon,
-  label,
-  hint,
-  destructive,
-  onPress,
-  shape = groupShape(true, true),
-}: {
-  colors: MaterialColors;
-  icon: IconSource;
-  label: string;
-  hint?: string;
-  destructive?: boolean;
-  onPress: () => void;
-  shape?: RowShape;
-}) {
-  const t = tonal(colors, destructive ? "error" : "secondary");
-  const labelColor = destructive ? colors.error : colors.onSurface;
-  return (
-    <Surface
-      color={colors.surfaceContainerHigh}
-      shape={shape}
-      modifiers={[fillMaxWidth()]}
-      onClick={onPress}
-    >
-      <ListItem
-        colors={{ containerColor: "transparent" }}
-        modifiers={[fillMaxWidth()]}
-      >
-        <ListItem.LeadingContent>
-          <IconCircle source={icon} container={t.container} on={t.on} />
-        </ListItem.LeadingContent>
-        <ListItem.HeadlineContent>
-          <Text
-            color={labelColor}
-            style={{ typography: "bodyLarge", fontWeight: "500" }}
-          >
-            {label}
-          </Text>
-        </ListItem.HeadlineContent>
-        {hint ? (
-          <ListItem.SupportingContent>
-            <Text
-              color={colors.onSurfaceVariant}
-              style={{ typography: "bodyMedium" }}
-            >
-              {hint}
-            </Text>
-          </ListItem.SupportingContent>
-        ) : null}
-      </ListItem>
-    </Surface>
-  );
-}
-
-/** Rounded tonal card showing a read-only value on the trailing edge. */
-function InfoRow({
-  colors,
-  icon,
-  label,
-  value,
-  shape = groupShape(true, true),
-}: {
-  colors: MaterialColors;
-  icon: IconSource;
-  label: string;
-  value: string;
-  shape?: RowShape;
-}) {
-  const t = tonal(colors, "secondary");
-  return (
-    <Surface
-      color={colors.surfaceContainerHigh}
-      shape={shape}
-      modifiers={[fillMaxWidth()]}
-    >
-      <ListItem
-        colors={{ containerColor: "transparent" }}
-        modifiers={[fillMaxWidth()]}
-      >
-        <ListItem.LeadingContent>
-          <IconCircle source={icon} container={t.container} on={t.on} />
-        </ListItem.LeadingContent>
-        <ListItem.HeadlineContent>
-          <Text
-            color={colors.onSurface}
-            style={{ typography: "bodyLarge", fontWeight: "500" }}
-          >
-            {label}
-          </Text>
-        </ListItem.HeadlineContent>
-        <ListItem.TrailingContent>
-          <Text
-            color={colors.onSurfaceVariant}
-            style={{ typography: "labelLarge", fontWeight: "600" }}
-          >
-            {value}
-          </Text>
-        </ListItem.TrailingContent>
-      </ListItem>
-    </Surface>
   );
 }

@@ -145,6 +145,16 @@ function RootNavigator({
               headerTintColor: onSurface,
             }}
           />
+          <Stack.Screen
+            name="about"
+            options={{
+              headerShown: true,
+              headerTitle: "About",
+              headerShadowVisible: false,
+              headerStyle: { backgroundColor: background },
+              headerTintColor: onSurface,
+            }}
+          />
         </Stack.Protected>
         <Stack.Screen name="qr-scan" options={{ presentation: "modal" }} />
       </Stack.Protected>

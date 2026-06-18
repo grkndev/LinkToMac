@@ -12,6 +12,7 @@ struct MenuPanel: View {
     let proximity: ProximityMonitor
     let onShowPairing: () -> Void
     let onShowServerSettings: () -> Void
+    let onShowAbout: () -> Void
 
     private var deviceName: String { Host.current().localizedName ?? "This Mac" }
 
@@ -140,6 +141,8 @@ struct MenuPanel: View {
                     title: "Start at login",
                     isOn: Binding(get: { LoginItem.isEnabled }, set: { try? LoginItem.setEnabled($0) })
                 )
+                RowDivider()
+                ButtonRow(icon: "info.circle", title: "About…", showsChevron: true, action: onShowAbout)
             }
         }
     }
@@ -210,146 +213,5 @@ struct MenuPanel: View {
             client.unpair()
             proximity.reloadPairing() // room rotated → the beacon UUID follows it
         }
-    }
-}
-
-// MARK: - Building blocks
-
-/// Small uppercased group title, System-Settings style.
-private struct SectionTitle: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .padding(.leading, 4)
-    }
-}
-
-/// Rounded grouped container holding stacked rows; clips so row hover stays inside corners.
-private struct Card<Content: View>: View {
-    @ViewBuilder var content: Content
-    var body: some View {
-        VStack(spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
-            )
-    }
-}
-
-/// Hairline separator inset to start after the leading icon column.
-private struct RowDivider: View {
-    var body: some View {
-        Divider().padding(.leading, 38)
-    }
-}
-
-private struct RowIcon: View {
-    let name: String
-    var body: some View {
-        Image(systemName: name)
-            .font(.system(size: 14))
-            .foregroundStyle(.secondary)
-            .frame(width: 20, alignment: .center)
-    }
-}
-
-private struct ToggleRow: View {
-    let icon: String
-    let title: String
-    @Binding var isOn: Bool
-    var body: some View {
-        HStack(spacing: 8) {
-            RowIcon(name: icon)
-            Text(title).font(.system(size: 13))
-            Spacer(minLength: 8)
-            Toggle("", isOn: $isOn)
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
-    }
-}
-
-/// A row with a leading icon, a title, and a trailing pop-up menu picker.
-private struct PickerRow<Value: Hashable>: View {
-    let icon: String
-    let title: String
-    @Binding var selection: Value
-    let options: [Value]
-    let label: (Value) -> String
-    var body: some View {
-        HStack(spacing: 8) {
-            RowIcon(name: icon)
-            Text(title).font(.system(size: 13))
-            Spacer(minLength: 8)
-            Picker("", selection: $selection) {
-                ForEach(options, id: \.self) { option in
-                    Text(label(option)).tag(option)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .fixedSize()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-    }
-}
-
-private struct ButtonRow: View {
-    let icon: String
-    let title: String
-    var showsChevron: Bool = false
-    let action: () -> Void
-    @State private var hovering = false
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                RowIcon(name: icon)
-                Text(title).font(.system(size: 13))
-                Spacer(minLength: 8)
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .background(hovering ? Color.primary.opacity(0.06) : Color.clear)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-    }
-}
-
-private struct InfoRow: View {
-    let icon: String
-    let title: String
-    let value: String
-    var body: some View {
-        HStack(spacing: 8) {
-            RowIcon(name: icon)
-            Text(title).font(.system(size: 13))
-            Spacer(minLength: 8)
-            Text(value)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 150, alignment: .trailing)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
     }
 }
