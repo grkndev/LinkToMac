@@ -13,6 +13,7 @@ struct MenuPanel: View {
     let onShowPairing: () -> Void
     let onShowServerSettings: () -> Void
     let onShowAbout: () -> Void
+    let onCheckForUpdates: () -> Void
 
     private var deviceName: String { Host.current().localizedName ?? "This Mac" }
 
@@ -141,6 +142,8 @@ struct MenuPanel: View {
                     title: "Start at login",
                     isOn: Binding(get: { LoginItem.isEnabled }, set: { try? LoginItem.setEnabled($0) })
                 )
+                RowDivider()
+                ButtonRow(icon: "arrow.triangle.2.circlepath", title: "Check for Updates…", action: onCheckForUpdates)
                 RowDivider()
                 ButtonRow(icon: "info.circle", title: "About…", showsChevron: true, action: onShowAbout)
             }

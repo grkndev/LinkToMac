@@ -10,6 +10,9 @@ struct AboutView: View {
     private static let releasesURL = "https://github.com/grkndev/LinkToMac/releases"
     private static let contactEmail = "info@grkn.dev"
 
+    /// User-initiated Sparkle check, supplied by the AppDelegate that owns the updater.
+    let onCheckForUpdates: () -> Void
+
     private var version: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
@@ -25,6 +28,9 @@ struct AboutView: View {
                 SectionTitle("ABOUT")
                 Card {
                     InfoRow(icon: "info.circle", title: "Version", value: "\(version) (\(build))")
+                    RowDivider()
+                    ButtonRow(icon: "arrow.triangle.2.circlepath", title: "Check for Updates…",
+                              action: onCheckForUpdates)
                 }
             }
 

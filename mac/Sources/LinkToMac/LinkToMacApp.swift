@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Sparkle
 
 @main
 struct LinkToMacApp: App {
@@ -15,6 +16,7 @@ struct LinkToMacApp: App {
                 onShowPairing: delegate.showPairingWindow,
                 onShowServerSettings: delegate.showServerSettingsWindow,
                 onShowAbout: delegate.showAboutWindow,
+                onCheckForUpdates: delegate.checkForUpdates,
             )
         } label: {
             // The app mark as a template image (monochrome; the system tints it for the menu bar).
@@ -32,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let client = RelayClient()
     /// BLE presence watcher; self-gates on its persisted `enabled`, so this is cheap when off.
     let proximity = ProximityMonitor()
+    /// Sparkle updater. `startingUpdater: true` schedules background checks (SUEnableAutomaticChecks);
+    /// the feed + EdDSA public key come from Info.plist. No Apple Developer account required.
+    let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil,
+    )
     /// LAN-direct WebSocket server (relay-less). Listens + advertises over Bonjour so a phone on
     /// the same network connects straight to us; rebuilt by `applyLanSettings()` when the port or
     /// the enabled toggle changes. Reads the pairing fresh on each handshake.
@@ -107,7 +114,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lazily build and front the About window (version + developer/contact links).
     func showAboutWindow() {
         if aboutWindow == nil {
-            let hosting = NSHostingController(rootView: AboutView())
+            let hosting = NSHostingController(
+                rootView: AboutView(onCheckForUpdates: { [weak self] in self?.checkForUpdates() })
+            )
             hosting.sizingOptions = [.preferredContentSize]
             let window = NSWindow(contentViewController: hosting)
             window.title = "About LinkToMac"
@@ -118,5 +127,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         aboutWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// User-initiated Sparkle update check (shows Sparkle's standard progress/alerts UI).
+    func checkForUpdates() {
+        updaterController.checkForUpdates(nil)
     }
 }

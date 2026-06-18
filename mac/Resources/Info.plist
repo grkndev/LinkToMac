@@ -40,5 +40,16 @@
 	<array>
 		<string>_linktomac._tcp</string>
 	</array>
+	<!-- Sparkle auto-update. The feed is the appcast attached to the GitHub "latest" release;
+	     SUFeedURL stays stable across versions. SUPublicEDKey is the EdDSA public key whose
+	     private half lives in the developer's login Keychain (used by sign_update at release). -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/grkndev/LinkToMac/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>OWFkrCYelihBqu7sisiCeOf12CrQ2kOq/OaQZXoumYs=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>
