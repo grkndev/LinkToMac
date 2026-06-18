@@ -13,3 +13,6 @@ workflow.md
 /mobile/CLAUDE.md
 /mobile/README.md
 /mobile/AGENTS.md
+
+.DS_Store
+*/**/.DS_Store
