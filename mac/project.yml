@@ -28,7 +28,7 @@ targets:
       Release: Config.xcconfig
     sources:
       - path: Sources
-      - path: Resources/Assets.xcassets
+      - path: Resources/AppIcon.icon
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMac
