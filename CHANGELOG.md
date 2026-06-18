@@ -17,6 +17,8 @@ intended for the Play Store / App Store.
 - Pair once with a QR code (v3: carries the relay + LAN config so the phone self-configures).
 
 ### Notes / known limitations
-- Release builds are **debug-signed** (sideload install).
+- Distributed for **sideload**: the Android APK is debug-signed; the macOS app (`.dmg`) is
+  ad-hoc signed and **not notarized** — first launch on another Mac needs right-click → Open
+  (or clear the quarantine attribute). Not for the app stores.
 - LAN transport is plain `ws://` (no TLS on the LAN); payloads stay E2E-encrypted regardless.
 - When off the LAN, the direct client keeps retrying the last known address in the background.

@@ -69,6 +69,15 @@ no internet.
    relay address/password, if set), so the phone configures itself and prefers the direct LAN
    link automatically (editable later under **Settings → Relay server**).
 
+### Building a release (beta)
+
+- **macOS** — `cd mac && ./scripts/build-release.sh` → `build/release/LinkToMac-<version>.dmg`
+  (universal, ad-hoc signed). The app is **not notarized** (no Apple Developer team), so on a
+  *different* Mac the first launch must be **right-click → Open** once — or run
+  `xattr -dr com.apple.quarantine /Applications/LinkToMac.app` after dragging it in.
+- **Android** — `cd mobile && eas login && eas build --platform android --profile preview --local`
+  → an installable **APK** (sideload).
+
 ## Using the features
 
 - **Clipboard** — just copy on either device; the other one follows. You can pause sending
