@@ -2,7 +2,7 @@
   "expo": {
     "name": "LinkToMac",
     "slug": "linktomac",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "linktomac",
@@ -51,6 +51,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4fe65b6d-6718-4865-933a-badabf77c68c"
+      }
     }
   }
 }
