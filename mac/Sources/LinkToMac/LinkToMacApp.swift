@@ -16,7 +16,10 @@ struct LinkToMacApp: App {
                 onShowServerSettings: delegate.showServerSettingsWindow,
             )
         } label: {
-            Image(systemName: delegate.client.menuBarSymbol)
+            // The app mark as a template image (monochrome; the system tints it for the menu bar).
+            // Dimmed when the phone isn't linked, so it doubles as an at-a-glance status cue.
+            Image("MenuBarIcon")
+                .opacity(delegate.client.isLinked ? 1 : 0.45)
         }
         .menuBarExtraStyle(.window)
     }

@@ -29,6 +29,7 @@ targets:
     sources:
       - path: Sources
       - path: Resources/AppIcon.icon
+      - path: Resources/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMac

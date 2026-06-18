@@ -389,6 +389,10 @@ extension RelayClient {
     /// "down" is expected, not an error, so the UI presents it as such.
     var isRelayConfigured: Bool { !Config.host.isEmpty }
 
+    /// Whether the phone is reachable on *either* transport (relay peer online or a LAN peer).
+    /// Drives the menu-bar icon's brightness (full when linked, dimmed when not).
+    var isLinked: Bool { peerOnline || lanPeerConnected }
+
     /// JSON payload encoded into the pairing QR shown to the phone.
     var pairingQRPayload: String { PairingStore.qrPayload(pairing) }
 
@@ -408,13 +412,5 @@ extension RelayClient {
 
     var peerText: String {
         "Android: \((peerOnline || lanPeerConnected) ? "online" : "offline")"
-    }
-
-    var menuBarSymbol: String {
-        if lanPeerConnected { return "antenna.radiowaves.left.and.right" }
-        switch status {
-        case .joined, .connecting, .connected: return "antenna.radiowaves.left.and.right"
-        case .disconnected, .error: return "antenna.radiowaves.left.and.right.slash"
-        }
     }
 }
