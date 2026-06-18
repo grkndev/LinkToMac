@@ -10,7 +10,9 @@ struct ServerSettings: Sendable, Equatable {
     var secure: Bool // wss:// when true, ws:// when false
     var token: String
     /// LAN-direct: this Mac runs a WebSocket server on `lanPort` and advertises it over Bonjour so
-    /// a phone on the same network connects without the relay. `lanEnabled` gates it (default on).
+    /// a phone on the same network connects without the relay. Default on — LAN is the primary
+    /// transport; the relay (if configured) is only a fallback when LAN is down (see the phone's
+    /// ConnectionManager). With no relay set, the app is LAN-only.
     var lanEnabled: Bool
     var lanPort: Int
 
