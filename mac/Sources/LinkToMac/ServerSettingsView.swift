@@ -13,6 +13,8 @@ struct ServerSettingsView: View {
     @State private var port: String
     @State private var secure: Bool
     @State private var token: String
+    @State private var lanEnabled: Bool
+    @State private var lanPort: String
 
     init(client: RelayClient, onSaved: @escaping () -> Void) {
         self.client = client
@@ -22,14 +24,22 @@ struct ServerSettingsView: View {
         _port = State(initialValue: String(s.port))
         _secure = State(initialValue: s.secure)
         _token = State(initialValue: s.token)
+        _lanEnabled = State(initialValue: s.lanEnabled)
+        _lanPort = State(initialValue: String(s.lanPort))
     }
 
     private var portValue: Int? {
         guard let p = Int(port.trimmingCharacters(in: .whitespaces)), (1...65535).contains(p) else { return nil }
         return p
     }
+    private var lanPortValue: Int? {
+        guard let p = Int(lanPort.trimmingCharacters(in: .whitespaces)), (1...65535).contains(p) else { return nil }
+        return p
+    }
+    private var hasRelay: Bool { !host.trimmingCharacters(in: .whitespaces).isEmpty }
     private var canSave: Bool {
-        !host.trimmingCharacters(in: .whitespaces).isEmpty && portValue != nil
+        // At least one transport must be valid: a relay endpoint, or LAN-direct.
+        (hasRelay && portValue != nil) || (lanEnabled && lanPortValue != nil)
     }
 
     var body: some View {
@@ -71,6 +81,25 @@ struct ServerSettingsView: View {
                     .textFieldStyle(.roundedBorder)
             }
 
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("LAN-direct (no relay on the same Wi-Fi)", isOn: $lanEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                Text("This Mac runs a local server the phone connects to directly. The relay above is then only used when you're away.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if lanEnabled {
+                    labeled("LAN port", caption: lanPortValue == nil ? "1–65535" : " ") {
+                        TextField("53124", text: $lanPort)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 84)
+                    }
+                }
+            }
+
             HStack {
                 Spacer()
                 Button("Save") { save() }
@@ -94,14 +123,16 @@ struct ServerSettingsView: View {
     }
 
     private func save() {
-        guard let p = portValue else { return }
         ServerSettingsStore.save(ServerSettings(
             host: host.trimmingCharacters(in: .whitespaces),
-            port: p,
+            port: portValue ?? 443,
             secure: secure,
-            token: token.trimmingCharacters(in: .whitespaces)
+            token: token.trimmingCharacters(in: .whitespaces),
+            lanEnabled: lanEnabled,
+            lanPort: lanPortValue ?? ServerSettingsStore.defaultLanPort
         ))
-        // Apply immediately: reconnect if already active, otherwise start the connection.
+        // Apply immediately: reconnect the relay if already active, otherwise start it. `onSaved`
+        // also reapplies the LAN server (port/enabled may have changed).
         if client.isActive { client.reconnect() } else { client.connect() }
         onSaved()
     }

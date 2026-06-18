@@ -19,6 +19,10 @@ enum Config {
     /// Operator-defined relay password, sent as a Bearer header. Empty until configured.
     static var authToken: String { ServerSettingsStore.load().token }
 
+    /// LAN-direct (relay-less) server settings, embedded in the QR so the phone configures itself.
+    static var lanEnabled: Bool { ServerSettingsStore.load().lanEnabled }
+    static var lanPort: Int { ServerSettingsStore.load().lanPort }
+
     /// `ws(s)://<host>:<port>/ws` — token travels in the Authorization header, not the URL.
     /// Returns a non-connectable placeholder when unconfigured (callers gate on `host` first).
     static var relayURL: URL {

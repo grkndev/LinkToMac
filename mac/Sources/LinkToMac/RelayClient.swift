@@ -23,6 +23,11 @@ final class RelayClient {
     private(set) var peerOnline = false
     private(set) var lastError: String?
 
+    /// Whether a phone is connected over the **LAN-direct** server (set by the app from
+    /// `LanServer.onPeerChange`). Independent of `peerOnline` (the relay peer); the menu reflects
+    /// whichever transport is live, and this is a real connection even when the relay is unset.
+    var lanPeerConnected = false
+
     /// Most recent clipboard text received from the peer (decrypted via `ClipCodec`).
     private(set) var lastClip: String?
 
@@ -53,6 +58,14 @@ final class RelayClient {
     /// Watches the Mac clipboard; created on first connect, forwards copies to the peer.
     private var pasteboard: PasteboardWatcher?
 
+    /// Fan-out hook for a second transport (the LAN-direct server). Called with every local
+    /// copy that passes the `sendToAndroid` gate, so a phone on the LAN gets clips too.
+    var onLocalClip: ((String) -> Void)?
+
+    /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
+    /// re-advertise under the new pairing id and invalidate any stale authenticated socket.
+    var onPairingChanged: (() -> Void)?
+
     private static let heartbeatInterval: Duration = .seconds(25)
     private static let maxBackoff = 30.0
 
@@ -67,6 +80,7 @@ final class RelayClient {
             pasteboard = PasteboardWatcher { [weak self] text in
                 guard let self, self.sendToAndroid else { return }
                 self.sendClip(text)
+                self.onLocalClip?(text) // fan out to the LAN-direct transport too
             }
         }
         pasteboard?.start()
@@ -95,6 +109,19 @@ final class RelayClient {
         Task { [weak self] in try? await self?.send(.clip(nonce: nonce, ct: ct)) }
     }
 
+    /// Write a clip that arrived over the LAN-direct transport. Reuses the same echo-suppressed
+    /// pasteboard writer as relay clips, so a local re-copy isn't bounced back to the phone.
+    func writeRemoteClip(_ text: String) {
+        pasteboard?.write(text)
+        lastClip = text
+        log("lan clip received (\(text.count) chars)")
+    }
+
+    /// Run a remote action that arrived over the LAN-direct transport (e.g. "lock").
+    func runRemoteCommand(_ action: String) {
+        handleCommand(action)
+    }
+
     func toggle() {
         shouldStay ? disconnect() : connect()
     }
@@ -117,19 +144,21 @@ final class RelayClient {
         PairingStore.clear()
         pairing = PairingStore.loadOrCreate()
         lastClip = nil
+        onPairingChanged?()
         if wasActive { connect() }
     }
 
     // MARK: - Socket lifecycle
 
     private func openSocket() {
-        // No baked-in endpoint: stay idle (no reconnect loop) until the user sets a server.
+        // No relay endpoint set: stay idle (no reconnect loop). This is a normal LAN-only setup,
+        // not an error — the LAN-direct server still carries the connection, so don't flag it red.
         guard !Config.host.isEmpty else {
             reconnectTask?.cancel()
             reconnectTask = nil
             teardown()
-            status = .error("not configured")
-            lastError = "Set the relay server in Server Settings…"
+            status = .disconnected
+            lastError = nil
             return
         }
         reconnectTask?.cancel()
@@ -259,8 +288,14 @@ final class RelayClient {
             } else {
                 log("clip decrypt failed (key mismatch or corrupt)")
             }
-        case let .cmd(action):
-            handleCommand(action)
+        case let .cmd(nonce, ct):
+            // Same AEAD as clips: drop anything that fails to authenticate (corrupt, tampered,
+            // a key mismatch after re-pair, or a forged command from a LAN/relay attacker).
+            if let action = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+                handleCommand(action)
+            } else {
+                log("cmd decrypt failed (key mismatch or corrupt)")
+            }
         case .pong:
             break
         }
@@ -350,6 +385,10 @@ final class RelayClient {
 extension RelayClient {
     var isActive: Bool { shouldStay }
 
+    /// Whether a relay endpoint is configured. When false the app is LAN-only — the relay being
+    /// "down" is expected, not an error, so the UI presents it as such.
+    var isRelayConfigured: Bool { !Config.host.isEmpty }
+
     /// JSON payload encoded into the pairing QR shown to the phone.
     var pairingQRPayload: String { PairingStore.qrPayload(pairing) }
 
@@ -357,23 +396,24 @@ extension RelayClient {
     var pairingRoomShort: String { String(pairing.room.prefix(12)) + "…" }
 
     var statusText: String {
+        if lanPeerConnected { return "LAN: connected" }
         switch status {
-        case .disconnected: return "Relay: disconnected"
+        case .disconnected: return isRelayConfigured ? "Relay: disconnected" : "LAN-only — waiting"
         case .connecting: return "Relay: connecting…"
         case .connected: return "Relay: connected"
         case .joined: return "Relay: joined"
-        case let .error(code): return "Relay: error (\(code))"
+        case let .error(code): return isRelayConfigured ? "Relay: error (\(code))" : "LAN-only — waiting"
         }
     }
 
     var peerText: String {
-        "Android: \(peerOnline ? "online" : "offline")"
+        "Android: \((peerOnline || lanPeerConnected) ? "online" : "offline")"
     }
 
     var menuBarSymbol: String {
+        if lanPeerConnected { return "antenna.radiowaves.left.and.right" }
         switch status {
-        case .joined: return "antenna.radiowaves.left.and.right"
-        case .connecting, .connected: return "antenna.radiowaves.left.and.right"
+        case .joined, .connecting, .connected: return "antenna.radiowaves.left.and.right"
         case .disconnected, .error: return "antenna.radiowaves.left.and.right.slash"
         }
     }

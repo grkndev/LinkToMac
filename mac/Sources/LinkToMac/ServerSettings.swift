@@ -9,6 +9,10 @@ struct ServerSettings: Sendable, Equatable {
     var port: Int
     var secure: Bool // wss:// when true, ws:// when false
     var token: String
+    /// LAN-direct: this Mac runs a WebSocket server on `lanPort` and advertises it over Bonjour so
+    /// a phone on the same network connects without the relay. `lanEnabled` gates it (default on).
+    var lanEnabled: Bool
+    var lanPort: Int
 
     /// True once a host has been entered — the relay won't connect until then.
     var isConfigured: Bool { !host.isEmpty }
@@ -23,6 +27,9 @@ enum ServerSettingsStore {
     private static let kHost = "relayHost"
     private static let kPort = "relayPort"
     private static let kSecure = "relaySecure"
+    private static let kLanEnabled = "lanEnabled"
+    private static let kLanPort = "lanPort"
+    static let defaultLanPort = 53124
 
     static func load() -> ServerSettings {
         let d = UserDefaults.standard
@@ -30,7 +37,9 @@ enum ServerSettingsStore {
             host: d.string(forKey: kHost) ?? "",
             port: d.object(forKey: kPort) as? Int ?? 443,
             secure: d.object(forKey: kSecure) as? Bool ?? true,
-            token: keychainGet() ?? ""
+            token: keychainGet() ?? "",
+            lanEnabled: d.object(forKey: kLanEnabled) as? Bool ?? true,
+            lanPort: d.object(forKey: kLanPort) as? Int ?? defaultLanPort
         )
     }
 
@@ -39,6 +48,8 @@ enum ServerSettingsStore {
         d.set(s.host, forKey: kHost)
         d.set(s.port, forKey: kPort)
         d.set(s.secure, forKey: kSecure)
+        d.set(s.lanEnabled, forKey: kLanEnabled)
+        d.set(s.lanPort, forKey: kLanPort)
         keychainSet(s.token)
     }
 

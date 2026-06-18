@@ -39,22 +39,23 @@ enum PairingStore {
         SecItemDelete(baseQuery() as CFDictionary)
     }
 
-    /// JSON the phone scans (v2): `{"v":2,"room","key","name","host","port","secure","token"}`.
-    /// `name` is this Mac's current computer name, read fresh on every QR render. The relay
-    /// endpoint + password (`host`/`port`/`secure`/`token`, from `Config`) ride along so the
-    /// phone auto-configures the server on scan — the QR already carries the E2E `key`, so
-    /// adding the token doesn't widen its exposure. The phone still accepts legacy v1 payloads.
+    /// JSON the phone scans (v3): v2's `{room,key,name,host,port,secure,token}` plus the LAN-direct
+    /// params `{lport,lan}` (this Mac's WebSocket port + whether LAN is enabled). `name` is the
+    /// current computer name, read fresh on every QR render. The relay endpoint may be blank
+    /// (LAN-only). The phone still accepts legacy v1/v2 payloads.
     static func qrPayload(_ pairing: Pairing) -> String {
         let name = Host.current().localizedName ?? "Mac"
         let payload = QRPayload(
-            v: 2,
+            v: 3,
             room: pairing.room,
             key: pairing.key,
             name: name,
             host: Config.host,
             port: Config.port,
             secure: Config.secure,
-            token: Config.authToken
+            token: Config.authToken,
+            lport: Config.lanPort,
+            lan: Config.lanEnabled
         )
         let data = (try? JSONEncoder().encode(payload)) ?? Data()
         return String(decoding: data, as: UTF8.self)
@@ -69,6 +70,8 @@ enum PairingStore {
         let port: Int
         let secure: Bool
         let token: String
+        let lport: Int
+        let lan: Bool
     }
 
     private static func randomBase64(_ count: Int) -> String {

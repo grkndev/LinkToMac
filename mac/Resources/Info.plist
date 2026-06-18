@@ -29,5 +29,14 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- LAN-direct mode: this Mac runs a WebSocket server and advertises it over Bonjour so a
+	     phone on the same network connects without a relay. macOS 14+ gates local networking on
+	     a usage string + the declared service type. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>LinkToMac connects directly to your paired phone on the local network to sync the clipboard without a relay server.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_linktomac._tcp</string>
+	</array>
 </dict>
 </plist>

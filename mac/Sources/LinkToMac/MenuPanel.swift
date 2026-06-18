@@ -52,6 +52,13 @@ struct MenuPanel: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if !client.isRelayConfigured {
+                    // Reassure the user the link still works without a relay URL set.
+                    Text("No relay set — local network only")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -161,18 +168,29 @@ struct MenuPanel: View {
     private struct StatusInfo { let text: String; let color: Color }
 
     private var status: StatusInfo {
+        // A phone on the LAN is a live connection regardless of the relay's state — show it first.
+        if client.lanPeerConnected {
+            return StatusInfo(text: "Connected · Android online · LAN", color: .green)
+        }
         switch client.status {
         case .joined:
             return client.peerOnline
-                ? StatusInfo(text: "Connected · Android online", color: .green)
-                : StatusInfo(text: "Waiting for Android", color: .orange)
+                ? StatusInfo(text: "Connected · Android online · Relay", color: .green)
+                : StatusInfo(text: "Waiting for Android · Relay", color: .orange)
         case .connecting, .connected:
             return StatusInfo(text: "Connecting…", color: .orange)
         case .disconnected:
+            // No relay configured is the normal LAN-only setup, not an error.
+            if !client.isRelayConfigured {
+                return StatusInfo(text: "LAN-direct · waiting for phone", color: .orange)
+            }
             return client.isActive
                 ? StatusInfo(text: "Connecting…", color: .orange)
                 : StatusInfo(text: "Disconnected", color: .gray)
         case .error:
+            if !client.isRelayConfigured {
+                return StatusInfo(text: "LAN-direct · waiting for phone", color: .orange)
+            }
             return StatusInfo(text: "Connection error", color: .red)
         }
     }
