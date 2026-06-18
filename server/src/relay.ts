@@ -124,7 +124,8 @@ export class Relay {
     if (!room) return;
 
     // Same fan-out as clips: forward verbatim to the *other* peer(s); never echo. The
-    // relay treats `action` as opaque, so new commands never need a server change.
+    // action is E2E-encrypted (nonce/ct), so the relay can't tell one command from
+    // another — new commands never need a server change.
     const payload = JSON.stringify(msg);
     let delivered = 0;
     for (const peer of room.values()) {
@@ -138,7 +139,7 @@ export class Relay {
       delivered++;
     }
     this.log.info(
-      { room: redactRoom(conn.room), from: conn.device, action: msg.action, delivered },
+      { room: redactRoom(conn.room), from: conn.device, bytes: msg.ct.length, delivered },
       'cmd',
     );
   }
