@@ -2,8 +2,8 @@
 
 A minimal **WebSocket relay** ("dumb pipe") for the Android ↔ macOS clipboard sync
 project. It pairs the two ends of a room by `roomId` and forwards **end-to-end
-encrypted** `clip` frames between them. The relay never stores or decrypts content —
-it only sees `roomId`, ciphertext size, and timing.
+encrypted** `clip` / `cmd` / `stat` frames between them. The relay never stores or
+decrypts content — it only sees `roomId`, ciphertext size, and timing.
 
 See the design doc: [`../docs/plans/2026-06-09-relay-server-design.md`](../docs/plans/2026-06-09-relay-server-design.md).
 
@@ -59,16 +59,22 @@ First message must be `join`.
 // client → relay
 { "t": "join", "room": "<roomId>", "device": "android" | "mac" }
 { "t": "clip", "nonce": "<base64>", "ct": "<base64>" }   // opaque, forwarded verbatim
+{ "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // remote action (e.g. lock), opaque
+{ "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (e.g. Mac battery), opaque
 { "t": "ping" }
 
 // relay → client
 { "t": "joined", "peers": ["mac"] }
 { "t": "peer", "state": "online" | "offline", "device": "mac" }
+{ "t": "clip", "nonce": "...", "ct": "..." }   // the peer's clip/cmd/stat, relayed verbatim
+{ "t": "cmd",  "nonce": "...", "ct": "..." }
+{ "t": "stat", "nonce": "...", "ct": "..." }
 { "t": "error", "code": "room-full" | "bad-join" | "not-joined" | "rate-limit" | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
 ```
 
-A `clip` is forwarded to the *other* peer only — the sender never receives its own echo.
+`clip`, `cmd`, and `stat` are forwarded to the *other* peer only — the sender never receives its
+own echo.
 
 ## Docker
 

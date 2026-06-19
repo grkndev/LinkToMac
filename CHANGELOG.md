@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.2.0 (2026-06-20)
+
+### Features
+- **Mac battery on the phone** — the phone's Home screen now shows the Mac's battery
+  percentage and charging state as a chip next to the connection status, synced live over the
+  same end-to-end-encrypted link as the clipboard (LAN-direct or relay). A charging Mac is
+  tinted differently; desktop Macs (no internal battery) show nothing.
+
+### Internal
+- New `stat` telemetry message (Mac → phone), E2E-encrypted (ChaCha20-Poly1305) and forwarded
+  opaquely by the relay exactly like `clip`/`cmd`, over both the LAN-direct and relay transports.
+- The Mac now treats a per-frame `bad-message` relay error as non-fatal (logged, not surfaced
+  as a connection error).
+
+### Updating
+- **macOS** auto-updates via Sparkle. **Android** needs the new APK reinstalled — this release
+  changes native code, so it is **not** an over-the-air (EAS Update) change.
+
 ## v0.1.0 — Beta (2026-06-18)
 
 First public **beta**. Links one Android phone and one Mac. Personal-use project — not

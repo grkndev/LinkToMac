@@ -1,10 +1,10 @@
-### Complated
+### Completed
 - [X] Clipboard sync
 - [x] Lock your mac from Android
 - [x] Auto-Lock your mac when Android moves out of range
+- [x] LAN-Direct Mode
+- [x] Show battery percent on Android App
 ### In Progress
-- [ ] LAN-Direct Mode
-- [ ] Show battery percent on Android App
 - [ ] Notifications sync
 ### Upcoming
 - [ ] Mirror your Android screen to mac

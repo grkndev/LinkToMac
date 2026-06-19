@@ -13,6 +13,8 @@ Windows", but self-hosted.
 - 🔒 **Lock from your phone** — one tap on the Home screen locks your Mac.
 - 🚶 **Auto-lock when you leave** — the Mac locks itself once your phone is out of
   Bluetooth range. (Locking only — macOS has no way to auto-*unlock*.)
+- 🔋 **Mac battery on your phone** — your Mac's charge level and charging state show up on the
+  phone's Home screen, live.
 - 🔗 **Pair once** with a QR code shown on the Mac.
 - 📶 **No relay on the same Wi-Fi** — the phone connects straight to the Mac (LAN-direct), and
   falls back to the relay automatically when you leave home. Works relay-free if you never set one up.
@@ -107,8 +109,8 @@ no internet.
 ## Scope & status
 
 v1 links **one phone and one Mac** and syncs **text only** (images/files are out of scope).
-Clipboard sync (end-to-end encrypted), remote lock, and proximity auto-lock are implemented;
-some lifecycle hardening is still on the roadmap. A separate technical document
+Clipboard sync (end-to-end encrypted), remote lock, proximity auto-lock, and live Mac-battery
+telemetry are implemented; some lifecycle hardening is still on the roadmap. A separate technical document
 ([`TECHNICAL.md`](TECHNICAL.md)) covers the internals in depth.
 
 ## License
