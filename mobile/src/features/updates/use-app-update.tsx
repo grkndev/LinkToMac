@@ -1,0 +1,109 @@
+import * as Updates from 'expo-updates';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { Alert, Linking } from 'react-native';
+
+import { checkForAppUpdate, type AppUpdate } from './check';
+
+type PendingUpdate = Exclude<AppUpdate, { kind: 'none' }>;
+
+type UpdateState = {
+  /** The pending update to surface in the modal, or null when nothing is pending / dismissed. */
+  update: PendingUpdate | null;
+  /** A check is in flight (drives the About row's "Checking…" hint). */
+  checking: boolean;
+  /** Re-run a check. `manual` surfaces "up to date" / "failed" feedback (the About button). */
+  checkNow: (manual?: boolean) => Promise<void>;
+  /** Download + reload an OTA update in place. */
+  applyOta: () => Promise<void>;
+  /** Open the APK download (or release page) for a native update. */
+  openDownload: () => void;
+  /** Dismiss the modal ("Later"). */
+  dismiss: () => void;
+};
+
+const Ctx = createContext<UpdateState | null>(null);
+
+export function useAppUpdate(): UpdateState {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error('useAppUpdate must be used within AppUpdateProvider');
+  return ctx;
+}
+
+/**
+ * Owns the "is there a newer version?" check and the resulting modal state for the whole app.
+ * Auto-checks once per launch (release builds only); the About screen drives a manual check
+ * through {@link useAppUpdate}. See {@link checkForAppUpdate} for the OTA-vs-native split.
+ */
+export function AppUpdateProvider({ children }: { children: ReactNode }) {
+  const [update, setUpdate] = useState<PendingUpdate | null>(null);
+  const [checking, setChecking] = useState(false);
+  const inFlight = useRef(false);
+
+  const checkNow = useCallback(async (manual = false) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setChecking(true);
+    try {
+      const result = await checkForAppUpdate();
+      if (result.kind === 'none') {
+        if (manual) Alert.alert("You're up to date", 'No new version is available.');
+        return;
+      }
+      setUpdate(result);
+    } catch {
+      if (manual) {
+        Alert.alert('Check failed', "Couldn't check for updates. Try again later.");
+      }
+    } finally {
+      inFlight.current = false;
+      setChecking(false);
+    }
+  }, []);
+
+  // Auto-check once per launch. Skipped in dev: OTA is disabled there and a stale native version
+  // would nag on every reload while iterating. Deferred a microtask so the check (and its
+  // setState) runs after the first paint rather than synchronously inside the effect.
+  useEffect(() => {
+    if (__DEV__) return;
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (!cancelled) checkNow(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkNow]);
+
+  const applyOta = useCallback(async () => {
+    try {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync();
+    } catch {
+      setUpdate(null);
+      Alert.alert('Update failed', "Couldn't download the update. Try again later.");
+    }
+  }, []);
+
+  const openDownload = useCallback(() => {
+    setUpdate((u) => {
+      if (u?.kind === 'native') Linking.openURL(u.url).catch(() => {});
+      return null;
+    });
+  }, []);
+
+  const dismiss = useCallback(() => setUpdate(null), []);
+
+  return (
+    <Ctx.Provider value={{ update, checking, checkNow, applyOta, openDownload, dismiss }}>
+      {children}
+    </Ctx.Provider>
+  );
+}

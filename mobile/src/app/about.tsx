@@ -1,39 +1,24 @@
+import { Column, Host, Text } from "@expo/ui/jetpack-compose";
 import {
-  Box,
-  Column,
-  Host,
-  Icon,
-  Shape,
-  Surface,
-  Text,
-} from "@expo/ui/jetpack-compose";
-import {
-  fillMaxSize,
   fillMaxWidth,
   padding,
-  size,
   verticalScroll,
 } from "@expo/ui/jetpack-compose/modifiers";
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
-import { useState } from "react";
-import { Alert, Image, Linking, useColorScheme, View } from "react-native";
+import { Image, Linking, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useIcons } from "@/components/icons";
 import { Group, SEED, useM3Colors } from "@/components/m3";
 import { ActionRow, InfoRow } from "@/components/settings-rows";
 import { Spacing } from "@/constants/theme";
+import { useAppUpdate } from "@/features/updates/use-app-update";
 
 const REPO_URL = "https://github.com/grkndev/LinkToMac";
 const PROFILE_URL = "https://grkn.dev";
 const RELEASES_URL = "https://github.com/grkndev/LinkToMac/releases";
 const CONTACT_EMAIL = "info@grkn.dev";
-
-/** 28dp "extra-large" rounded square for the expressive hero tile (matches Home). */
-const HERO_SHAPE = Shape.RoundedCorner({
-  cornerRadii: { topStart: 28, topEnd: 28, bottomStart: 28, bottomEnd: 28 },
-});
 
 const open = (url: string) => {
   Linking.openURL(url).catch(() => {});
@@ -48,52 +33,9 @@ export default function AboutScreen() {
 
   const version = Constants.expoConfig?.version ?? "—";
 
-  const [checking, setChecking] = useState(false);
-
-  // Manual OTA check: query EAS Update, then offer to download + restart. The whole flow is a
-  // no-op outside release builds (Updates.isEnabled is false in dev / Expo Go).
-  const checkForUpdates = async () => {
-    if (checking) return;
-    if (!Updates.isEnabled) {
-      Alert.alert(
-        "Updates unavailable",
-        "Over-the-air updates only run in release builds.",
-      );
-      return;
-    }
-    setChecking(true);
-    try {
-      const result = await Updates.checkForUpdateAsync();
-      if (!result.isAvailable) {
-        Alert.alert("You're up to date", "No new update is available.");
-        return;
-      }
-      Alert.alert("Update available", "Download it and restart the app now?", [
-        { text: "Later", style: "cancel" },
-        {
-          text: "Update",
-          onPress: async () => {
-            try {
-              await Updates.fetchUpdateAsync();
-              await Updates.reloadAsync();
-            } catch {
-              Alert.alert(
-                "Update failed",
-                "Couldn't download the update. Try again later.",
-              );
-            }
-          },
-        },
-      ]);
-    } catch {
-      Alert.alert(
-        "Check failed",
-        "Couldn't check for updates. Try again later.",
-      );
-    } finally {
-      setChecking(false);
-    }
-  };
+  // Manual check routed through the shared updater: it surfaces the same modal as the launch check
+  // (OTA → download + restart, or a newer native APK → release download). See use-app-update.
+  const { checking, checkNow } = useAppUpdate();
 
   return (
     <Host
@@ -167,9 +109,9 @@ export default function AboutScreen() {
                 ? "Checking…"
                 : Updates.isEnabled
                   ? `Channel: ${Updates.channel ?? "—"}`
-                  : "Available in release builds only."
+                  : "Checks GitHub for a new app version."
             }
-            onPress={checkForUpdates}
+            onPress={() => checkNow(true)}
           />
         </Group>
 

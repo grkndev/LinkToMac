@@ -21,6 +21,8 @@ import {
   ClipBootProvider,
   useClipBootContext,
 } from "@/features/selfadb/clip-boot-context";
+import { AppUpdateProvider } from "@/features/updates/use-app-update";
+import { UpdateModal } from "@/features/updates/UpdateModal";
 import { StatusBar } from "expo-status-bar";
 import { SEED, useM3Colors } from "@/components/m3";
 import { fillMaxSize, size } from "@expo/ui/jetpack-compose/modifiers";
@@ -52,8 +54,11 @@ export default function RootLayout() {
         <ClipBootProvider>
           <PairingProvider>
             <IconsProvider>
-              <StatusBar style="auto" />
-              <RootNavigator background={m3.background} onSurface={m3.onSurface} />
+              <AppUpdateProvider>
+                <StatusBar style="auto" />
+                <RootNavigator background={m3.background} onSurface={m3.onSurface} />
+                <UpdateModal />
+              </AppUpdateProvider>
             </IconsProvider>
           </PairingProvider>
         </ClipBootProvider>
