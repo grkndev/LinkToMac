@@ -9,7 +9,7 @@ import {
   Surface,
   Text,
   type MaterialColors,
-} from '@expo/ui/jetpack-compose';
+} from "@expo/ui/jetpack-compose";
 import {
   alpha,
   background,
@@ -21,11 +21,11 @@ import {
   size,
   verticalScroll,
   weight,
-} from '@expo/ui/jetpack-compose/modifiers';
-import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
-import { Alert, useColorScheme } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+} from "@expo/ui/jetpack-compose/modifiers";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+import { Alert, useColorScheme } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   ButtonGroup,
@@ -37,18 +37,19 @@ import {
   tonal,
   useM3Colors,
   type RowShape,
-} from '@/components/m3';
-import { useIcons, type IconSource } from '@/components/icons';
-import { Spacing } from '@/constants/theme';
-import SelfAdb from '@/features/selfadb/client';
-import { useClipHistory } from '@/features/clip-history/use-clip-history';
-import { usePairing } from '@/features/relay/pairing-context';
-import { useRelayStatus } from '@/features/relay/use-relay-status';
+} from "@/components/m3";
+import { useIcons, type IconSource } from "@/components/icons";
+import { Spacing } from "@/constants/theme";
+import SelfAdb from "@/features/selfadb/client";
+import { useClipHistory } from "@/features/clip-history/use-clip-history";
+import { useMacBattery } from "@/features/relay/use-mac-battery";
+import { usePairing } from "@/features/relay/pairing-context";
+import { useRelayStatus } from "@/features/relay/use-relay-status";
 
 /** Brand green for the "online" status dot — M3 has no green role, so this stays a literal. */
-const ONLINE = '#2ECC71';
+const ONLINE = "#2ECC71";
 /** Amber for the transient connecting/reconnecting state (M3 has no amber role). */
-const RECONNECTING = '#F39C12';
+const RECONNECTING = "#F39C12";
 /** How many failed reconnect attempts before the UI gives up and shows "Disconnected".
  *  The link keeps retrying in the background regardless; this is purely the label threshold. */
 const RECONNECT_LIMIT = 3;
@@ -73,42 +74,61 @@ export default function HomeScreen() {
   const { pairing } = usePairing();
   const { relay } = useRelayStatus();
   const { items: clipItems } = useClipHistory();
+  const { battery } = useMacBattery();
 
   const connected = relay.peerOnline;
   // The link auto-reconnects with backoff; show "Reconnecting" while it's actively retrying, and
   // only fall back to "Disconnected" once it's tried RECONNECT_LIMIT times (or hit a dead end).
-  const retrying = !connected && (relay.status === 'connecting' || relay.status === 'connected');
+  const retrying =
+    !connected &&
+    (relay.status === "connecting" || relay.status === "connected");
   const attempt = relay.attempt ?? 0;
-  const connState: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' = connected
-    ? 'connected'
+  const connState:
+    | "connected"
+    | "connecting"
+    | "reconnecting"
+    | "disconnected" = connected
+    ? "connected"
     : retrying && attempt < RECONNECT_LIMIT
       ? attempt === 0
-        ? 'connecting'
-        : 'reconnecting'
-      : 'disconnected';
+        ? "connecting"
+        : "reconnecting"
+      : "disconnected";
   const statusLabel =
-    connState === 'connected'
-      ? 'Connected'
-      : connState === 'connecting'
-        ? 'Connecting…'
-        : connState === 'reconnecting'
-          ? 'Reconnecting…'
-          : 'Disconnected';
+    connState === "connected"
+      ? "Connected"
+      : connState === "connecting"
+        ? "Connecting…"
+        : connState === "reconnecting"
+          ? "Reconnecting…"
+          : "Disconnected";
   const statusColor =
-    connState === 'connected' ? ONLINE : connState === 'disconnected' ? colors.error : RECONNECTING;
+    connState === "connected"
+      ? ONLINE
+      : connState === "disconnected"
+        ? colors.error
+        : RECONNECTING;
   // How the link is carried: direct over the LAN, or via the relay. Only meaningful while connected.
   const transportLabel =
-    relay.transport === 'lan' ? 'LAN' : relay.transport === 'relay' ? 'Relay' : null;
+    relay.transport === "lan"
+      ? "LAN"
+      : relay.transport === "relay"
+        ? "Relay"
+        : null;
 
   const latestMacClip = clipItems?.[0]?.text;
   const clipValue = latestMacClip
     ? truncate(latestMacClip)
     : clipItems === null
-      ? ''
-      : 'No items received yet';
+      ? ""
+      : "No items received yet";
 
   return (
-    <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>
+    <Host
+      style={{ flex: 1, backgroundColor: colors.background }}
+      seedColor={SEED}
+      colorScheme={scheme}
+    >
       <Column
         modifiers={[
           fillMaxWidth(),
@@ -127,11 +147,15 @@ export default function HomeScreen() {
           <Surface
             color={colors.surfaceContainerHigh}
             shape={HERO_SHAPE}
-            onClick={() => router.push('/settings')}
+            onClick={() => router.push("/settings")}
             modifiers={[size(44, 44)]}
           >
             <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
-              <Icon source={icons.settings} size={24} tint={colors.onSurfaceVariant} />
+              <Icon
+                source={icons.settings}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
             </Box>
           </Surface>
         </Row>
@@ -142,39 +166,109 @@ export default function HomeScreen() {
           horizontalAlignment="center"
           verticalArrangement={{ spacedBy: Spacing.two }}
         >
-          <Surface color={colors.secondaryContainer} shape={HERO_SHAPE} modifiers={[size(96, 96)]}>
+          <Surface
+            color={colors.secondaryContainer}
+            shape={HERO_SHAPE}
+            modifiers={[size(96, 96)]}
+          >
             <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
-              <Icon source={icons.laptop} size={46} tint={colors.onSecondaryContainer} />
+              <Icon
+                source={icons.laptop}
+                size={46}
+                tint={colors.onSecondaryContainer}
+              />
             </Box>
           </Surface>
           <Text
             color={colors.onSurface}
-            style={{ typography: 'headlineLarge', fontWeight: '600', textAlign: 'center' }}
+            style={{
+              typography: "headlineSmall",
+              fontWeight: "600",
+              textAlign: "center",
+            }}
           >
-            {pairing?.name ?? 'Mac'}
+            {pairing?.name ?? "Mac"}
           </Text>
-          <Row verticalAlignment="center" horizontalArrangement={{ spacedBy: Spacing.two }}>
-            <Box
-              modifiers={[size(8, 8), clip(Shapes.Circle), background(statusColor)]}
-            />
-            <Text
-              color={colors.onSurfaceVariant}
-              style={{ typography: 'labelLarge', fontWeight: '600' }}
-            >
-              {statusLabel}
-            </Text>
+         
+          <Row
+            verticalAlignment="center"
+            horizontalArrangement={{ spacedBy: Spacing.two }}
+          >
             {connected && transportLabel ? (
               <Surface color={colors.secondaryContainer} shape={CHIP_SHAPE}>
-                <Box modifiers={[padding(Spacing.two, Spacing.one, Spacing.two, Spacing.one)]}>
+                <Box
+                  modifiers={[
+                    padding(Spacing.two, Spacing.one, Spacing.two, Spacing.one),
+                  ]}
+                >
                   <Text
                     color={colors.onSecondaryContainer}
-                    style={{ typography: 'labelMedium', fontWeight: '700' }}
+                    style={{ typography: "labelMedium", fontWeight: "700" }}
                   >
                     {transportLabel}
                   </Text>
                 </Box>
               </Surface>
             ) : null}
+            {/* Mac battery — only when connected and the Mac has reported one (desktop Macs never do).
+                A charging Mac uses the tertiary tone so plugged-in reads at a glance. */}
+            {connected && battery ? (
+              <Surface
+                color={
+                  battery.charging
+                    ? colors.tertiaryContainer
+                    : colors.secondaryContainer
+                }
+                shape={CHIP_SHAPE}
+              >
+                <Row
+                  verticalAlignment="center"
+                  horizontalArrangement={{ spacedBy: Spacing.one }}
+                  modifiers={[
+                    padding(Spacing.two, Spacing.one, Spacing.two, Spacing.one),
+                  ]}
+                >
+                  <Icon
+                    source={icons.battery}
+                    size={14}
+                    tint={
+                      battery.charging
+                        ? colors.onTertiaryContainer
+                        : colors.onSecondaryContainer
+                    }
+                  />
+                  <Text
+                    color={
+                      battery.charging
+                        ? colors.onTertiaryContainer
+                        : colors.onSecondaryContainer
+                    }
+                    style={{ typography: "labelMedium", fontWeight: "700" }}
+                  >
+                    {`${battery.level}%`}
+                  </Text>
+                </Row>
+              </Surface>
+            ) : null}
+          </Row>
+
+           <Row
+            verticalAlignment="center"
+            horizontalArrangement={{ spacedBy: Spacing.two }}
+          >
+            <Box
+              modifiers={[
+                size(8, 8),
+                clip(Shapes.Circle),
+                background(statusColor),
+              ]}
+            />
+            <Text
+              color={colors.onSurfaceVariant}
+              style={{ typography: "labelLarge", fontWeight: "600" }}
+            >
+              {statusLabel}
+            </Text>
           </Row>
         </Column>
 
@@ -186,8 +280,10 @@ export default function HomeScreen() {
             label="Lock Mac"
             enabled={connected}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-              SelfAdb.sendCommand('lock').catch(() => {});
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+                () => {},
+              );
+              SelfAdb.sendCommand("lock").catch(() => {});
             }}
           />
           <ActionTile colors={colors} icon={icons.cast} label="Cast Screen" />
@@ -195,13 +291,18 @@ export default function HomeScreen() {
 
         {/* Info list — same grouped-list language as Settings. */}
         <Group>
-          <InfoRow colors={colors} icon={icons.folder} label="Received files" value="Soon" />
+          <InfoRow
+            colors={colors}
+            icon={icons.folder}
+            label="Received files"
+            value="Soon"
+          />
           <InfoRow
             colors={colors}
             icon={icons.clipboard}
             label="Clipboard"
             value={clipValue}
-            onClick={() => router.push('/clipboard-history')}
+            onClick={() => router.push("/clipboard-history")}
           />
         </Group>
       </Column>
@@ -229,13 +330,13 @@ function ActionTile({
   enabled?: boolean;
   shape?: RowShape;
 }) {
-  const t = tonal(colors, 'secondary');
+  const t = tonal(colors, "secondary");
   const active = onPress != null && enabled;
   const handleClick = active
     ? onPress
     : onPress != null
-      ? () => Alert.alert('Not connected', 'Connect to your Mac first.')
-      : () => Alert.alert('Soon', 'This feature is not available yet.');
+      ? () => Alert.alert("Not connected", "Connect to your Mac first.")
+      : () => Alert.alert("Soon", "This feature is not available yet.");
   return (
     <Surface
       color={colors.surfaceContainerHigh}
@@ -244,14 +345,21 @@ function ActionTile({
       modifiers={active ? [weight(1)] : [weight(1), alpha(0.5)]}
     >
       <Column
-        modifiers={[fillMaxWidth(), padding(Spacing.two, Spacing.three, Spacing.two, Spacing.three)]}
+        modifiers={[
+          fillMaxWidth(),
+          padding(Spacing.two, Spacing.three, Spacing.two, Spacing.three),
+        ]}
         horizontalAlignment="center"
         verticalArrangement={{ spacedBy: Spacing.two }}
       >
         <IconCircle source={icon} container={t.container} on={t.on} />
         <Text
           color={colors.onSurface}
-          style={{ typography: 'labelLarge', fontWeight: '600', textAlign: 'center' }}
+          style={{
+            typography: "labelLarge",
+            fontWeight: "600",
+            textAlign: "center",
+          }}
         >
           {label}
         </Text>
@@ -276,20 +384,34 @@ function InfoRow({
   onClick?: () => void;
   shape?: RowShape;
 }) {
-  const t = tonal(colors, 'secondary');
+  const t = tonal(colors, "secondary");
   return (
-    <Surface color={colors.surfaceContainerHigh} shape={shape} modifiers={[fillMaxWidth()]} onClick={onClick}>
-      <ListItem colors={{ containerColor: 'transparent' }} modifiers={[fillMaxWidth()]}>
+    <Surface
+      color={colors.surfaceContainerHigh}
+      shape={shape}
+      modifiers={[fillMaxWidth()]}
+      onClick={onClick}
+    >
+      <ListItem
+        colors={{ containerColor: "transparent" }}
+        modifiers={[fillMaxWidth()]}
+      >
         <ListItem.LeadingContent>
           <IconCircle source={icon} container={t.container} on={t.on} />
         </ListItem.LeadingContent>
         <ListItem.HeadlineContent>
-          <Text color={colors.onSurface} style={{ typography: 'bodyLarge', fontWeight: '500' }}>
+          <Text
+            color={colors.onSurface}
+            style={{ typography: "bodyLarge", fontWeight: "500" }}
+          >
             {label}
           </Text>
         </ListItem.HeadlineContent>
         <ListItem.SupportingContent>
-          <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+          <Text
+            color={colors.onSurfaceVariant}
+            style={{ typography: "bodyMedium" }}
+          >
             {value}
           </Text>
         </ListItem.SupportingContent>

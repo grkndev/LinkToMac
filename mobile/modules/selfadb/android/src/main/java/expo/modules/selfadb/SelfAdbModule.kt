@@ -14,6 +14,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import io.github.muntashirakon.adb.AdbPairingRequiredException
 import io.github.muntashirakon.adb.android.AdbMdns
+import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -47,12 +48,13 @@ class SelfAdbModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SelfAdb")
 
-    Events("onClip", "onMacClip", "onLog", "onStatus", "onRelay")
+    Events("onClip", "onMacClip", "onMacStat", "onLog", "onStatus", "onRelay")
 
     // Attach UI callbacks to the (possibly already-running) service.
     OnCreate {
       ClipBus.onClip = { text, ts -> sendEvent("onClip", mapOf("text" to text, "ts" to ts)) }
       ClipBus.onMacClip = { text, ts -> sendEvent("onMacClip", mapOf("text" to text, "ts" to ts)) }
+      ClipBus.onMacStat = { json -> parseStat(json)?.let { sendEvent("onMacStat", it) } }
       ClipBus.onLog = { msg -> sendEvent("onLog", mapOf("message" to msg)) }
       ClipBus.onRelay = { payload -> sendEvent("onRelay", payload) }
     }
@@ -368,6 +370,12 @@ class SelfAdbModule : Module() {
       ClipBus.clearBuffer()
     }
 
+    /** Last telemetry received FROM the Mac (e.g. battery `{level,charging}`), or null. Retained
+     *  natively across the JS-runtime gap so the UI can seed before the next push. */
+    AsyncFunction("getMacStat") {
+      ClipBus.lastStat?.let { parseStat(it) }
+    }
+
     /** Retained history of clips received FROM the Mac (newest-first), across the JS-runtime gap. */
     AsyncFunction("getClipHistory") {
       ClipBus.clipHistory()
@@ -431,10 +439,20 @@ class SelfAdbModule : Module() {
       // App going away: detach UI callbacks but LEAVE the service (and relay) running.
       ClipBus.onClip = null
       ClipBus.onMacClip = null
+      ClipBus.onMacStat = null
       ClipBus.onLog = null
       ClipBus.onRelay = null
       adb.close()
     }
+  }
+
+  /** Parse the Mac's telemetry JSON (`{"level":85,"charging":true}`) into an event/result map, or
+   *  null if it can't be parsed. Keeps the JS side free of raw-string parsing. */
+  private fun parseStat(json: String): Map<String, Any?>? = try {
+    val o = JSONObject(json)
+    mapOf("level" to o.getInt("level"), "charging" to o.optBoolean("charging", false))
+  } catch (e: Exception) {
+    null
   }
 
   /** Push (if needed) + launch the detached daemon, then own the bridge in the FGS. */

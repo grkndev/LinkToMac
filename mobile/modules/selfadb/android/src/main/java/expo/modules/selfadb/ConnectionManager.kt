@@ -32,6 +32,8 @@ class ConnectionManager(
   private val lanPort: Int,
   private val lanHost: String?,
   private val onClipReceived: (String) -> Unit,
+  /** Decrypted telemetry JSON received from the Mac (e.g. battery), from whichever link is active. */
+  private val onStatReceived: (String) -> Unit,
   /** transport is "lan" or "relay"; status/peerOnline/error/attempt mirror the child client. */
   private val onStatus: (transport: String, status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
   private val log: (String) -> Unit,
@@ -108,6 +110,7 @@ class ConnectionManager(
       port = port,
       key = key,
       onClipReceived = onClipReceived,
+      onStatReceived = onStatReceived,
       onStatus = { status, peerOnline, error, attempt -> post { onLanStatus(status, peerOnline, error, attempt) } },
       log = log,
     ).also { it.start() }
@@ -148,6 +151,7 @@ class ConnectionManager(
       room = room,
       key = key,
       onClipReceived = onClipReceived,
+      onStatReceived = onStatReceived,
       onStatus = { status, peerOnline, error, attempt -> post { onRelayStatus(status, peerOnline, error, attempt) } },
       log = log,
     ).also { it.start() }

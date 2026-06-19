@@ -9,6 +9,13 @@ export type LogEvent = {
   message: string;
 };
 
+export type StatEvent = {
+  /** Mac battery charge percent, 0–100 */
+  level: number;
+  /** whether the Mac is currently charging */
+  charging: boolean;
+};
+
 export type StatusEvent = {
   /** adb connection: "idle" | "connecting" | "connected" | "failed" */
   adb: string;
@@ -32,6 +39,8 @@ export type SelfAdbModuleEvents = {
   onClip: (event: ClipEvent) => void;
   /** a clip received FROM the Mac (written to this device's clipboard) */
   onMacClip: (event: ClipEvent) => void;
+  /** telemetry received FROM the Mac (e.g. battery level + charging state) */
+  onMacStat: (event: StatEvent) => void;
   onLog: (event: LogEvent) => void;
   onStatus: (event: StatusEvent) => void;
   onRelay: (event: RelayEvent) => void;

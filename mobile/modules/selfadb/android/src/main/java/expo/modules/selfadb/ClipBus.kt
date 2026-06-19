@@ -16,12 +16,17 @@ import java.util.Locale
 object ClipBus {
   @Volatile var onClip: ((String, Double) -> Unit)? = null
   @Volatile var onMacClip: ((String, Double) -> Unit)? = null
+  @Volatile var onMacStat: ((String) -> Unit)? = null
   @Volatile var onLog: ((String) -> Unit)? = null
   @Volatile var onRelay: ((Map<String, Any?>) -> Unit)? = null
 
   /** Last relay state, retained so a late-attaching UI can query it (the service may
    *  have connected long before the app/JS came up). */
   @Volatile var lastRelay: Map<String, Any?>? = null
+
+  /** Last telemetry JSON received from the Mac (e.g. battery), retained so a late-attaching UI can
+   *  query it — the service may have received it before the app/JS came up. */
+  @Volatile var lastStat: String? = null
 
   /**
    * In-process ring buffer of timestamped log lines. Retained for the lifetime of the
@@ -56,6 +61,13 @@ object ClipBus {
       clipBuffer.addLast(mapOf("text" to text, "ts" to ts))
     }
     onMacClip?.invoke(text, ts)
+  }
+
+  /** Record + emit telemetry JSON received from the Mac (e.g. battery). Retained for late-attaching UI. */
+  fun macStat(json: String) {
+    if (json.isEmpty()) return
+    lastStat = json
+    onMacStat?.invoke(json)
   }
 
   /** Snapshot of received clips, newest-first (matches the UI list order). */

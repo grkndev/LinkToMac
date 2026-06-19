@@ -168,6 +168,7 @@ class ClipForegroundService : Service() {
         ClipBus.macClip(text, System.currentTimeMillis().toDouble())
         ClipBus.log("clip -> clipboard (${text.length})")
       },
+      onStatReceived = { json -> ClipBus.macStat(json) },
       onStatus = { transport, status, peerOnline, error, attempt ->
         ClipBus.relay(status, peerOnline, error, transport, attempt)
         updateNotification(peerOnline)

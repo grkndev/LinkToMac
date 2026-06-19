@@ -29,6 +29,8 @@ class RelayClient(
   /** 32-byte pairing secret (base64) for the E2E ClipCodec. */
   private val key: String,
   private val onClipReceived: (String) -> Unit,
+  /** Decrypted telemetry JSON received from the Mac (e.g. battery `{"level":85,"charging":true}`). */
+  private val onStatReceived: (String) -> Unit,
   private val onStatus: (status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
   private val log: (String) -> Unit,
 ) {
@@ -168,6 +170,10 @@ class RelayClient(
       "clip" -> {
         val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
         if (decoded != null) onClipReceived(decoded) else log("clip decrypt failed (key mismatch or corrupt)")
+      }
+      "stat" -> {
+        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
+        if (decoded != null) onStatReceived(decoded) else log("stat decrypt failed (key mismatch or corrupt)")
       }
       "pong" -> {}
     }
