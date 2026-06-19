@@ -25,6 +25,14 @@ export interface CmdMsg {
   ct: string;
 }
 
+// Telemetry from a peer (e.g. the Mac's battery). E2E-encrypted (`nonce`/`ct`) exactly like a
+// `clip`, so the relay forwards it verbatim and never sees the contents — opaque, just like clips.
+export interface StatMsg {
+  t: 'stat';
+  nonce: string;
+  ct: string;
+}
+
 export interface PingMsg {
   t: 'ping';
 }
@@ -33,7 +41,7 @@ export interface PongMsg {
   t: 'pong';
 }
 
-export type ClientMessage = JoinMsg | ClipMsg | CmdMsg | PingMsg | PongMsg;
+export type ClientMessage = JoinMsg | ClipMsg | CmdMsg | StatMsg | PingMsg | PongMsg;
 
 // --- relay -> client ---
 export type ErrorCode =
@@ -98,6 +106,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
       if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
       return { t: 'cmd', nonce: obj.nonce, ct: obj.ct };
+    case 'stat':
+      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
+      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      return { t: 'stat', nonce: obj.nonce, ct: obj.ct };
     case 'ping':
       return { t: 'ping' };
     case 'pong':

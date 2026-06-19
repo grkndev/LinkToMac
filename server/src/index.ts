@@ -123,6 +123,9 @@ wss.on('connection', (ws: WebSocket) => {
       case 'cmd':
         relay.handleCmd(conn, msg);
         break;
+      case 'stat':
+        relay.handleStat(conn, msg);
+        break;
       case 'ping':
         ws.send(serialize({ t: 'pong' }));
         break;
