@@ -58,9 +58,15 @@ final class RelayClient {
     /// Watches the Mac clipboard; created on first connect, forwards copies to the peer.
     private var pasteboard: PasteboardWatcher?
 
+    /// Watches this Mac's battery; created on first connect, forwards level/charging to the peer.
+    private var battery: BatteryMonitor?
+
     /// Fan-out hook for a second transport (the LAN-direct server). Called with every local
     /// copy that passes the `sendToAndroid` gate, so a phone on the LAN gets clips too.
     var onLocalClip: ((String) -> Void)?
+
+    /// Fan-out hook for telemetry (battery) onto the LAN-direct server, mirroring `onLocalClip`.
+    var onLocalStat: ((String) -> Void)?
 
     /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
     /// re-advertise under the new pairing id and invalidate any stale authenticated socket.
@@ -84,12 +90,21 @@ final class RelayClient {
             }
         }
         pasteboard?.start()
+        if battery == nil {
+            battery = BatteryMonitor { [weak self] payload in
+                guard let self else { return }
+                self.sendStat(payload)
+                self.onLocalStat?(payload) // fan out to the LAN-direct transport too
+            }
+        }
+        battery?.start()
         openSocket()
     }
 
     func disconnect() {
         shouldStay = false
         pasteboard?.stop()
+        battery?.stop()
         reconnectTask?.cancel()
         reconnectTask = nil
         teardown()
@@ -107,6 +122,28 @@ final class RelayClient {
             return
         }
         Task { [weak self] in try? await self?.send(.clip(nonce: nonce, ct: ct)) }
+    }
+
+    /// Encrypt + send a telemetry payload (e.g. battery) to the peer. Same fail-closed AEAD as
+    /// `sendClip`: never falls back to plaintext if the pairing key is malformed.
+    func sendStat(_ payload: String) {
+        guard !payload.isEmpty else { return }
+        guard let (nonce, ct) = ClipCodec.encode(payload, keyBase64: pairing.key) else {
+            log("encrypt failed (bad pairing key); not sending stat")
+            return
+        }
+        Task { [weak self] in try? await self?.send(.stat(nonce: nonce, ct: ct)) }
+    }
+
+    /// Current battery as the wire payload, or nil if this Mac has no internal battery. Lets the
+    /// owner push a fresh value to a transport the moment its peer connects (see `LinkToMacApp`).
+    func currentBatteryPayload() -> String? {
+        battery?.currentPayload()
+    }
+
+    /// Send the current battery over the relay now (no-op on a desktop Mac / before the monitor starts).
+    private func pushBatteryNow() {
+        if let payload = battery?.currentPayload() { sendStat(payload) }
     }
 
     /// Write a clip that arrived over the LAN-direct transport. Reuses the same echo-suppressed
@@ -271,10 +308,21 @@ final class RelayClient {
             reconnectAttempt = 0
             peerOnline = peers.contains(Config.peerDevice)
             log("joined; peers=\(peers)")
+            if peerOnline { pushBatteryNow() } // give the phone a fresh value without waiting for the poll
         case let .peer(state, device):
-            if device == Config.peerDevice { peerOnline = (state == "online") }
+            if device == Config.peerDevice {
+                let cameOnline = (state == "online") && !peerOnline
+                peerOnline = (state == "online")
+                if cameOnline { pushBatteryNow() }
+            }
             log("peer \(device) \(state)")
         case let .error(code, message):
+            // Per-frame validation errors (e.g. an older relay that doesn't know `stat`) are not
+            // connection failures — log them but don't sour the menu status.
+            if code == "bad-message" {
+                log("relay rejected a frame: \(message)")
+                return
+            }
             status = .error(code)
             lastError = message
             log("relay error: \(code) \(message)")

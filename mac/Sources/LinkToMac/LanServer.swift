@@ -227,6 +227,17 @@ final class LanServer: @unchecked Sendable {
         }
     }
 
+    /// Encrypt + send a telemetry payload (e.g. battery) to the authenticated phone. Mirrors
+    /// `sendClip`; no-op if no peer / bad key.
+    func sendStat(_ payload: String) {
+        queue.async { [self] in
+            guard authed, let conn = connection, !payload.isEmpty,
+                  let key = pairingProvider()?.key,
+                  let (nonce, ct) = ClipCodec.encode(payload, keyBase64: key) else { return }
+            send(["t": "stat", "nonce": nonce, "ct": ct], on: conn)
+        }
+    }
+
     private func send(_ message: [String: Any], on conn: NWConnection) {
         guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
         let metadata = NWProtocolWebSocket.Metadata(opcode: .text)

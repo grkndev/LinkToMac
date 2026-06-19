@@ -11,6 +11,9 @@ enum ClientMessage: Encodable {
     case pong
     /// Encrypted clipboard payload: `nonce` + `ct` from `ClipCodec` (ChaCha20-Poly1305).
     case clip(nonce: String, ct: String)
+    /// Encrypted telemetry payload (e.g. battery `{"level":85,"charging":true}`), E2E-encrypted
+    /// into `nonce`/`ct` exactly like a `clip`. The relay forwards it opaquely; only the peer decrypts.
+    case stat(nonce: String, ct: String)
 
     private enum CodingKeys: String, CodingKey {
         case t, room, device, nonce, ct
@@ -29,6 +32,10 @@ enum ClientMessage: Encodable {
             try c.encode("pong", forKey: .t)
         case let .clip(nonce, ct):
             try c.encode("clip", forKey: .t)
+            try c.encode(nonce, forKey: .nonce)
+            try c.encode(ct, forKey: .ct)
+        case let .stat(nonce, ct):
+            try c.encode("stat", forKey: .t)
             try c.encode(nonce, forKey: .nonce)
             try c.encode(ct, forKey: .ct)
         }

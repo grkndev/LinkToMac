@@ -51,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.connect()
         // A local copy fans out to whichever LAN server is live (re-read at call time).
         client.onLocalClip = { [weak self] text in self?.lan?.sendClip(text) }
+        // Battery telemetry fans out to the LAN server too, mirroring clips.
+        client.onLocalStat = { [weak self] payload in self?.lan?.sendStat(payload) }
         // Re-advertise under the fresh pairing id (and drop stale auth) when the user re-pairs.
         client.onPairingChanged = { [weak self] in self?.applyLanSettings() }
         applyLanSettings()
@@ -68,7 +70,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let client = self.client
         server.onRemoteClip = { text in Task { @MainActor in client.writeRemoteClip(text) } }
         server.onRemoteCommand = { action in Task { @MainActor in client.runRemoteCommand(action) } }
-        server.onPeerChange = { connected in Task { @MainActor in client.lanPeerConnected = connected } }
+        // `weak server` so the callback doesn't retain the server it's installed on. On connect,
+        // push the current battery immediately so the phone shows it without waiting for the poll.
+        server.onPeerChange = { [weak server] connected in
+            Task { @MainActor in
+                client.lanPeerConnected = connected
+                if connected, let payload = client.currentBatteryPayload() { server?.sendStat(payload) }
+            }
+        }
         lan = server
         server.start()
     }
