@@ -19,7 +19,7 @@ const BUNDLE_ID = IS_DEV ? 'com.grkndev.linktomac.dev' : 'com.grkndev.linktomac'
 export default (_: ConfigContext): ExpoConfig => ({
   name: NAME,
   slug: 'linktomac',
-  version: '0.1.0',
+  version: '0.2.0',
   // appVersion policy → runtime "0.1.0"; top-level so EAS Update resolves it for every platform.
   runtimeVersion: { policy: 'appVersion' },
   orientation: 'portrait',
