@@ -250,7 +250,9 @@ to *launch* (or relaunch) it — never for the steady-state data path.
 ### 3.5 Relay client + BLE beacon (Android)
 
 - **`RelayClient.kt`** is an OkHttp `WebSocket`. It joins as `"android"`, uses OkHttp's native
-  `pingInterval` (20 s) for keepalive, and reconnects with exponential backoff capped at 30 s.
+  `pingInterval` (50 s — under the relay front-proxy's 60 s WS idle timeout, tuned to minimise
+  mobile radio wakeups; matches the server's own heartbeat) for keepalive, and reconnects with
+  exponential backoff capped at 30 s.
   All state runs on a single-thread executor; late OkHttp callbacks after shutdown are dropped
   rather than crashing (a `RejectedExecutionException` guard — this was a real "crash on pause"
   bug). It sends `clip` and `cmd` frames and applies received clips through the service.
@@ -389,7 +391,11 @@ is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on th
   **53124**) with TXT `rid = base64url(SHA256(room))[:16]` + `name`. The phone recomputes the same
   `rid` from its stored room and connects only to a matching service (`LanDiscovery.kt`,
   `NsdManager`) — so it finds *its* Mac on a multi-Mac LAN and re-finds it after a DHCP change. A
-  manual Mac IP (Settings → Relay server) is the escape hatch when mDNS is blocked.
+  manual Mac IP (Settings → Relay server) is the escape hatch when mDNS is blocked. **Discovery is
+  Wi-Fi-gated** (`ConnectivityManager` callback in `ConnectionManager.kt`): it runs only while a
+  Wi-Fi network is present and not already LAN-joined, and stops on join. Off Wi-Fi (e.g. cellular)
+  the Mac can't be on the LAN, so the phone drops discovery — releasing its battery-draining Wi-Fi
+  multicast lock — and leans on the relay.
 - **Auth handshake** (LAN has no relay token/room gate): on connect the Mac sends
   `{ t:"hello", nonce }`; the phone replies `{ t:"auth", proof }` where
   `proof = base64(HMAC-SHA256(key, nonce))`; the Mac verifies in constant time and replies
