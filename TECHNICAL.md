@@ -111,8 +111,9 @@ between them. It never stores anything and never inspects clipboard content.
 - Per-connection **sliding-window rate limit** (`RATE_LIMIT_MSGS` / `RATE_LIMIT_WINDOW_MS`,
   default 120 / 10 s; `server/src/ratelimit.ts`).
 - `maxPayload` of 256 KB enforced at the `ws` layer; binary frames rejected.
-- ws-level **ping/pong heartbeat** (`PING_INTERVAL_MS`, default 30 s) with dead-connection
-  reaping (`server/src/heartbeat.ts`).
+- ws-level **ping/pong heartbeat** (`PING_INTERVAL_MS`, default 50 s — under the front-proxy's
+  60 s WS read timeout, and tuned to minimise mobile radio wakeups) with dead-connection reaping
+  (`server/src/heartbeat.ts`).
 - `GET /health` returns `{ status, rooms, conns, uptimeSec }`.
 - Graceful `SIGTERM`/`SIGINT` shutdown (close code `1001`, 3 s force-exit).
 

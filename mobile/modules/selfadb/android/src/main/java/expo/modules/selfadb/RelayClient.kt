@@ -37,8 +37,12 @@ class RelayClient(
   // `wss://` with a publicly-trusted (Let's Encrypt) cert works out of the box. For the future
   // LAN-direct mode (self-signed cert on the Mac), pin it here via a CertificatePinner / custom
   // trust manager built from the QR's `certFingerprint`.
+  // 50s keepalive: long enough to cut idle radio wakeups (vs the old 20s), short enough to stay
+  // under the relay's nginx-proxy 60s read timeout AND the server's own 50s heartbeat — so the
+  // connection never goes idle long enough for a proxy/peer to drop it. OkHttp auto-pongs the
+  // server's pings at the protocol layer, so the wake cadence is ~max(this, server ping), not their sum.
   private val http = OkHttpClient.Builder()
-    .pingInterval(20, TimeUnit.SECONDS)
+    .pingInterval(50, TimeUnit.SECONDS)
     .build()
   private val exec: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 

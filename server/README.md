@@ -45,7 +45,7 @@ All via env vars (see `.env.example`):
 | `ALLOW_NO_AUTH` | `false` | set `true` to run without a token (local dev only) |
 | `MAX_PEERS_PER_ROOM` | `2` | per-room connection cap |
 | `MAX_PAYLOAD_BYTES` | `262144` | 256 KB frame cap |
-| `PING_INTERVAL_MS` | `30000` | ws-level heartbeat |
+| `PING_INTERVAL_MS` | `50000` | ws-level heartbeat; keep < front-proxy WS read timeout (nginx default 60s). Higher = fewer mobile radio wakeups |
 | `JOIN_TIMEOUT_MS` | `10000` | close if no `join` arrives |
 | `RATE_LIMIT_MSGS` / `RATE_LIMIT_WINDOW_MS` | `120` / `10000` | per-connection sliding window |
 | `LOG_LEVEL` | `info` | pino level |

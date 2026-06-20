@@ -41,8 +41,11 @@ class LanClient(
   private val log: (String) -> Unit,
 ) {
   private val url = "ws://$host:$port/ws"
+  // 60s keepalive (vs the old 20s): on the LAN there's no NAT/proxy idle timeout to beat and the
+  // Mac only auto-replies (never initiates pings), so this is the sole wake source for the link.
+  // A dead LAN link (Wi-Fi dropped, Mac asleep) is detected within 60s, then we fall back to relay.
   private val http = OkHttpClient.Builder()
-    .pingInterval(20, TimeUnit.SECONDS)
+    .pingInterval(60, TimeUnit.SECONDS)
     .build()
   private val exec: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 

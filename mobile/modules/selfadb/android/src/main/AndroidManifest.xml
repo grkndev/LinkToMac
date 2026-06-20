@@ -24,6 +24,11 @@
   <!-- mDNS discovery of _adb-tls-pairing / _adb-tls-connect via NsdManager -->
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+  <!-- Gate LAN/mDNS discovery on Wi-Fi presence (ConnectivityManager.registerNetworkCallback):
+       no Wi-Fi -> the Mac can't be on the LAN, so we drop discovery + its multicast lock and
+       rely on the relay. Saves battery when out and about. -->
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
   <!-- keep the relay WS alive under doze / aggressive OEM battery management -->
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 

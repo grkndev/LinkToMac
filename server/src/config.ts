@@ -51,7 +51,7 @@ export function loadConfig(): Config {
     authToken,
     maxPeersPerRoom: num('MAX_PEERS_PER_ROOM', 2),
     maxPayloadBytes: num('MAX_PAYLOAD_BYTES', 262144),
-    pingIntervalMs: num('PING_INTERVAL_MS', 30000),
+    pingIntervalMs: num('PING_INTERVAL_MS', 50000),
     joinTimeoutMs: num('JOIN_TIMEOUT_MS', 10000),
     rateLimitMsgs: num('RATE_LIMIT_MSGS', 120),
     rateLimitWindowMs: num('RATE_LIMIT_WINDOW_MS', 10000),
