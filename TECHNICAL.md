@@ -24,26 +24,26 @@ fourth is a stock-Android system service the Android app talks to through a tric
 
 ```
   ANDROID (phone)                         CLOUD                  macOS
-  ┌───────────────────────────────┐                     ┌──────────────────────────┐
-  │ Expo / React Native app (JS)  │                     │ SwiftUI menu-bar agent    │
-  │   • UI, pairing, settings     │                     │   • NSPasteboard poll     │
-  │   • drives native via Expo    │                     │   • URLSession WS client  │
-  │     module (control plane)    │                     │   • CoreBluetooth central │
-  │ ┌───────────────────────────┐ │   ┌─────────────┐   │   • SACLockScreen / QR    │
+  ┌────────────────────────────────┐                     ┌───────────────────────────┐
+  │ Expo / React Native app (JS)   │                     │ SwiftUI menu-bar agent    │
+  │   • UI, pairing, settings      │                     │   • NSPasteboard poll     │
+  │   • drives native via Expo     │                     │   • URLSession WS client  │
+  │     module (control plane)     │                     │   • CoreBluetooth central │
+  │ ┌────────────────────────────┐ │   ┌─────────────┐   │   • SACLockScreen / QR    │
   │ │ Foreground Service (Kotlin)│ │   │  Node `ws`  │   │   • Keychain, login item  │
   │ │  • OkHttp WS → relay ──────┼─┼──►│   relay     │◄──┼── URLSessionWebSocketTask │
-  │ │  • ClipBridge (localhost)  │ │   │ (room route)│   └──────────┬───────────────┘
-  │ │  • BleAdvertiser           │ │   └─────────────┘              │
-  │ └─────────┬─────────────────┘ │   forwards opaque              │
-  │  connect  │ 127.0.0.1:53123   │   frames by roomId             │
-  │ ┌─────────▼─────────────────┐ │   (no storage, no decrypt)     │
-  │ │ ClipboardAgent (shell UID)│ │                                │
-  │ │  app_process daemon       │ │                                │
-  │ │  • IClipboard reflection  │ │                                │
-  │ │  • ServerSocket NDJSON    │ │                                │
-  │ └───────────────────────────┘ │                                │
-  └───────────────┬───────────────┘                                │
-                  └────────────── BLE presence beacon ─────────────┘
+  │ │  • ClipBridge (localhost)  │ │   │ (room route)│   └───────────┬───────────────┘
+  │ │  • BleAdvertiser           │ │   └─────────────┘               │
+  │ └─────────┬──────────────────┘ │   forwards opaque               │
+  │  connect  │ 127.0.0.1:53123    │   frames by roomId              │
+  │ ┌─────────▼─────────────────┐  │   (no storage, no decrypt)      │
+  │ │ ClipboardAgent (shell UID)│  │                                 │
+  │ │  app_process daemon       │  │                                 │
+  │ │  • IClipboard reflection  │  │                                 │
+  │ │  • ServerSocket NDJSON    │  │                                 │
+  │ └───────────────────────────┘  │                                 │
+  └───────────────┬────────────────┘                                 │
+                  └─────────────── BLE presence beacon ──────────────┘
                        (proximity auto-lock — fully local, no relay)
 ```
 
