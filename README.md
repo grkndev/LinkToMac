@@ -24,11 +24,11 @@ Windows", but self-hosted.
 
 ```
   Android phone                 your relay              Mac
-  ┌────────────────┐           ┌───────────┐        ┌───────────────┐
-  │ background app  │  ◄─────►  │  tiny WS   │  ◄───► │  menubar app   │
-  │  clipboard ·    │           │  server    │        │  clipboard ·   │
-  │  lock command   │           │ (room id)  │        │  lock · QR     │
-  └───────┬─────────┘           └───────────┘        └──────┬────────┘
+  ┌─────────────────┐           ┌────────────┐        ┌───────────────┐
+  │ background app  │  ◄─────►  │  tiny WS   │  ◄───► │  menubar app  │
+  │  clipboard ·    │           │  server    │        │  clipboard ·  │
+  │  lock command   │           │ (room id)  │        │  lock · QR    │
+  └───────┬─────────┘           └────────────┘        └───────┬───────┘
           │                                                   │
           └───────────  Bluetooth presence beacon  ───────────┘
                       (proximity auto-lock — fully local)
