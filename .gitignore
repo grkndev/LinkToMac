@@ -16,3 +16,6 @@ workflow.md
 
 .DS_Store
 */**/.DS_Store
+*/**/CLAUDE.md
+*/**/AGENTS.md
+CLAUDE.md
