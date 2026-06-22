@@ -78,7 +78,11 @@ no internet.
   *different* Mac the first launch must be **right-click → Open** once — or run
   `xattr -dr com.apple.quarantine /Applications/LinkToMac.app` after dragging it in.
 - **Android** — `cd mobile && eas login && eas build --platform android --profile preview --local`
-  → an installable **APK** (sideload).
+  → an installable **APK** (sideload). This `preview` profile **is** the public-release build:
+  it bakes in the `preview` EAS Update channel, so OTA JS patches must be published to the same
+  channel (`eas update --channel preview`). The `version` / `BUILD_NUMBER` (→ `versionCode`) in
+  `app.config.ts` are the release identity; bump them before building. Attach the APK to a
+  GitHub release — the in-app updater discovers new versions from the latest GitHub release.
 
 ## Using the features
 
