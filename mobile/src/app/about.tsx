@@ -32,12 +32,13 @@ export default function AboutScreen() {
   const icons = useIcons();
 
   const version = Constants.expoConfig?.version ?? "—";
-  // versionCode comes from the native build (PackageManager), NOT the JS config: with the
-  // date-based YYMMDDNNN scheme an OTA manifest would carry the *publish* date, while this
-  // reflects the installed APK's build date — the value that actually gates installs.
-  // (Constants.platform is deprecated for expo-application, but that's a native module we
-  // don't want to add just to print one number, and this stays OTA-deliverable.)
-  const versionCode = Constants.platform?.android?.versionCode;
+  // versionCode read from the resolved config. SDK 56's expo-constants no longer exposes the
+  // native versionCode (Constants.platform.android is an empty map), and the truly-native
+  // source (expo-application) is a native module we'd have to add — which wouldn't ship over
+  // OTA. Caveat of the config path + our date-based YYMMDDNNN scheme: after an OTA this shows
+  // that update's *publish-date* code rather than the APK's build date. Close enough for a
+  // build identifier, and it stays OTA-deliverable.
+  const versionCode = Constants.expoConfig?.android?.versionCode;
 
   // Manual check routed through the shared updater: it surfaces the same modal as the launch check
   // (OTA → download + restart, or a newer native APK → release download). See use-app-update.
