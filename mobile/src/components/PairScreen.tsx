@@ -35,21 +35,21 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
       <SafeAreaView style={styles.safe}>
         <View style={styles.hero}>
           <ThemedText type="title" style={styles.title}>
-            {mode === 'pair' ? 'Mac’e Bağla' : 'Yeniden Bağlan'}
+            {mode === 'pair' ? 'Connect to Mac' : 'Reconnect'}
           </ThemedText>
           <ThemedText type="default" themeColor="textSecondary" style={styles.subtitle}>
             {mode === 'pair'
-              ? 'Kurulum tek seferlik. Eşleştirme kodunu gir, gerisini biz hallederiz.'
-              : 'Kablosuz hata ayıklamayı tekrar aç; bağlantı otomatik kurulacak.'}
+              ? 'Setup is a one-time thing. Enter the pairing code and we’ll handle the rest.'
+              : 'Turn Wireless debugging back on and the connection will be restored automatically.'}
           </ThemedText>
         </View>
 
         <ThemedView type="backgroundElement" style={styles.card}>
           {mode === 'pair' ? (
             <>
-              <Step n={1} text="Kablosuz hata ayıklamayı aç" />
-              <Step n={2} text="“Eşleştirme kodu ile cihaz eşleştir”e dokun" />
-              <Step n={3} text="6 haneli kodu aşağıya gir" />
+              <Step n={1} text="Turn on Wireless debugging" />
+              <Step n={2} text="Tap “Pair device with pairing code”" />
+              <Step n={3} text="Enter the 6-digit code below" />
 
               <TextInput
                 style={[
@@ -67,11 +67,11 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
               />
             </>
           ) : (
-            <Step n={1} text="Geliştirici ayarlarından kablosuz hata ayıklamayı aç" />
+            <Step n={1} text="Turn on Wireless debugging in Developer options" />
           )}
 
           <Pressable onPress={openSettings} style={styles.linkBtn} disabled={busy}>
-            <ThemedText type="linkPrimary">Geliştirici Ayarlarını Aç</ThemedText>
+            <ThemedText type="linkPrimary">Open Developer Settings</ThemedText>
           </Pressable>
         </ThemedView>
 
@@ -93,7 +93,7 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
             <ActivityIndicator color={theme.background} />
           ) : (
             <ThemedText type="default" style={[styles.primaryLabel, { color: theme.background }]}>
-              {mode === 'pair' ? 'Eşleştir' : 'Tekrar Dene'}
+              {mode === 'pair' ? 'Pair' : 'Try Again'}
             </ThemedText>
           )}
         </Pressable>
