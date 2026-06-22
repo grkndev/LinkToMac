@@ -121,7 +121,9 @@ export default function AboutScreen() {
               checking
                 ? "Checking…"
                 : Updates.isEnabled
-                  ? `Channel: ${Updates.channel ?? "—"}`
+                  ? `Channel: ${
+                    Constants.expoConfig?.name.includes("Dev") ? "Development" :
+                    Updates.channel ?? "—"}`
                   : "Checks GitHub for a new app version."
             }
             onPress={() => checkNow(true)}
