@@ -17,11 +17,22 @@ const NAME = IS_DEV ? 'LinkToMac (Dev)' : 'Link To Mac';
 const BUNDLE_ID = IS_DEV ? 'com.grkndev.linktomac.dev' : 'com.grkndev.linktomac';
 
 // User-facing version (the `vX.Y.Z` release tag) and the Android build number.
-// `eas.json` sets appVersionSource:"local", so BUILD_NUMBER is authoritative (not the
-// EAS remote counter): bump it on every build that ships, and ensure it only ever goes
-// UP or a new APK won't install over an older one. CI can override via the env var.
+// `eas.json` sets appVersionSource:"local", so the versionCode is authoritative here
+// (not the EAS remote counter).
+//
+// versionCode is date-based: `YYMMDDNNN` — build date (2-digit year, month, day) followed
+// by a 3-digit same-day counter. The first build on 2026-06-22 -> 260622001. The date prefix
+// is derived automatically at build time, so each new day's build already outranks the last
+// (Android requires versionCode to only ever go UP, or a newer APK won't install over an
+// older one). For a 2nd+ build on the SAME day, bump the counter via the BUILD_NUMBER env
+// (BUILD_NUMBER=2 -> ...002). Stays under Android's signed 32-bit cap (2,147,483,647): the
+// max representable value is 991231999, i.e. it overflows only in the year 2100.
 const VERSION = '0.2.1';
-const BUILD_NUMBER = Number(process.env.BUILD_NUMBER ?? 3);
+const now = new Date();
+const DATE_PREFIX =
+  (now.getFullYear() % 100) * 10_000 + (now.getMonth() + 1) * 100 + now.getDate();
+const BUILD_COUNTER = Number(process.env.BUILD_NUMBER ?? 1); // 1..999, same-day disambiguator
+const BUILD_NUMBER = DATE_PREFIX * 1000 + BUILD_COUNTER;
 
 export default (_: ConfigContext): ExpoConfig => ({
   name: NAME,
