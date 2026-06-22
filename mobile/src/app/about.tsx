@@ -32,6 +32,12 @@ export default function AboutScreen() {
   const icons = useIcons();
 
   const version = Constants.expoConfig?.version ?? "—";
+  // versionCode comes from the native build (PackageManager), NOT the JS config: with the
+  // date-based YYMMDDNNN scheme an OTA manifest would carry the *publish* date, while this
+  // reflects the installed APK's build date — the value that actually gates installs.
+  // (Constants.platform is deprecated for expo-application, but that's a native module we
+  // don't want to add just to print one number, and this stays OTA-deliverable.)
+  const versionCode = Constants.platform?.android?.versionCode;
 
   // Manual check routed through the shared updater: it surfaces the same modal as the launch check
   // (OTA → download + restart, or a newer native APK → release download). See use-app-update.
@@ -95,6 +101,12 @@ export default function AboutScreen() {
             icon={icons.info}
             label="App Version"
             value={version}
+          />
+          <InfoRow
+            colors={colors}
+            icon={icons.terminal}
+            label="Build number"
+            value={versionCode != null ? String(versionCode) : "—"}
           />
         </Group>
 
