@@ -19,10 +19,14 @@ type UpdateState = {
   update: PendingUpdate | null;
   /** A check is in flight (drives the About row's "Checking…" hint). */
   checking: boolean;
+  /** An OTA download is in flight (drives the "App is updating" dialog + progress bar). */
+  applyingOta: boolean;
   /** Re-run a check. `manual` surfaces "up to date" / "failed" feedback (the About button). */
   checkNow: (manual?: boolean) => Promise<void>;
-  /** Download + reload an OTA update in place. */
+  /** Download + reload an OTA update in place (shows the "App is updating" dialog). */
   applyOta: () => Promise<void>;
+  /** Let the in-flight OTA download finish in the background; it applies on the next launch. */
+  continueInBackground: () => void;
   /** Open the APK download (or release page) for a native update. */
   openDownload: () => void;
   /** Dismiss the modal ("Later"). */
@@ -45,7 +49,11 @@ export function useAppUpdate(): UpdateState {
 export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const [update, setUpdate] = useState<PendingUpdate | null>(null);
   const [checking, setChecking] = useState(false);
+  const [applyingOta, setApplyingOta] = useState(false);
   const inFlight = useRef(false);
+  // Set when the user taps "Continue in background": the fetch keeps running but we
+  // skip the forced reload (and stay silent on failure) since they've left the dialog.
+  const background = useRef(false);
 
   const checkNow = useCallback(async (manual = false) => {
     if (inFlight.current) return;
@@ -83,13 +91,34 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   }, [checkNow]);
 
   const applyOta = useCallback(async () => {
+    // Flip into the "applying" state first so the modal can show the "App is updating"
+    // dialog with a progress bar — fetchUpdateAsync() has no progress callback and takes
+    // a few seconds, and without this the button looks dead until reloadAsync() restarts.
+    background.current = false;
+    setApplyingOta(true);
     try {
       await Updates.fetchUpdateAsync();
-      await Updates.reloadAsync();
+      // If the user chose "Continue in background" mid-download, the fetched bundle is
+      // already staged and expo-updates loads it on the next launch — don't force a restart.
+      if (background.current) return;
+      await Updates.reloadAsync(); // restarts the app — nothing below runs on success
     } catch {
-      setUpdate(null);
-      Alert.alert('Update failed', "Couldn't download the update. Try again later.");
+      // A background failure stays silent (it'll be re-offered on the next check); only
+      // surface the error if the user is still watching the "App is updating" dialog.
+      if (!background.current) {
+        setApplyingOta(false);
+        setUpdate(null);
+        Alert.alert('Update failed', "Couldn't download the update. Try again later.");
+      }
     }
+  }, []);
+
+  const continueInBackground = useCallback(() => {
+    // Leave fetchUpdateAsync() running; just release the dialog. The staged update
+    // applies on the next app launch (see applyOta).
+    background.current = true;
+    setApplyingOta(false);
+    setUpdate(null);
   }, []);
 
   const openDownload = useCallback(() => {
@@ -102,7 +131,18 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const dismiss = useCallback(() => setUpdate(null), []);
 
   return (
-    <Ctx.Provider value={{ update, checking, checkNow, applyOta, openDownload, dismiss }}>
+    <Ctx.Provider
+      value={{
+        update,
+        checking,
+        applyingOta,
+        checkNow,
+        applyOta,
+        continueInBackground,
+        openDownload,
+        dismiss,
+      }}
+    >
       {children}
     </Ctx.Provider>
   );
