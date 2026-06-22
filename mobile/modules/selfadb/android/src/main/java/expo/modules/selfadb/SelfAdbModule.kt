@@ -41,8 +41,11 @@ class SelfAdbModule : Module() {
     const val LOG_TAIL_BYTES = 65536
 
     // How long deploy() waits for the freshly launched daemon to bind its socket before
-    // declaring the launch a failure (-> need-connect, instead of a false "ready").
-    const val DAEMON_START_TIMEOUT_MS = 4000L
+    // declaring the launch a failure (-> need-connect, instead of a false "ready"). launchDaemon
+    // already BLOCKS until the daemon logs `listening` (it must, or adbd's exec: teardown kills
+    // the cold-starting daemon — see AdbManager.launchDaemon), so this is just a fast bridge/probe
+    // confirmation and is effectively instant on success. Keep it short to bound the failure path.
+    const val DAEMON_START_TIMEOUT_MS = 3000L
   }
 
   override fun definition() = ModuleDefinition {
@@ -73,10 +76,12 @@ class SelfAdbModule : Module() {
     AsyncFunction("connect") { host: String, port: Int ->
       status("connecting", "idle")
       log("connecting $host:$port")
-      val ok = adb.connect(host, port)
-      status(if (ok) "connected" else "failed", "idle")
-      if (!ok) throw Exception("connect failed (not paired / wrong port)")
-      "connected"
+      // connect() returns false ONLY when a session is already live (libadb's
+      // isConnected() guard) — that's success, not failure. A real failure throws
+      // (AdbPairingRequiredException / IOException).
+      val fresh = adb.connect(host, port)
+      status("connected", "idle")
+      if (fresh) "connected" else "already connected"
     }
 
     AsyncFunction("deployAndRun") { clipPort: Int ->
@@ -123,6 +128,19 @@ class SelfAdbModule : Module() {
         }
         val host = endpoint.first.hostAddress ?: "127.0.0.1"
         status("connecting", "idle")
+        // The libadb Manager is a single instance for the JS-runtime lifetime, so a
+        // connection from an earlier pairAuto/autoStart in this session may still be
+        // live here — and stale if wireless debugging was toggled since. We only
+        // reach this branch with a DEAD daemon that we must redeploy, so force a
+        // fresh session: drop any existing link, then connect. (Without this,
+        // connect() short-circuits to false on the already-live link — libadb's
+        // isConnected() guard, not a failure — which used to throw "connect failed
+        // despite mDNS endpoint" and skip the redeploy, looping the reconnect
+        // screen. See issue #5.) A genuine failure throws; need-pair is handled below.
+        if (adb.isConnected()) {
+          log("dropping stale adb session before reconnect")
+          adb.disconnect()
+        }
         log("connecting $host:${endpoint.second} (mDNS)")
         if (!adb.connect(host, endpoint.second)) {
           status("failed", "idle")
@@ -175,9 +193,10 @@ class SelfAdbModule : Module() {
         ?: throw Exception("connect service not found after pairing")
       val connHost = connEp.first.hostAddress ?: "127.0.0.1"
       log("connecting $connHost:${connEp.second} (mDNS)")
+      // false = a session is already live (libadb's isConnected() guard), not a
+      // failure; real failures throw. Don't mistake the reused link for an error.
       if (!adb.connect(connHost, connEp.second)) {
-        status("failed", "idle")
-        throw Exception("connect failed after pairing")
+        log("adb session already live, reusing")
       }
       status("connected", "idle")
       log("grant WRITE_SECURE_SETTINGS: " + adb.grantSecureSettings(appCtx.packageName))
@@ -402,9 +421,9 @@ class SelfAdbModule : Module() {
             "Cihaz logu okunamadı: kablosuz hata ayıklama yayında değil.\n" +
             "Geliştirici Seçenekleri > Kablosuz hata ayıklama'yı açıp tekrar dene."
         val host = ep.first.hostAddress ?: "127.0.0.1"
-        if (!adb.connect(host, ep.second)) {
-          return@AsyncFunction "adb bağlanılamadı ($host:${ep.second}) — eşleştirme düşmüş olabilir."
-        }
+        // false = a session is already live (libadb's isConnected() guard), not a
+        // failure — reuse it. A real connect failure throws and is caught below.
+        adb.connect(host, ep.second)
         val alive = adb.runShort("pgrep -f ${AdbManager.NICE_NAME} >/dev/null 2>&1 && echo ÇALIŞIYOR || echo ÖLÜ")
         // Only the tail: clip.log grows unbounded over a long session, and a single
         // adb WRTE payload larger than the negotiated maxdata buffer throws

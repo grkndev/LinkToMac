@@ -56,6 +56,23 @@ class AdbManager(private val context: Context) {
     manager.connect(host, port)
 
   /**
+   * True while a TLS adb session is live in the shared manager. NOTE: this reads
+   * libadb's local connection flag, not the live socket — a session can still
+   * report connected after wireless debugging was toggled off (the stale socket
+   * isn't noticed until next use). Callers that need a guaranteed-fresh session
+   * should [disconnect] first. See SelfAdbModule.autoStart.
+   */
+  fun isConnected(): Boolean = manager.isConnected()
+
+  /** Drop the current adb session so the next [connect] does a fresh handshake. */
+  fun disconnect() {
+    try {
+      manager.disconnect()
+    } catch (_: Exception) {
+    }
+  }
+
+  /**
    * Block until adbd advertises [serviceType] over mDNS, or [timeoutMs] passes.
    * Uses libadb's NsdManager-backed [AdbMdns]. The pairing service
    * (SERVICE_TYPE_TLS_PAIRING) is only advertised while the system "Pair device
@@ -119,11 +136,25 @@ class AdbManager(private val context: Context) {
    * depends on the adb stream. Result: it survives adb disconnect, wireless
    * debugging being turned off, and the app being killed. Only a reboot, a
    * crash, or killDaemon() stops it.
+   *
+   * CRITICAL: this command must NOT return until the daemon has bound its socket.
+   * We launch over libadb's `exec:` service, and adbd kills that service's process
+   * group when the stream closes — `nohup setsid` does NOT save a daemon that is
+   * still cold-starting (ART/dex load takes ~1-2s). If we returned right after
+   * `echo LAUNCHED`, libadb closes the stream mid-startup and the daemon is killed
+   * before it ever binds (empty clip.log, nothing on :PORT) -> DaemonNotStarted ->
+   * reconnect loop (issue #5). So the foreground here BLOCKS, polling clip.log for
+   * the daemon's flushed `listening` line, and only then closes the stream — by
+   * which point the daemon is fully detached + bound and survives the close.
+   * (Verified: same launch dies via `exec:` when it returns immediately, survives
+   * when it waits for `listening`.) `rm` first so a stale log can't false-match.
    */
   fun launchDaemon(clipPort: Int): String {
     val inner = "CLASSPATH=$DEX_PATH app_process /system/bin " +
       "--nice-name=$NICE_NAME $MAIN_CLASS $clipPort"
-    val cmd = "nohup setsid sh -c '$inner' >$LOG_PATH 2>&1 </dev/null & echo LAUNCHED"
+    val cmd = "rm -f $LOG_PATH; nohup setsid sh -c '$inner' >$LOG_PATH 2>&1 </dev/null & " +
+      "i=0; while [ \$i -lt 40 ]; do grep -q listening $LOG_PATH 2>/dev/null && { echo LAUNCHED; exit 0; }; " +
+      "sleep 0.2; i=\$((i+1)); done; echo LAUNCH_TIMEOUT"
     return runShort(cmd)
   }
 

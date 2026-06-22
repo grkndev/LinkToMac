@@ -224,12 +224,35 @@ allowed to):
   - app → daemon: `{"cmd":"write","text":"…"}`
 - A `lastSeen` string suppresses the echo of the agent's *own* writes.
 
+> **Bind the socket before any privileged clipboard IPC.** `main()` starts the `serve()` thread
+> (the `ServerSocket` bind) **first**, then runs a best-effort, read-only self-test and the
+> listener registration **off the main thread / wrapped so they can't be fatal**. The app's
+> `waitForDaemon` only checks this socket, so anything that blocks or throws before the bind —
+> e.g. `setPrimaryClip`/`getPrimaryClip` stalling under shell UID on some One UI builds — makes
+> the launch look like a failure (`DaemonNotStartedException`) and loops the pairing/reconnect
+> screen. That was the second half of issue #5: the old `main()` did a `setPrimaryClip` self-test
+> on the main thread *before* binding, so the daemon never bound and `clip.log` stayed empty.
+> Keep the bind independent of clipboard reflection, and **flush stdout per line** (`log()`) so
+> `clip.log` is actually diagnostic when a start fails. Rebuild the dex (`build-dex.sh`) after
+> editing this ordering.
+
 **Detached-daemon trick (the key to survival):** the launch command is wrapped in
 `nohup setsid sh -c '…' >log 2>&1 </dev/null &`. `setsid` puts it in a new session so adbd's
 process-group kill can't reach it; `nohup` ignores `SIGHUP`; stdio is detached. Result: the
 daemon **survives ADB disconnect, Wireless Debugging being turned off, and the app being
 killed.** Only a reboot, a crash, or an explicit `killDaemon()` stops it. ADB is needed only
 to *launch* (or relaunch) it — never for the steady-state data path.
+
+> **`nohup setsid` is NOT enough on its own — `launchDaemon` must block until the daemon binds.**
+> We launch over libadb's `exec:` service, and adbd kills that service's process group when the
+> stream closes. A daemon that is still cold-starting (ART/dex load, ~1-2s) gets killed *before*
+> `setsid` has fully detached it / before it binds, if the launch returns immediately. So the
+> launch command's foreground polls `clip.log` for the daemon's flushed `listening` line and only
+> then closes the stream — by which point the daemon is detached + bound and survives. Returning
+> right after `echo LAUNCHED` was the third and final face of issue #5: the daemon "launched" but
+> never bound (empty `clip.log`, `DaemonNotStartedException`, reconnect loop) — even though the
+> exact same dex binds fine when launched over the `shell:` service (which doesn't tear the group
+> down). Don't shorten the launch to a fire-and-forget.
 
 ### 3.4 The bridge + foreground service (`ClipBridge.kt`, `ClipForegroundService.kt`)
 
@@ -274,6 +297,7 @@ probe localhost:53123 ── alive ───────────────
         │
    mDNS discover _adb-tls-connect ── not found ────────────────► "need-connect"
         │ found
+   drop stale adb session (isConnected → disconnect), then
    connect ── AdbPairingRequiredException ─────────────────────► "need-pair"  (re-pair gate)
         │ ok
    deploy (push dex if needed + launch daemon) → start service → "ready"
@@ -284,6 +308,16 @@ connect and exec streams have no internal deadline and a half-trusted adbd can s
 A timeout is treated as "paired but stuck" → routed to the recoverable reconnect screen, and
 the hook re-runs `autoStart` whenever the app returns to the foreground (covers the user
 toggling Wireless Debugging in system settings).
+
+> **`adb.connect()` returns `false` only when a session is already live** (libadb's
+> `isConnected()` guard) — it is *never* a genuine failure, which always **throws**
+> (`AdbPairingRequiredException` / `IOException`). The `AdbManager` is one instance for the
+> JS-runtime lifetime, so a link from an earlier `pairAuto`/`autoStart` can still be open here
+> — and stale if Wireless Debugging was toggled since. `autoStart` reaches this branch only
+> with a **dead daemon it must redeploy**, so it `disconnect()`s any existing session first and
+> reconnects fresh. Treating `false` as a failure (the original bug, issue #5) threw "connect
+> failed despite mDNS endpoint" and skipped the redeploy, looping the reconnect screen after a
+> successful re-pair. Don't reintroduce a `throw` on `connect()==false`.
 
 ### 3.7 The JS ↔ native seam (`ClipBus.kt`)
 
