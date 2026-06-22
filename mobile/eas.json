@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 20.2.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -20,7 +20,6 @@
       "channel": "preview"
     },
     "production": {
-      "autoIncrement": true,
       "android": {
         "buildType": "apk"
       },

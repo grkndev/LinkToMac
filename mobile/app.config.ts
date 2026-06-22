@@ -16,10 +16,17 @@ const IS_DEV = variant === 'development';
 const NAME = IS_DEV ? 'LinkToMac (Dev)' : 'Link To Mac';
 const BUNDLE_ID = IS_DEV ? 'com.grkndev.linktomac.dev' : 'com.grkndev.linktomac';
 
+// User-facing version (the `vX.Y.Z` release tag) and the Android build number.
+// `eas.json` sets appVersionSource:"local", so BUILD_NUMBER is authoritative (not the
+// EAS remote counter): bump it on every build that ships, and ensure it only ever goes
+// UP or a new APK won't install over an older one. CI can override via the env var.
+const VERSION = '0.2.1';
+const BUILD_NUMBER = Number(process.env.BUILD_NUMBER ?? 3);
+
 export default (_: ConfigContext): ExpoConfig => ({
   name: NAME,
   slug: 'linktomac',
-  version: '0.2.0',
+  version: VERSION,
   // appVersion policy → runtime "0.1.0"; top-level so EAS Update resolves it for every platform.
   runtimeVersion: { policy: 'appVersion' },
   orientation: 'portrait',
@@ -39,6 +46,7 @@ export default (_: ConfigContext): ExpoConfig => ({
     },
     predictiveBackGestureEnabled: false,
     package: BUNDLE_ID,
+    versionCode: BUILD_NUMBER,
     permissions: ['android.permission.CAMERA', 'android.permission.RECORD_AUDIO'],
   },
   web: {
