@@ -3,26 +3,22 @@ import AppKit
 
 /// The menu-bar popover panel shown by `MenuBarExtra(...).menuBarExtraStyle(.window)`.
 ///
-/// A soft, native card: the paired Mac's identity + a live status pill, a CLIPBOARD group
-/// with the real `.switch` toggle and the last received copy, a general settings group, and
-/// a footer. `RelayClient` is `@Observable`, so reading its properties here makes the panel
-/// re-render live as the relay status / last clip change.
+/// A soft, native **quick glance**: the paired Mac's identity + a live status pill, the last
+/// received copy, and a footer. **All settings now live in the dashboard's Settings screen** —
+/// this panel is read-only status plus "Open Window…" / "Quit". `RelayClient` is `@Observable`,
+/// so reading its properties here makes the panel re-render live as the status / last clip change.
 struct MenuPanel: View {
     let client: RelayClient
-    let proximity: ProximityMonitor
-    let onShowPairing: () -> Void
-    let onShowServerSettings: () -> Void
-    let onShowAbout: () -> Void
-    let onCheckForUpdates: () -> Void
+    /// Opens the main dashboard window (every setting — clipboard, proximity, pairing, relay,
+    /// connect, login item, updates, about, unpair — now lives there).
+    let onOpenWindow: () -> Void
 
     private var deviceName: String { Host.current().localizedName ?? "This Mac" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            clipboardCard
-            securityCard
-            generalCard
+            lastClipCard
             footer
         }
         .padding(14)
@@ -67,85 +63,16 @@ struct MenuPanel: View {
         .padding(.bottom, 2)
     }
 
-    // MARK: - Clipboard
+    // MARK: - Last clip (read-only glance)
 
-    private var clipboardCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionTitle("CLIPBOARD")
-            Card {
-                ToggleRow(
-                    icon: "arrow.up.arrow.down",
-                    title: "Send copies to Android",
-                    isOn: Binding(get: { client.sendToAndroid }, set: { client.sendToAndroid = $0 })
-                )
-                if let clip = client.lastClip, !clip.isEmpty {
-                    RowDivider()
+    @ViewBuilder
+    private var lastClipCard: some View {
+        if let clip = client.lastClip, !clip.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                SectionTitle("CLIPBOARD")
+                Card {
                     InfoRow(icon: "doc.on.clipboard", title: "Last copy", value: clip)
                 }
-            }
-        }
-    }
-
-    // MARK: - Security
-
-    private var securityCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionTitle("SECURITY")
-            Card {
-                ToggleRow(
-                    icon: "lock.laptopcomputer",
-                    title: "Lock when phone leaves",
-                    isOn: Binding(get: { proximity.enabled }, set: { proximity.enabled = $0 }),
-                )
-                if proximity.enabled {
-                    RowDivider()
-                    InfoRow(icon: "dot.radiowaves.left.and.right", title: "Phone", value: proximity.statusText)
-                    RowDivider()
-                    PickerRow(
-                        icon: "antenna.radiowaves.left.and.right",
-                        title: "Sensitivity",
-                        selection: Binding(get: { proximity.sensitivity }, set: { proximity.sensitivity = $0 }),
-                        options: ProximityMonitor.Sensitivity.allCases,
-                        label: { $0.label },
-                    )
-                    RowDivider()
-                    PickerRow(
-                        icon: "clock",
-                        title: "Lock after",
-                        selection: Binding(get: { proximity.graceSeconds }, set: { proximity.graceSeconds = $0 }),
-                        options: ProximityMonitor.graceOptions,
-                        label: { "\($0)s" },
-                    )
-                }
-            }
-        }
-    }
-
-    // MARK: - General
-
-    private var generalCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionTitle("GENERAL")
-            Card {
-                ButtonRow(icon: "qrcode", title: "Pairing QR…", showsChevron: true, action: onShowPairing)
-                RowDivider()
-                ButtonRow(icon: "server.rack", title: "Server Settings…", showsChevron: true, action: onShowServerSettings)
-                RowDivider()
-                ButtonRow(
-                    icon: client.isActive ? "bolt.horizontal.fill" : "bolt.horizontal",
-                    title: client.isActive ? "Disconnect" : "Connect",
-                    action: { client.toggle() }
-                )
-                RowDivider()
-                ToggleRow(
-                    icon: "power",
-                    title: "Start at login",
-                    isOn: Binding(get: { LoginItem.isEnabled }, set: { try? LoginItem.setEnabled($0) })
-                )
-                RowDivider()
-                ButtonRow(icon: "arrow.triangle.2.circlepath", title: "Check for Updates…", action: onCheckForUpdates)
-                RowDivider()
-                ButtonRow(icon: "info.circle", title: "About…", showsChevron: true, action: onShowAbout)
             }
         }
     }
@@ -154,11 +81,10 @@ struct MenuPanel: View {
 
     private var footer: some View {
         HStack(spacing: 0) {
-            Button(role: .destructive, action: confirmUnpair) {
-                Text("Unpair…").font(.system(size: 12))
+            Button(action: onOpenWindow) {
+                Label("Open Window…", systemImage: "macwindow").font(.system(size: 12))
             }
             .buttonStyle(.borderless)
-            .tint(.red)
             Spacer(minLength: 0)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
@@ -198,23 +124,6 @@ struct MenuPanel: View {
                 return StatusInfo(text: "LAN-direct · waiting for phone", color: .orange)
             }
             return StatusInfo(text: "Connection error", color: .red)
-        }
-    }
-
-    /// Confirm before discarding the room/key; the phone must rescan a fresh QR after.
-    private func confirmUnpair() {
-        let alert = NSAlert()
-        alert.messageText = "Unpair this Mac?"
-        alert.informativeText =
-            "The current room and key will be deleted and a new pairing will be generated. "
-            + "The phone disconnects and must scan the new QR to pair again."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Unpair")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            client.unpair()
-            proximity.reloadPairing() // room rotated → the beacon UUID follows it
         }
     }
 }

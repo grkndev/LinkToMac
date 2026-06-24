@@ -43,82 +43,46 @@ struct ServerSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Relay Server").font(.system(size: 15, weight: .semibold))
-                Text("Where this Mac and your phone meet. These values are embedded in the pairing QR, so the phone configures itself on scan.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 8) {
+                M3SectionHeader("RELAY SERVER")
+                Text("Where this Mac and your phone meet. These values ride in the pairing QR, so the phone configures itself on scan.")
+                    .font(M3.bodyMedium)
+                    .foregroundStyle(M3.onSurfaceVariant)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            labeled("Server address", caption: "Domain (for TLS) or IP") {
-                TextField("relay.example.com", text: $host)
-                    .textFieldStyle(.roundedBorder)
-                    .textContentType(.URL)
-            }
-
-            HStack(alignment: .top, spacing: 14) {
-                labeled("Port", caption: portValue == nil ? "1–65535" : " ") {
-                    TextField("443", text: $port)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 84)
+                    .padding(.leading, 6)
+                VStack(spacing: 3) {
+                    M3FieldRow(icon: "network", label: "Server address",
+                               placeholder: "relay.example.com — domain (for TLS) or IP",
+                               text: $host, position: .first)
+                    M3FieldRow(icon: "number", label: "Port", placeholder: "443",
+                               invalid: hasRelay && portValue == nil, text: $port, position: .middle)
+                    M3ToggleRow(icon: "lock.shield.fill", title: "TLS (wss://)",
+                                subtitle: secure ? "Encrypted — needs a certificate" : "Plaintext — LAN only",
+                                isOn: $secure, position: .middle)
+                    M3FieldRow(icon: "key.fill", label: "Password",
+                               placeholder: "matches the server's RELAY_AUTH_TOKEN",
+                               secure: true, text: $token, position: .last)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("TLS").font(.system(size: 12, weight: .medium))
-                    Toggle("Use wss://", isOn: $secure)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                    Text(secure ? "Encrypted (needs a cert)" : "Plaintext — LAN only")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
             }
 
-            labeled("Password", caption: "Must match the server's RELAY_AUTH_TOKEN") {
-                SecureField("relay password", text: $token)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle("LAN-direct (no relay on the same Wi-Fi)", isOn: $lanEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                Text("This Mac runs a local server the phone connects to directly. The relay above is then only used when you're away.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if lanEnabled {
-                    labeled("LAN port", caption: lanPortValue == nil ? "1–65535" : " ") {
-                        TextField("53124", text: $lanPort)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 84)
+            VStack(alignment: .leading, spacing: 8) {
+                M3SectionHeader("LAN-DIRECT")
+                VStack(spacing: 3) {
+                    M3ToggleRow(icon: "wifi", title: "LAN-direct",
+                                subtitle: "Phone connects straight to this Mac over Wi-Fi",
+                                isOn: $lanEnabled, position: lanEnabled ? .first : .single)
+                    if lanEnabled {
+                        M3FieldRow(icon: "number", label: "LAN port", placeholder: "53124",
+                                   invalid: lanPortValue == nil, text: $lanPort, position: .last)
                     }
                 }
             }
 
             HStack {
                 Spacer()
-                Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canSave)
+                M3Button(title: "Save", enabled: canSave) { save() }
             }
-            .padding(.top, 2)
-        }
-        .padding(18)
-        .frame(width: 340)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    @ViewBuilder
-    private func labeled<C: View>(_ label: String, caption: String, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.system(size: 12, weight: .medium))
-            content()
-            Text(caption).font(.system(size: 11)).foregroundStyle(.tertiary)
         }
     }
 

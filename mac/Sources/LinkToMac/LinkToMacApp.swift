@@ -5,18 +5,17 @@ import Sparkle
 @main
 struct LinkToMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    /// Drives `MenuBarExtra` insertion. Shares the exact UserDefaults key `AppearanceStore` writes,
+    /// so toggling "Show in Menu Bar" in Settings inserts/removes the item reactively.
+    @AppStorage(AppearanceKeys.menuBar) private var showInMenuBar = true
 
     var body: some Scene {
         // Window-style menu bar extra: the dropdown is a soft native popover panel, which
         // (unlike a .menu) can host real switches and a designed layout. See `MenuPanel`.
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $showInMenuBar) {
             MenuPanel(
                 client: delegate.client,
-                proximity: delegate.proximity,
-                onShowPairing: delegate.showPairingWindow,
-                onShowServerSettings: delegate.showServerSettingsWindow,
-                onShowAbout: delegate.showAboutWindow,
-                onCheckForUpdates: delegate.checkForUpdates,
+                onOpenWindow: delegate.showDashboardWindow,
             )
         } label: {
             // The app mark as a template image (monochrome; the system tints it for the menu bar).
@@ -34,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let client = RelayClient()
     /// BLE presence watcher; self-gates on its persisted `enabled`, so this is cheap when off.
     let proximity = ProximityMonitor()
+    /// Dock-icon / menu-bar visibility prefs (Settings → APPEARANCE). Owns the activation policy.
+    let appearance = AppearanceStore()
     /// Sparkle updater. `startingUpdater: true` schedules background checks (SUEnableAutomaticChecks);
     /// the feed + EdDSA public key come from Info.plist. No Apple Developer account required.
     let updaterController = SPUStandardUpdaterController(
@@ -43,9 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the same network connects straight to us; rebuilt by `applyLanSettings()` when the port or
     /// the enabled toggle changes. Reads the pairing fresh on each handshake.
     private var lan: LanServer?
-    private var pairingWindow: NSWindow?
-    private var serverSettingsWindow: NSWindow?
-    private var aboutWindow: NSWindow?
+    /// The main dashboard window. Built lazily and reused (the app is now a regular Dock app, so
+    /// the window is the primary surface; the menu-bar extra is the quick-glance companion).
+    private var dashboardWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         client.connect()
@@ -56,6 +57,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Re-advertise under the fresh pairing id (and drop stale auth) when the user re-pairs.
         client.onPairingChanged = { [weak self] in self?.applyLanSettings() }
         applyLanSettings()
+        appearance.applyDockPolicy() // honour the persisted "Show in Dock" pref at launch
+        showDashboardWindow() // open the dashboard on every launch
+    }
+
+    /// Keep the app alive when the dashboard window is closed — it still lives in the menu bar.
+    /// Quit only via the menu or ⌘Q.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Clicking the Dock icon (with the window closed) reopens the dashboard.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showDashboardWindow()
+        return true
     }
 
     /// (Re)build the LAN-direct server from the current Server Settings. Inbound clips/commands are
@@ -82,60 +95,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server.start()
     }
 
-    /// Lazily build and front a window showing the pairing QR (agent app has no Dock icon,
-    /// so we must explicitly activate to bring the window forward).
-    func showPairingWindow() {
-        if pairingWindow == nil {
-            let hosting = NSHostingController(rootView: PairingView(client: client))
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "LinkToMac — Pairing"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.setContentSize(NSSize(width: 320, height: 420))
-            window.center()
-            pairingWindow = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        pairingWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    /// Lazily build and front the runtime relay configuration window (host/port/TLS/password).
-    func showServerSettingsWindow() {
-        if serverSettingsWindow == nil {
-            let hosting = NSHostingController(
-                rootView: ServerSettingsView(client: client) { [weak self] in
-                    self?.applyLanSettings() // LAN port/enabled may have changed
-                    self?.serverSettingsWindow?.close()
-                }
+    /// Lazily build and front the main dashboard window. Hosts `DashboardView` (which folds the
+    /// former pairing / server-settings / about windows into its `NavigationStack`). Forced to a
+    /// dark appearance so the titlebar matches the dark dashboard content.
+    func showDashboardWindow() {
+        if dashboardWindow == nil {
+            let root = DashboardView(
+                client: client,
+                proximity: proximity,
+                appearance: appearance,
+                onApplyLan: { [weak self] in self?.applyLanSettings() }, // LAN port/enabled may have changed
+                onCheckForUpdates: { [weak self] in self?.checkForUpdates() }
             )
-            hosting.sizingOptions = [.preferredContentSize]
+            let hosting = NSHostingController(rootView: root)
+            // We pin the window size ourselves (below); stop the hosting controller from imposing
+            // its own content-derived size constraints.
+            hosting.sizingOptions = []
             let window = NSWindow(contentViewController: hosting)
-            window.title = "LinkToMac — Server Settings"
-            window.styleMask = [.titled, .closable]
+            window.title = "Link to Mac"
+            // Chromeless titlebar: transparent + no title text + full-size content, so the dark
+            // dashboard bleeds to the top edge under the floating traffic lights — no visible bar,
+            // just the Close/Minimize buttons. No resize, no full screen, no zoom.
+            window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.collectionBehavior.insert(.fullScreenNone)
+            window.standardWindowButton(.zoomButton)?.isEnabled = false // green button disabled
             window.isReleasedWhenClosed = false
+            // 1280×760 matches the reference design 1:1 (left column 466 + 17 gap + 732 right panel +
+            // 32/33 side margins). Locked: min == max so the window is a fixed size and can't resize.
+            let fixedSize = NSSize(width: 1280, height: 760)
+            window.setContentSize(fixedSize)
+            window.minSize = fixedSize
+            window.maxSize = fixedSize
+            window.appearance = NSAppearance(named: .darkAqua)
             window.center()
-            serverSettingsWindow = window
+            dashboardWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
-        serverSettingsWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    /// Lazily build and front the About window (version + developer/contact links).
-    func showAboutWindow() {
-        if aboutWindow == nil {
-            let hosting = NSHostingController(
-                rootView: AboutView(onCheckForUpdates: { [weak self] in self?.checkForUpdates() })
-            )
-            hosting.sizingOptions = [.preferredContentSize]
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "About LinkToMac"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            aboutWindow = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        aboutWindow?.makeKeyAndOrderFront(nil)
+        dashboardWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// User-initiated Sparkle update check (shows Sparkle's standard progress/alerts UI).

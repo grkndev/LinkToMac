@@ -18,9 +18,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-	<!-- Menubar agent: no Dock icon, no main window. -->
+	<!-- Regular app: Dock icon + a main dashboard window, plus the menu-bar extra. Closing the
+	     window leaves the app alive in the menu bar (see AppDelegate). -->
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 	<!-- Bluetooth: scan for the phone's presence beacon to auto-lock when it leaves. -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>LinkToMac scans for your paired phone over Bluetooth to lock this Mac when you walk away.</string>

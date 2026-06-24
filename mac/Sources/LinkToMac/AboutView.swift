@@ -1,9 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// Standalone "About" window: app identity + version, plus links to the changelog, source,
-/// developer profile, and contact. Mirrors `MenuPanel`'s System-Settings card language via the
-/// shared building blocks in `PanelComponents`.
+/// The "About" sub-screen pushed from Settings. Redesigned in the M3 dashboard language: an
+/// expressive hero (tonal app badge + name + tagline + version chip), a Check-for-Updates row, and
+/// a connected LINKS group (changelog, source, developer, contact) with trailing external-link
+/// glyphs. Hosted inside the dashboard's route stack.
 struct AboutView: View {
     private static let repoURL = "https://github.com/grkndev/LinkToMac"
     private static let profileURL = "https://grkn.dev"
@@ -21,67 +22,77 @@ struct AboutView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                header
 
-            VStack(alignment: .leading, spacing: 6) {
-                SectionTitle("ABOUT")
-                Card {
-                    InfoRow(icon: "info.circle", title: "Version", value: "\(version) (\(build))")
-                    RowDivider()
-                    ButtonRow(icon: "arrow.triangle.2.circlepath", title: "Check for Updates…",
-                              action: onCheckForUpdates)
-                }
-            }
+                M3SettingsRow(icon: "arrow.triangle.2.circlepath", title: "Check for Updates",
+                              subtitle: "Get the latest version", trailingSymbol: nil,
+                              position: .single, action: onCheckForUpdates)
 
-            VStack(alignment: .leading, spacing: 6) {
-                SectionTitle("LINKS")
-                Card {
-                    ButtonRow(icon: "doc.text", title: "Release notes…",
-                              showsChevron: true, trailingSymbol: "arrow.up.right") {
-                        open(Self.releasesURL)
-                    }
-                    RowDivider()
-                    ButtonRow(icon: "chevron.left.forwardslash.chevron.right", title: "Source code…",
-                              showsChevron: true, trailingSymbol: "arrow.up.right") {
-                        open(Self.repoURL)
-                    }
-                    RowDivider()
-                    ButtonRow(icon: "person.crop.circle", title: "Developer — grkndev",
-                              showsChevron: true, trailingSymbol: "arrow.up.right") {
-                        open(Self.profileURL)
-                    }
-                    RowDivider()
-                    ButtonRow(icon: "envelope", title: "Contact…",
-                              showsChevron: true, trailingSymbol: "arrow.up.right") {
-                        open("mailto:\(Self.contactEmail)")
+                VStack(alignment: .leading, spacing: 8) {
+                    M3SectionHeader("LINKS")
+                    VStack(spacing: 3) {
+                        M3SettingsRow(icon: "doc.text", title: "Release notes",
+                                      trailingSymbol: "arrow.up.right", position: .first) { open(Self.releasesURL) }
+                        M3SettingsRow(icon: "chevron.left.forwardslash.chevron.right", title: "Source code",
+                                      trailingSymbol: "arrow.up.right", position: .middle) { open(Self.repoURL) }
+                        M3SettingsRow(icon: "person.crop.circle", title: "Developer", subtitle: "grkndev",
+                                      trailingSymbol: "arrow.up.right", position: .middle) { open(Self.profileURL) }
+                        M3SettingsRow(icon: "envelope", title: "Contact", subtitle: Self.contactEmail,
+                                      trailingSymbol: "arrow.up.right", position: .last) { open("mailto:\(Self.contactEmail)") }
                     }
                 }
             }
+            .frame(maxWidth: 600, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 28)
         }
-        .padding(14)
-        .frame(width: 300)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(M3.surface)
     }
 
-    // MARK: - Header
+    // MARK: - Hero
 
     private var header: some View {
-        VStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.accentColor.gradient)
-                .frame(width: 64, height: 64)
-                .overlay {
-                    Image(systemName: "laptopcomputer")
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            Text("LinkToMac").font(.system(size: 16, weight: .semibold))
-            Text("Phone ↔ Mac clipboard & control")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+        VStack(spacing: 14) {
+            appIcon
+            VStack(spacing: 4) {
+                Text("Link to Mac")
+                    .font(M3.headline(28))
+                    .foregroundStyle(M3.onSurface)
+                
+                (Text("Android ") +
+                 Text(Image(systemName: "arrow.left.arrow.right")).font(.system(size: 12)) +
+                 Text(" Mac clipboard & control"))
+                    .font(M3.bodyLarge)
+                    .foregroundStyle(M3.onSurfaceVariant)
+            }
+            M3Chip(icon: "checkmark.seal.fill", text: "Version \(version) (\(build))")
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    /// The app's real Dock icon (the composed `AppIcon`). Falls back to a tonal badge if the running
+    /// app reports no icon image.
+    private var appIcon: some View {
+        Group {
+            if let icon = NSApp.applicationIconImage {
+                Image(nsImage: icon).resizable().interpolation(.high)
+            } else {
+                RoundedRectangle(cornerRadius: M3.corExtraLarge, style: .continuous)
+                    .fill(M3.primaryContainer)
+                    .overlay(
+                        Image(systemName: "laptopcomputer.and.iphone")
+                            .font(.system(size: 42, weight: .medium))
+                            .foregroundStyle(M3.onPrimaryContainer)
+                    )
+            }
+        }
+        .frame(width: 100, height: 100)
     }
 
     private func open(_ urlString: String) {
