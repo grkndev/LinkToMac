@@ -4,12 +4,17 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import expo.modules.selfadb.R
+import org.json.JSONObject
 
 /**
  * Hosts the clipboard pipeline so it survives the app being swiped away.
@@ -36,9 +41,16 @@ class ClipForegroundService : Service() {
    *  keeps honoring the user's choice. */
   @Volatile private var sendPaused: Boolean = false
 
+  /** Last telemetry payload sent, so a battery broadcast only forwards a `stat` when it changed. */
+  @Volatile private var lastStatSent: String? = null
+  /** Tracks the peer-online edge so we push fresh telemetry once per (re)connect, not every tick. */
+  @Volatile private var lastPeerOnline = false
+  private var batteryReceiver: BroadcastReceiver? = null
+
   override fun onCreate() {
     super.onCreate()
     startInForeground()
+    registerBatteryReceiver()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -172,9 +184,67 @@ class ClipForegroundService : Service() {
       onStatus = { transport, status, peerOnline, error, attempt ->
         ClipBus.relay(status, peerOnline, error, transport, attempt)
         updateNotification(peerOnline)
+        // Give the Mac fresh battery + name the moment it (re)connects, without waiting for a change.
+        if (peerOnline && !lastPeerOnline) pushBatteryStat(force = true)
+        lastPeerOnline = peerOnline
       },
       log = { ClipBus.log(it) },
     ).also { it.start() }
+  }
+
+  // ---- Telemetry (battery + name -> Mac) -----------------------------------
+  // Lives in the service so it keeps reporting even when the JS app is swiped away. Sends a `stat`
+  // frame (E2E-encrypted by the active link) carrying {"level":N,"charging":bool,"name":"…"}.
+  // Independent of [sendPaused] (that gate is clipboard-only).
+
+  /** Send the current battery to the Mac if it changed since the last send (or `force` on connect). */
+  private fun pushBatteryStat(force: Boolean = false) {
+    val payload = batteryStatPayload() ?: return
+    if (!force && payload == lastStatSent) return
+    lastStatSent = payload
+    conn?.sendStat(payload)
+  }
+
+  /** This phone's telemetry as the wire payload, or null if the battery can't be read. */
+  private fun batteryStatPayload(): String? {
+    val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
+    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+    if (level < 0 || scale <= 0) return null
+    val pct = (level * 100 / scale).coerceIn(0, 100)
+    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+    val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+      status == BatteryManager.BATTERY_STATUS_FULL
+    return JSONObject()
+      .put("level", pct)
+      .put("charging", charging)
+      .put("name", deviceName())
+      .toString()
+  }
+
+  /** User-set device name (Settings.Global "device_name") when available, else the hardware model. */
+  private fun deviceName(): String {
+    val name = try {
+      Settings.Global.getString(contentResolver, "device_name")
+    } catch (e: Exception) {
+      null
+    }
+    return if (!name.isNullOrBlank()) name else Build.MODEL
+  }
+
+  private fun registerBatteryReceiver() {
+    if (batteryReceiver != null) return
+    val r = object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) = pushBatteryStat()
+    }
+    batteryReceiver = r
+    registerReceiver(r, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+  }
+
+  private fun unregisterBatteryReceiver() {
+    val r = batteryReceiver ?: return
+    batteryReceiver = null
+    try { unregisterReceiver(r) } catch (e: Exception) {}
   }
 
   // ---- BLE presence beacon (proximity auto-lock) ---------------------------
@@ -209,6 +279,7 @@ class ClipForegroundService : Service() {
   }
 
   override fun onDestroy() {
+    unregisterBatteryReceiver()
     conn?.shutdown()
     conn = null
     bleAdvertiser?.stop()

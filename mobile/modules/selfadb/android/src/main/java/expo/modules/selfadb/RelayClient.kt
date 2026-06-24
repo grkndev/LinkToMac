@@ -113,6 +113,19 @@ class RelayClient(
     ws?.send(msg.toString())
   }
 
+  /** Send telemetry (this phone's battery + name) to the Mac, E2E-encrypted like a clip.
+   *  Payload plaintext is `{"level":N,"charging":bool,"name":"…"}`. */
+  fun sendStat(payload: String) {
+    if (payload.isEmpty()) return
+    val enc = ClipCodec.encode(payload, key)
+    if (enc == null) {
+      log("encrypt failed (bad pairing key); not sending stat")
+      return
+    }
+    val msg = JSONObject().put("t", "stat").put("nonce", enc.first).put("ct", enc.second)
+    ws?.send(msg.toString())
+  }
+
   private fun open() {
     cancelReconnect()
     onStatus("connecting", peerOnline, null, attempt)

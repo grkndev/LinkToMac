@@ -109,6 +109,18 @@ class LanClient(
     ws?.send(msg.toString())
   }
 
+  /** Send telemetry (this phone's battery + name) to the Mac, E2E-encrypted like a clip. */
+  fun sendStat(payload: String) {
+    if (payload.isEmpty()) return
+    val enc = ClipCodec.encode(payload, key)
+    if (enc == null) {
+      log("lan encrypt failed (bad pairing key); not sending stat")
+      return
+    }
+    val msg = JSONObject().put("t", "stat").put("nonce", enc.first).put("ct", enc.second)
+    ws?.send(msg.toString())
+  }
+
   private fun open() {
     cancelReconnect()
     authed = false
