@@ -1,27 +1,35 @@
 import SwiftUI
 
-/// Pushed from the dashboard's Clipboard tile. Redesigned in the M3 dashboard language: clips are
-/// grouped by recency into **connected list groups** of two-line rows, each with a content-type
-/// badge (link / command / phone / text), the clip over a "Kind · time" subtitle, and a tap-to-copy
-/// affordance. **Phase 1: placeholder rows.** Phase 2 feeds this from a Mac-local ring of received
-/// clips (no protocol change) and wires the tap to re-copy.
+/// Pushed from the dashboard's Clipboard tile. Shows the Mac-local ring of clips received from the
+/// phone (`RelayClient.clipHistory`), grouped by recency into **connected list groups** of two-line
+/// rows: a content-type badge (link / command / phone / text), the clip over a "Kind · time"
+/// subtitle, and a hover-reactive copy glyph. Tapping a row re-copies it to the Mac pasteboard.
 struct ClipHistoryScreen: View {
-    private let today: [(text: String, time: String)] = [
-        ("https://github.com/grkndev/LinkToMac", "2m"),
-        ("Meeting moved to 3pm — conf room B", "18m"),
-        ("npm run dev", "1h"),
-    ]
-    private let earlier: [(text: String, time: String)] = [
-        ("ssh grkn@192.168.1.20", "Yesterday"),
-        ("Lorem ipsum dolor sit amet, consectetur adipiscing", "Yesterday"),
-        ("+90 555 123 45 67", "2d"),
-    ]
+    let client: RelayClient
+
+    private struct ClipGroup { let title: String; let entries: [RelayClient.ClipEntry] }
+
+    /// Split the history into TODAY / EARLIER, preserving newest-first order within each.
+    private var groups: [ClipGroup] {
+        let cal = Calendar.current
+        let today = client.clipHistory.filter { cal.isDateInToday($0.date) }
+        let earlier = client.clipHistory.filter { !cal.isDateInToday($0.date) }
+        var result: [ClipGroup] = []
+        if !today.isEmpty { result.append(ClipGroup(title: "TODAY", entries: today)) }
+        if !earlier.isEmpty { result.append(ClipGroup(title: "EARLIER", entries: earlier)) }
+        return result
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                section("TODAY", today)
-                section("EARLIER", earlier)
+                if client.clipHistory.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(Array(groups.enumerated()), id: \.element.title) { index, group in
+                        section(group, showClear: index == 0)
+                    }
+                }
             }
             .frame(maxWidth: 600, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -32,18 +40,40 @@ struct ClipHistoryScreen: View {
         .background(M3.surface)
     }
 
-    /// A section header + a connected group of clip rows.
     @ViewBuilder
-    private func section(_ title: String, _ clips: [(text: String, time: String)]) -> some View {
+    private func section(_ group: ClipGroup, showClear: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            M3SectionHeader(title)
+            HStack {
+                M3SectionHeader(group.title)
+                Spacer()
+                if showClear {
+                    Button { client.clearClipHistory() } label: {
+                        Text("Clear").font(M3.labelLarge).foregroundStyle(M3.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
             VStack(spacing: 3) {
-                ForEach(Array(clips.enumerated()), id: \.offset) { index, clip in
-                    ClipRow(text: clip.text, time: clip.time,
-                            position: groupPosition(index, count: clips.count))
+                ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
+                    ClipRow(text: entry.text, time: Self.relative(entry.date),
+                            position: groupPosition(index, count: group.entries.count)) {
+                        client.recopy(entry.text)
+                    }
                 }
             }
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            M3IconBadge(icon: "doc.on.clipboard", size: 64,
+                        fill: M3.surfaceContainerHigh, tint: M3.onSurfaceVariant)
+            Text("No clips yet").font(M3.titleLarge).foregroundStyle(M3.onSurface)
+            Text("Copies received from your phone will appear here.")
+                .font(M3.bodyMedium).foregroundStyle(M3.onSurfaceVariant)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 80)
     }
 
     private func groupPosition(_ index: Int, count: Int) -> M3GroupPosition {
@@ -52,10 +82,19 @@ struct ClipHistoryScreen: View {
         if index == count - 1 { return .last }
         return .middle
     }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+    private static func relative(_ date: Date) -> String {
+        relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
 }
 
 /// The kind of a clip, inferred from its text — drives the row's badge icon, subtitle label, and
-/// whether it renders monospaced. Reused verbatim once phase 2 feeds in real clips.
+/// whether it renders monospaced.
 private enum ClipKind {
     case url, command, phone, text
 
@@ -91,12 +130,14 @@ private enum ClipKind {
 }
 
 /// One clip in a connected list group — leading content-type badge, the clip over a "Kind · time"
-/// subtitle, and a trailing copy glyph that brightens on hover. The whole row is the copy button.
+/// subtitle, and a trailing copy glyph that brightens on hover. The whole row re-copies on tap.
 private struct ClipRow: View {
     let text: String
     let time: String
     var position: M3GroupPosition = .single
+    let onCopy: () -> Void
     @State private var hovering = false
+    @State private var copied = false
 
     private var kind: ClipKind { ClipKind.infer(from: text) }
     private var shape: UnevenRoundedRectangle { position.shape(axis: .vertical) }
@@ -105,9 +146,7 @@ private struct ClipRow: View {
     }
 
     var body: some View {
-        Button {
-            // Phase 2: re-copy `text` to the pasteboard.
-        } label: {
+        Button(action: copy) {
             HStack(spacing: 14) {
                 M3IconBadge(icon: kind.icon, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
@@ -116,15 +155,16 @@ private struct ClipRow: View {
                         .foregroundStyle(M3.onSurface)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text("\(kind.label) · \(time)")
+                    Text(copied ? "Copied to clipboard" : "\(kind.label) · \(time)")
                         .font(M3.bodyMedium)
-                        .foregroundStyle(M3.onSurfaceVariant)
+                        .foregroundStyle(copied ? M3.success : M3.onSurfaceVariant)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "doc.on.doc")
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(hovering ? M3.onSurface : M3.onSurfaceVariant)
+                    .foregroundStyle(copied ? M3.success : (hovering ? M3.onSurface : M3.onSurfaceVariant))
+                    .contentTransition(.symbolEffect(.replace))
             }
             .padding(.horizontal, 16)
             .frame(height: 64)
@@ -134,5 +174,15 @@ private struct ClipRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+
+    /// Re-copy, then flash a checkmark + "Copied" for a moment so the tap clearly registers.
+    private func copy() {
+        onCopy()
+        withAnimation(.snappy) { copied = true }
+        Task {
+            try? await Task.sleep(for: .seconds(1.3))
+            withAnimation(.easeOut) { copied = false }
+        }
     }
 }

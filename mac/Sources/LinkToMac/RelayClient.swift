@@ -31,6 +31,29 @@ final class RelayClient {
     /// Most recent clipboard text received from the peer (decrypted via `ClipCodec`).
     private(set) var lastClip: String?
 
+    /// One received clip with the time it arrived. `id` lets SwiftUI lists diff stably.
+    struct ClipEntry: Identifiable {
+        let id = UUID()
+        let text: String
+        let date: Date
+    }
+
+    /// Mac-local history of clips received from the phone (newest first, capped). Feeds the
+    /// dashboard's Clipboard screen. In-memory only — cleared on quit / unpair.
+    private(set) var clipHistory: [ClipEntry] = []
+    private static let clipHistoryCap = 50
+
+    /// Inbound phone telemetry from `stat` frames (nil until the first one arrives). The phone
+    /// sends `{"level":N,"charging":bool,"name":"…"}`.
+    private(set) var phoneBatteryLevel: Int?
+    private(set) var phoneCharging: Bool?
+    private(set) var phoneName: String?
+
+    /// This Mac's own battery, surfaced for the dashboard (the same value sent to the phone via
+    /// `stat`). nil on a desktop Mac (no internal battery).
+    private(set) var macBatteryLevel: Int?
+    private(set) var macCharging: Bool?
+
     /// Generated once and persisted; the room we join and show as a QR for the phone.
     private(set) var pairing: Pairing = PairingStore.loadOrCreate()
 
@@ -93,11 +116,13 @@ final class RelayClient {
         if battery == nil {
             battery = BatteryMonitor { [weak self] payload in
                 guard let self else { return }
+                self.applyMacStat(payload) // surface this Mac's battery in the dashboard
                 self.sendStat(payload)
                 self.onLocalStat?(payload) // fan out to the LAN-direct transport too
             }
         }
         battery?.start()
+        if let payload = battery?.currentPayload() { applyMacStat(payload) } // seed without waiting for the poll
         openSocket()
     }
 
@@ -151,12 +176,63 @@ final class RelayClient {
     func writeRemoteClip(_ text: String) {
         pasteboard?.write(text)
         lastClip = text
+        recordClip(text)
         log("lan clip received (\(text.count) chars)")
     }
 
     /// Run a remote action that arrived over the LAN-direct transport (e.g. "lock").
     func runRemoteCommand(_ action: String) {
         handleCommand(action)
+    }
+
+    /// Apply a phone `stat` that arrived over the LAN-direct transport (already decrypted by `LanServer`).
+    func writeRemoteStat(_ json: String) {
+        applyPhoneStat(json)
+    }
+
+    /// Re-copy a clip-history entry to the pasteboard. Echo-suppressed (same writer as inbound
+    /// clips), so it doesn't bounce back to the phone.
+    func recopy(_ text: String) {
+        guard !text.isEmpty else { return }
+        pasteboard?.write(text)
+        lastClip = text
+    }
+
+    func clearClipHistory() { clipHistory.removeAll() }
+
+    /// Append a received clip to the in-memory history (newest first, capped, skip consecutive dupes).
+    private func recordClip(_ text: String) {
+        guard !text.isEmpty, clipHistory.first?.text != text else { return }
+        clipHistory.insert(ClipEntry(text: text, date: Date()), at: 0)
+        if clipHistory.count > Self.clipHistoryCap {
+            clipHistory.removeLast(clipHistory.count - Self.clipHistoryCap)
+        }
+    }
+
+    /// Parse + apply a decrypted phone `stat` payload (`{"level":N,"charging":bool,"name":"…"}`).
+    private func applyPhoneStat(_ json: String) {
+        guard let stat = Self.decodeStat(json) else { log("stat parse failed"); return }
+        if let level = stat.level { phoneBatteryLevel = min(max(level, 0), 100) }
+        if let charging = stat.charging { phoneCharging = charging }
+        if let name = stat.name, !name.isEmpty { phoneName = name }
+    }
+
+    /// Parse this Mac's own outgoing battery payload to surface it in the dashboard.
+    private func applyMacStat(_ payload: String) {
+        guard let stat = Self.decodeStat(payload) else { return }
+        macBatteryLevel = stat.level.map { min(max($0, 0), 100) }
+        macCharging = stat.charging
+    }
+
+    private struct StatPayload: Decodable {
+        let level: Int?
+        let charging: Bool?
+        let name: String?
+    }
+
+    private static func decodeStat(_ json: String) -> StatPayload? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(StatPayload.self, from: data)
     }
 
     func toggle() {
@@ -181,6 +257,10 @@ final class RelayClient {
         PairingStore.clear()
         pairing = PairingStore.loadOrCreate()
         lastClip = nil
+        clipHistory.removeAll()
+        phoneBatteryLevel = nil
+        phoneCharging = nil
+        phoneName = nil
         onPairingChanged?()
         if wasActive { connect() }
     }
@@ -332,6 +412,7 @@ final class RelayClient {
             if let text = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
                 pasteboard?.write(text)
                 lastClip = text
+                recordClip(text)
                 log("clip received (\(text.count) chars)")
             } else {
                 log("clip decrypt failed (key mismatch or corrupt)")
@@ -343,6 +424,13 @@ final class RelayClient {
                 handleCommand(action)
             } else {
                 log("cmd decrypt failed (key mismatch or corrupt)")
+            }
+        case let .stat(nonce, ct):
+            // Phone telemetry (battery + name). Same AEAD as clips; drop anything unauthenticated.
+            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+                applyPhoneStat(json)
+            } else {
+                log("stat decrypt failed (key mismatch or corrupt)")
             }
         case .pong:
             break

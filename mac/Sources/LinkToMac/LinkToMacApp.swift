@@ -83,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let client = self.client
         server.onRemoteClip = { text in Task { @MainActor in client.writeRemoteClip(text) } }
         server.onRemoteCommand = { action in Task { @MainActor in client.runRemoteCommand(action) } }
+        server.onRemoteStat = { json in Task { @MainActor in client.writeRemoteStat(json) } }
         // `weak server` so the callback doesn't retain the server it's installed on. On connect,
         // push the current battery immediately so the phone shows it without waiting for the poll.
         server.onPeerChange = { [weak server] connected in

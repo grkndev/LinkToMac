@@ -6,6 +6,7 @@ import SwiftUI
 /// hardcoded.** Clipboard / Settings push a sub-screen via `onOpen`; Lock Phone / Cast Screen are
 /// visual-only roadmap tiles.
 struct PhonePanel: View {
+    let client: RelayClient
     let onOpen: (DashRoute) -> Void
 
     var body: some View {
@@ -31,28 +32,61 @@ struct PhonePanel: View {
                 
 
             VStack(alignment: .leading, spacing: 0) {
-                Text("grkn\u{2019}s S24 Ultra")
+                Text(client.phoneName ?? "Android")
                     .font(M3.headline(28))
                     .foregroundStyle(M3.onSurface)
                     .lineLimit(1)
                 Spacer().frame(height: 10)
                 HStack(spacing: 8) {
-                    Circle().fill(M3.success).frame(width: 11, height: 11)
-                    Text("Connected").font(M3.bodyLarge).foregroundStyle(M3.onSurfaceVariant)
+                    Circle().fill(client.isLinked ? M3.success : M3.onSurfaceVariant)
+                        .frame(width: 11, height: 11)
+                    Text(client.isLinked ? "Connected" : "Disconnected")
+                        .font(M3.bodyLarge).foregroundStyle(M3.onSurfaceVariant)
                 }
                 Spacer().frame(height: 16)
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        M3Chip(icon: "wifi", text: "LAN")
-                        M3Chip(icon: "battery.75", text: "68%")
-                    }
-                    HStack(spacing: 10) {
-                        M3Chip(icon: "cloud.fill", text: "Relay")
-                        M3Chip(icon: "battery.100", text: "100%")
-                    }
-                }
+                statusChips
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    /// Transport + phone battery + Mac battery. Each chip is hidden until its value is real, so a
+    /// fresh pairing (or a desktop Mac with no battery) simply shows fewer chips.
+    private var statusChips: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                M3Chip(icon: transportIcon, text: transportText)
+                if let level = client.phoneBatteryLevel {
+                    M3Chip(icon: Self.batteryIcon(level, charging: client.phoneCharging ?? false),
+                           text: "\(level)%")
+                }
+            }
+            if let level = client.macBatteryLevel {
+                M3Chip(icon: "laptopcomputer", text: "Mac \(level)%")
+            }
+        }
+    }
+
+    private var transportIcon: String {
+        if client.lanPeerConnected { return "wifi" }
+        if client.peerOnline { return "cloud.fill" }
+        return "wifi.slash"
+    }
+    private var transportText: String {
+        if client.lanPeerConnected { return "LAN" }
+        if client.peerOnline { return "Relay" }
+        return "Offline"
+    }
+
+    /// SF Symbol for a battery level (+ charging bolt), matching the system battery glyph steps.
+    private static func batteryIcon(_ level: Int, charging: Bool) -> String {
+        if charging { return "battery.100.bolt" }
+        switch level {
+        case 90...: return "battery.100"
+        case 60..<90: return "battery.75"
+        case 35..<60: return "battery.50"
+        case 10..<35: return "battery.25"
+        default: return "battery.0"
         }
     }
 

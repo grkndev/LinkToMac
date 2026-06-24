@@ -51,6 +51,9 @@ enum ServerMessage: Decodable {
     /// A remote action from the peer (e.g. "lock"), E2E-encrypted into `nonce`/`ct` just like
     /// a clip. The relay forwards it opaquely; we decrypt with the pairing key before acting.
     case cmd(nonce: String, ct: String)
+    /// Telemetry from the phone (battery + name), E2E-encrypted into `nonce`/`ct` like a clip.
+    /// Decrypted plaintext is `{"level":N,"charging":bool,"name":"…"}`.
+    case stat(nonce: String, ct: String)
     case pong
 
     private enum CodingKeys: String, CodingKey {
@@ -84,6 +87,11 @@ enum ServerMessage: Decodable {
             )
         case "cmd":
             self = .cmd(
+                nonce: try c.decode(String.self, forKey: .nonce),
+                ct: try c.decode(String.self, forKey: .ct)
+            )
+        case "stat":
+            self = .stat(
                 nonce: try c.decode(String.self, forKey: .nonce),
                 ct: try c.decode(String.self, forKey: .ct)
             )

@@ -44,7 +44,7 @@ struct DashboardView: View {
 
     private var home: some View {
         HStack(alignment: .top, spacing: 17) {
-            PhonePanel(onOpen: { path.append($0) })
+            PhonePanel(client: client, onOpen: { path.append($0) })
             FeaturePanel()
         }
         .padding(.leading, 32)
@@ -59,7 +59,7 @@ struct DashboardView: View {
     private func screen(for route: DashRoute) -> some View {
         switch route {
         case .clipboard:
-            ClipHistoryScreen()
+            ClipHistoryScreen(client: client)
         case .settings:
             SettingsScreen(
                 client: client,
