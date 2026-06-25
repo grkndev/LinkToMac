@@ -96,6 +96,15 @@ class ClipForegroundService : Service() {
     conn?.sendCmd(action)
   }
 
+  /**
+   * Forward a mirrored device notification to the Mac. Called by [NotificationListener] (same
+   * process). Independent of [sendPaused] (that gate is clipboard-only); the listener already
+   * checks [getNotificationForwarding]. No-op if not connected.
+   */
+  fun sendNote(json: String) {
+    conn?.sendNote(json)
+  }
+
   // ---- Connection (LAN-direct preferred, relay fallback) -------------------
 
   /** Persist config and (re)connect — but skip the restart if nothing changed. */
@@ -397,6 +406,7 @@ class ClipForegroundService : Service() {
     private const val PREFS_UI = "linktomac_ui"
     private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"
     private const val KEY_CLIP_SEND_PAUSED = "clipSendPaused"
+    private const val KEY_NOTIFICATION_FORWARDING = "notificationForwarding"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     const val DEFAULT_PORT = 53123
 
@@ -419,6 +429,19 @@ class ClipForegroundService : Service() {
     fun setClipSendPaused(ctx: Context, paused: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_CLIP_SEND_PAUSED, paused)
+        .apply()
+    }
+
+    /** Whether mirroring device notifications to the Mac is enabled (default true). Gates
+     *  [NotificationListener] independently of the system "Notification access" grant, so the
+     *  user can pause mirroring without revoking access. Persisted in PREFS_UI (survives unpair). */
+    fun getNotificationForwarding(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getBoolean(KEY_NOTIFICATION_FORWARDING, true)
+
+    fun setNotificationForwarding(ctx: Context, enabled: Boolean) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_NOTIFICATION_FORWARDING, enabled)
         .apply()
     }
 

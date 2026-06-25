@@ -33,6 +33,14 @@ export interface StatMsg {
   ct: string;
 }
 
+// A mirrored device notification (phone → Mac). E2E-encrypted (`nonce`/`ct`) exactly like a
+// `clip`, so the relay forwards it verbatim and never sees the contents — opaque, just like clips.
+export interface NoteMsg {
+  t: 'note';
+  nonce: string;
+  ct: string;
+}
+
 export interface PingMsg {
   t: 'ping';
 }
@@ -41,7 +49,7 @@ export interface PongMsg {
   t: 'pong';
 }
 
-export type ClientMessage = JoinMsg | ClipMsg | CmdMsg | StatMsg | PingMsg | PongMsg;
+export type ClientMessage = JoinMsg | ClipMsg | CmdMsg | StatMsg | NoteMsg | PingMsg | PongMsg;
 
 // --- relay -> client ---
 export type ErrorCode =
@@ -110,6 +118,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
       if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
       return { t: 'stat', nonce: obj.nonce, ct: obj.ct };
+    case 'note':
+      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
+      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      return { t: 'note', nonce: obj.nonce, ct: obj.ct };
     case 'ping':
       return { t: 'ping' };
     case 'pong':

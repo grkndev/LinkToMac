@@ -54,6 +54,9 @@ enum ServerMessage: Decodable {
     /// Telemetry from the phone (battery + name), E2E-encrypted into `nonce`/`ct` like a clip.
     /// Decrypted plaintext is `{"level":N,"charging":bool,"name":"…"}`.
     case stat(nonce: String, ct: String)
+    /// A mirrored device notification from the phone, E2E-encrypted into `nonce`/`ct` like a clip.
+    /// Decrypted plaintext is a JSON object (see `RelayClient.applyNotification`).
+    case note(nonce: String, ct: String)
     case pong
 
     private enum CodingKeys: String, CodingKey {
@@ -92,6 +95,11 @@ enum ServerMessage: Decodable {
             )
         case "stat":
             self = .stat(
+                nonce: try c.decode(String.self, forKey: .nonce),
+                ct: try c.decode(String.self, forKey: .ct)
+            )
+        case "note":
+            self = .note(
                 nonce: try c.decode(String.self, forKey: .nonce),
                 ct: try c.decode(String.self, forKey: .ct)
             )

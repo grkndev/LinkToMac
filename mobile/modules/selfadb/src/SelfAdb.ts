@@ -74,6 +74,14 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   hasPostNotifications(): Promise<boolean>;
   /** request POST_NOTIFICATIONS; re-posts the service notification once granted. */
   requestPostNotifications(): Promise<boolean>;
+  /** whether the user granted "Notification access" (lets the listener mirror notifications to the Mac). */
+  hasNotificationAccess(): Promise<boolean>;
+  /** open the system "Notification access" screen so the user can grant the listener. */
+  openNotificationAccessSettings(): Promise<void>;
+  /** whether captured notifications are forwarded to the Mac (persisted, default true). */
+  getNotificationForwarding(): Promise<boolean>;
+  /** pause/resume mirroring notifications to the Mac without revoking the system access grant. */
+  setNotificationForwarding(enabled: boolean): Promise<void>;
   /** whether the app is exempt from battery optimizations (more resilient FGS). */
   hasIgnoreBatteryOptimizations(): Promise<boolean>;
   /** open the system dialog to request battery-optimization exemption. */

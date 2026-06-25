@@ -58,6 +58,22 @@
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         android:value="clipboard_sync" />
     </service>
+
+    <!--
+      Notification mirroring: a NotificationListenerService that captures every posted/removed
+      notification and forwards it to the Mac. `BIND_NOTIFICATION_LISTENER_SERVICE` + the
+      service intent-filter are how the system recognises it; the user must still grant
+      "Notification access" in system settings (a special access, not a runtime permission).
+    -->
+    <service
+      android:name=".NotificationListener"
+      android:exported="false"
+      android:label="Link to macOS notifications"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
   </application>
 
 </manifest>

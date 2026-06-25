@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AppKit
 
 /// Drives a single WebSocket connection to the relay: connect, `join`, app-level
 /// ping/pong, presence tracking, and auto-reconnect with exponential backoff.
@@ -48,6 +49,33 @@ final class RelayClient {
     private(set) var phoneBatteryLevel: Int?
     private(set) var phoneCharging: Bool?
     private(set) var phoneName: String?
+
+    /// One mirrored phone notification. `key` is the Android `sbn.key` — stable across an update of
+    /// the same notification, so it drives dedup/update/removal. `id` lets SwiftUI lists diff stably.
+    struct NotificationEntry: Identifiable {
+        let id = UUID()
+        let key: String
+        let pkg: String
+        let app: String
+        let title: String
+        let text: String
+        let category: String?
+        let date: Date
+        let icon: NSImage?
+    }
+
+    /// Mirrored phone notifications (newest first, capped, deduped by `key`). Feeds the dashboard's
+    /// Notifications tab. In-memory only — cleared on quit / unpair.
+    private(set) var notifications: [NotificationEntry] = []
+    private static let notificationsCap = 100
+    /// App-icon cache keyed by package, so a `note` that omits an icon still renders the app's badge.
+    private var iconCache: [String: NSImage] = [:]
+
+    /// Whether an inbound notification also raises a native macOS banner (the dashboard tab is always
+    /// updated). Persisted; defaults on. `@Observable` makes the Settings toggle reflect changes live.
+    var showNotificationBanners: Bool = UserDefaults.standard.object(forKey: "showNotificationBanners") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showNotificationBanners, forKey: "showNotificationBanners") }
+    }
 
     /// Generated once and persisted; the room we join and show as a QR for the phone.
     private(set) var pairing: Pairing = PairingStore.loadOrCreate()
@@ -183,6 +211,11 @@ final class RelayClient {
         applyPhoneStat(json)
     }
 
+    /// Apply a phone `note` that arrived over the LAN-direct transport (already decrypted by `LanServer`).
+    func writeRemoteNote(_ json: String) {
+        applyNotification(json)
+    }
+
     /// Re-copy a clip-history entry to the pasteboard. Echo-suppressed (same writer as inbound
     /// clips), so it doesn't bounce back to the phone.
     func recopy(_ text: String) {
@@ -192,6 +225,8 @@ final class RelayClient {
     }
 
     func clearClipHistory() { clipHistory.removeAll() }
+
+    func clearNotifications() { notifications.removeAll() }
 
     /// Append a received clip to the in-memory history (newest first, capped, skip consecutive dupes).
     private func recordClip(_ text: String) {
@@ -221,6 +256,71 @@ final class RelayClient {
         return try? JSONDecoder().decode(StatPayload.self, from: data)
     }
 
+    /// Parse + apply a decrypted phone `note` payload. `op:"remove"` drops the entry with that `key`
+    /// (a phone dismissal); `op:"post"` (default) upserts by `key` — same key replaces in place and
+    /// moves to the front (an update), else inserts newest-first and trims to the cap. A post also
+    /// raises a native banner when enabled.
+    private func applyNotification(_ json: String) {
+        guard let n = Self.decodeNote(json) else { log("note parse failed"); return }
+        if n.op == "remove" {
+            notifications.removeAll { $0.key == n.key }
+            return
+        }
+        let pkg = n.pkg ?? ""
+        // Raw PNG bytes (for the banner attachment) decoded once from the same base64 the icon uses.
+        let iconPNG = n.icon.flatMap { Data(base64Encoded: $0) }
+        let icon = resolveIcon(pkg: pkg, png: iconPNG)
+        let entry = NotificationEntry(
+            key: n.key,
+            pkg: pkg,
+            app: n.app ?? (pkg.isEmpty ? "App" : pkg),
+            title: n.title ?? "",
+            text: n.text ?? "",
+            category: n.category,
+            date: n.time.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date(),
+            icon: icon
+        )
+        notifications.removeAll { $0.key == entry.key }
+        notifications.insert(entry, at: 0)
+        if notifications.count > Self.notificationsCap {
+            notifications.removeLast(notifications.count - Self.notificationsCap)
+        }
+        log("note: \(entry.app) (\(entry.text.count) chars)")
+        if showNotificationBanners {
+            let bannerTitle = entry.title.isEmpty ? entry.app : "\(entry.app) · \(entry.title)"
+            // The phone sends the icon on every post, so iconPNG is normally present; the banner
+            // attachment surfaces the source app's icon (WhatsApp, Discord, …).
+            MacNotifier.post(title: bannerTitle, body: entry.text, iconPNG: iconPNG)
+        }
+    }
+
+    /// Build an `NSImage` from decoded PNG bytes, caching it per package. Falls back to the cached
+    /// icon (or nil) when the payload carries no icon, so an update without an icon keeps the app badge.
+    private func resolveIcon(pkg: String, png: Data?) -> NSImage? {
+        if let png, let image = NSImage(data: png) {
+            if !pkg.isEmpty { iconCache[pkg] = image }
+            return image
+        }
+        return iconCache[pkg]
+    }
+
+    private struct NotePayload: Decodable {
+        let op: String?
+        let key: String
+        let pkg: String?
+        let app: String?
+        let title: String?
+        let text: String?
+        let category: String?
+        let time: Int64?
+        let icon: String?
+    }
+
+    private static func decodeNote(_ json: String) -> NotePayload? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(NotePayload.self, from: data)
+    }
+
     func toggle() {
         shouldStay ? disconnect() : connect()
     }
@@ -244,6 +344,8 @@ final class RelayClient {
         pairing = PairingStore.loadOrCreate()
         lastClip = nil
         clipHistory.removeAll()
+        notifications.removeAll()
+        iconCache.removeAll()
         phoneBatteryLevel = nil
         phoneCharging = nil
         phoneName = nil
@@ -417,6 +519,13 @@ final class RelayClient {
                 applyPhoneStat(json)
             } else {
                 log("stat decrypt failed (key mismatch or corrupt)")
+            }
+        case let .note(nonce, ct):
+            // A mirrored phone notification. Same AEAD as clips; drop anything unauthenticated.
+            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+                applyNotification(json)
+            } else {
+                log("note decrypt failed (key mismatch or corrupt)")
             }
         case .pong:
             break

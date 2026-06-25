@@ -1,6 +1,7 @@
 package expo.modules.selfadb
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -362,6 +363,37 @@ class SelfAdbModule : Module() {
 
     AsyncFunction("getStatusNotificationVisible") {
       ClipForegroundService.getStatusNotificationVisible(appCtx)
+    }
+
+    // ---- Notification mirroring (NotificationListenerService -> Mac) ---------
+
+    /** Whether the user has granted this app "Notification access" (the special access that lets
+     *  [NotificationListener] read notifications). Parsed from Settings.Secure to avoid a dep. */
+    AsyncFunction("hasNotificationAccess") {
+      val cn = ComponentName(appCtx, NotificationListener::class.java)
+      val flat = Settings.Secure.getString(appCtx.contentResolver, "enabled_notification_listeners") ?: ""
+      flat.split(":").any {
+        val c = ComponentName.unflattenFromString(it)
+        c != null && c.packageName == cn.packageName && c.className == cn.className
+      }
+    }
+
+    /** Open the system "Notification access" screen so the user can grant the listener. */
+    AsyncFunction("openNotificationAccessSettings") {
+      appCtx.startActivity(
+        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      )
+    }
+
+    /** Whether captured notifications are forwarded to the Mac (persisted, default true). Lets the
+     *  user pause mirroring without revoking the system access grant. */
+    AsyncFunction("getNotificationForwarding") {
+      ClipForegroundService.getNotificationForwarding(appCtx)
+    }
+
+    AsyncFunction("setNotificationForwarding") { enabled: Boolean ->
+      ClipForegroundService.setNotificationForwarding(appCtx, enabled)
     }
 
     AsyncFunction("hasIgnoreBatteryOptimizations") {

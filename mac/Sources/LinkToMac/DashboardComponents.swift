@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Material 3 (Expressive) design tokens + components for the dashboard window. The dark scheme is
 /// **sampled from the Jetpack-Compose mobile app** (`local-assets/Screenshot_*.jpg`) so the Mac reads
@@ -84,6 +85,27 @@ struct M3IconBadge: View {
                     .font(.system(size: size * 0.4, weight: .regular))
                     .foregroundStyle(tint)
             )
+    }
+}
+
+/// A circular leading badge backed by a real image (e.g. a mirrored notification's app icon),
+/// falling back to a tonal SF-Symbol `M3IconBadge` when no image is available. The image is
+/// clipped to the same circle as `M3IconBadge` so notification rows read in the M3 badge language.
+struct M3ImageBadge: View {
+    let image: NSImage?
+    var fallback: String = "bell.fill"
+    var size: CGFloat = 44
+    var body: some View {
+        if let image {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+        } else {
+            M3IconBadge(icon: fallback, size: size)
+        }
     }
 }
 
@@ -228,6 +250,8 @@ enum M3GroupPosition {
 /// outer corners round large and the inner (adjoining) corners round small. Hover raises the tone.
 struct M3Row: View {
     let icon: String
+    /// Optional leading image (e.g. a notification's app icon). When nil, the `icon` SF Symbol shows.
+    var iconImage: NSImage? = nil
     let title: String
     var subtitle: String? = nil
     var trailing: String? = nil
@@ -238,7 +262,7 @@ struct M3Row: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            M3IconBadge(icon: icon, size: 44)
+            M3ImageBadge(image: iconImage, fallback: icon, size: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(M3.titleMedium).foregroundStyle(M3.onSurface).lineLimit(1)
                 if let subtitle {

@@ -26,6 +26,8 @@ export default function SettingsScreen() {
 
   const [notifIconVisible, setNotifIconVisible] = useState(true);
   const [notifGranted, setNotifGranted] = useState<boolean | null>(null);
+  const [notifMirrorOn, setNotifMirrorOn] = useState(true);
+  const [notifAccess, setNotifAccess] = useState<boolean | null>(null);
   const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
   const [proximityOn, setProximityOn] = useState(false);
   // True while a proximity toggle is mid-flight. The permission prompt below
@@ -40,6 +42,12 @@ export default function SettingsScreen() {
     SelfAdb.hasPostNotifications()
       .then(setNotifGranted)
       .catch(() => setNotifGranted(null));
+    SelfAdb.getNotificationForwarding()
+      .then(setNotifMirrorOn)
+      .catch(() => {});
+    SelfAdb.hasNotificationAccess()
+      .then(setNotifAccess)
+      .catch(() => setNotifAccess(null));
     SelfAdb.hasIgnoreBatteryOptimizations()
       .then(setBatteryOk)
       .catch(() => setBatteryOk(null));
@@ -56,6 +64,10 @@ export default function SettingsScreen() {
       SelfAdb.hasPostNotifications()
         .then(setNotifGranted)
         .catch(() => {});
+      // "Notification access" is granted in a system settings screen -> re-check on return.
+      SelfAdb.hasNotificationAccess()
+        .then(setNotifAccess)
+        .catch(() => {});
       // The OS may have revoked Nearby Devices behind our back -> reflect the real
       // beacon state. Skip while a toggle is in flight so we don't read the beacon
       // before it has started and snap the switch back OFF (issue #2).
@@ -71,6 +83,11 @@ export default function SettingsScreen() {
   const toggleNotifIcon = (visible: boolean) => {
     setNotifIconVisible(visible);
     SelfAdb.setStatusNotificationVisible(visible).catch(() => {});
+  };
+
+  const toggleNotifMirror = (on: boolean) => {
+    setNotifMirrorOn(on);
+    SelfAdb.setNotificationForwarding(on).catch(() => {});
   };
 
   // Auto-lock needs Nearby Devices to advertise the BLE beacon; ask before enabling.
@@ -155,6 +172,25 @@ export default function SettingsScreen() {
                 SelfAdb.requestPostNotifications()
                   .then(setNotifGranted)
                   .catch(() => {});
+              }}
+            />
+          ) : null}
+          <SwitchRow
+            colors={colors}
+            icon={icons.notificationsActive}
+            label="Mirror notifications to Mac"
+            hint="Forward this phone's notifications to your Mac. Requires notification access."
+            value={notifMirrorOn}
+            onValueChange={toggleNotifMirror}
+          />
+          {notifMirrorOn && notifAccess === false ? (
+            <ActionRow
+              colors={colors}
+              icon={icons.notifications}
+              label="Grant notification access"
+              hint="Allow Link to macOS to read notifications so they can be mirrored to your Mac."
+              onPress={() => {
+                SelfAdb.openNotificationAccessSettings().catch(() => {});
               }}
             />
           ) : null}

@@ -27,6 +27,15 @@ struct SettingsScreen: View {
                     )
                 }
 
+                group("NOTIFICATIONS") {
+                    M3ToggleRow(
+                        icon: "bell.badge", title: "Notification banners",
+                        subtitle: "Show a macOS banner when your phone gets a notification",
+                        isOn: Binding(get: { client.showNotificationBanners },
+                                      set: { client.showNotificationBanners = $0 })
+                    )
+                }
+
                 group("SECURITY") {
                     M3ToggleRow(
                         icon: "lock.laptopcomputer", title: "Lock when phone leaves",

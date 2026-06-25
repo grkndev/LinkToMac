@@ -59,6 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLanSettings()
         appearance.applyDockPolicy() // honour the persisted "Show in Dock" pref at launch
         showDashboardWindow() // open the dashboard on every launch
+        // Prompt for notification permission up front so the first mirrored notification can
+        // already raise a banner (the prompt is async; an early request avoids the first one
+        // being silently skipped while authorization is still undetermined).
+        MacNotifier.requestAuthorizationIfNeeded()
     }
 
     /// Keep the app alive when the dashboard window is closed — it still lives in the menu bar.
@@ -84,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server.onRemoteClip = { text in Task { @MainActor in client.writeRemoteClip(text) } }
         server.onRemoteCommand = { action in Task { @MainActor in client.runRemoteCommand(action) } }
         server.onRemoteStat = { json in Task { @MainActor in client.writeRemoteStat(json) } }
+        server.onRemoteNote = { json in Task { @MainActor in client.writeRemoteNote(json) } }
         // `weak server` so the callback doesn't retain the server it's installed on. On connect,
         // push the current battery immediately so the phone shows it without waiting for the poll.
         server.onPeerChange = { [weak server] connected in

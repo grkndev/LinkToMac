@@ -45,7 +45,7 @@ struct DashboardView: View {
     private var home: some View {
         HStack(alignment: .top, spacing: 17) {
             PhonePanel(client: client, onOpen: { path.append($0) })
-            FeaturePanel()
+            FeaturePanel(client: client)
         }
         .padding(.leading, 32)
         .padding(.trailing, 33)

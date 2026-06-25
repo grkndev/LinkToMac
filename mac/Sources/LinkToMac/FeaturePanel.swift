@@ -2,8 +2,14 @@ import SwiftUI
 
 /// Right column of the dashboard: an M3 filter-chip tab bar over a list of two-line M3 rows (leading
 /// circular tonal badge + title + subtitle + trailing time), mirroring the mobile app's list idiom.
-/// **Phase 1: pure placeholder** (roadmap features). Selecting a tab swaps the row icon + content.
+///
+/// **The Notifications tab is real** (phase 2): it renders `client.notifications` — mirrored phone
+/// notifications received over the `note` channel — with the posting app's icon, newest-first, plus
+/// an empty state and a Clear action. **Messages / Calls / Photos stay placeholder** (roadmap, no
+/// data source). Selecting a tab swaps the content.
 struct FeaturePanel: View {
+    let client: RelayClient
+
     private struct Tab {
         let icon: String
         let title: String
@@ -11,15 +17,10 @@ struct FeaturePanel: View {
         let rows: [(title: String, subtitle: String, time: String)]
     }
 
+    /// Tab metadata. The Notifications tab (index 0) is driven by real data; its sample `rows` are
+    /// unused (the body special-cases index 0). The other three remain hardcoded placeholders.
     private let tabs: [Tab] = [
-        Tab(icon: "bell.fill", title: "Notifications", rowIcon: "bell.fill", rows: [
-            ("Slack", "grkn: ship the dashboard redesign today", "now"),
-            ("Gmail", "Your build finished successfully", "2m"),
-            ("Calendar", "Standup in 15 minutes", "12m"),
-            ("WhatsApp", "Mom: are you coming for dinner?", "28m"),
-            ("GitHub", "PR #42 was approved and merged", "1h"),
-            ("Spotify", "Discover Weekly is ready", "3h"),
-        ]),
+        Tab(icon: "bell.fill", title: "Notifications", rowIcon: "bell.fill", rows: []),
         Tab(icon: "message.fill", title: "Messages", rowIcon: "message.fill", rows: [
             ("Ada", "Sounds good, see you then!", "now"),
             ("Deniz", "Did you push the fix?", "5m"),
@@ -47,6 +48,12 @@ struct FeaturePanel: View {
     ]
     @State private var selected = 0
 
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 3) {
@@ -57,17 +64,72 @@ struct FeaturePanel: View {
                     }
                 }
             }
-            VStack(spacing: 3) {
-                let rows = tabs[selected].rows
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                    M3Row(icon: tabs[selected].rowIcon,
-                          title: row.title, subtitle: row.subtitle, trailing: row.time,
-                          position: groupPosition(index, count: rows.count))
-                }
+            if selected == 0 {
+                notificationsContent
+            } else {
+                placeholderRows
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Notifications (real)
+
+    @ViewBuilder
+    private var notificationsContent: some View {
+        let items = client.notifications
+        if items.isEmpty {
+            emptyState
+        } else {
+            HStack {
+                Spacer(minLength: 0)
+                Button { client.clearNotifications() } label: {
+                    Text("Clear").font(M3.labelLarge).foregroundStyle(M3.onSurfaceVariant)
+                }
+                .buttonStyle(.plain)
+            }
+            VStack(spacing: 3) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, note in
+                    M3Row(icon: "bell.fill",
+                          iconImage: note.icon,
+                          title: note.app,
+                          subtitle: subtitle(for: note),
+                          trailing: Self.relativeFormatter.localizedString(for: note.date, relativeTo: Date()),
+                          position: groupPosition(index, count: items.count))
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            M3IconBadge(icon: "bell.slash", size: 56,
+                        fill: M3.surfaceContainerHigh, tint: M3.onSurfaceVariant)
+            Text("No notifications yet").font(M3.titleMedium).foregroundStyle(M3.onSurface)
+            Text("Notifications from your phone appear here.")
+                .font(M3.bodyMedium).foregroundStyle(M3.onSurfaceVariant)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 56)
+    }
+
+    private func subtitle(for note: RelayClient.NotificationEntry) -> String {
+        if !note.title.isEmpty && !note.text.isEmpty { return "\(note.title): \(note.text)" }
+        return note.text.isEmpty ? note.title : note.text
+    }
+
+    // MARK: - Placeholder tabs (roadmap)
+
+    private var placeholderRows: some View {
+        VStack(spacing: 3) {
+            let rows = tabs[selected].rows
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                M3Row(icon: tabs[selected].rowIcon,
+                      title: row.title, subtitle: row.subtitle, trailing: row.time,
+                      position: groupPosition(index, count: rows.count))
+            }
+        }
     }
 
     /// Where a cell sits in a connected group — shared by the tab strip and the row list (drives corner shaping).

@@ -54,11 +54,12 @@ fourth is a stock-Android system service the Android app talks to through a tric
 | **Clipboard sync** | WebSocket `clip` frames | Yes — *or* LAN-direct (§5.1) | Both ways |
 | **Remote lock** | WebSocket `cmd` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Mac → Phone |
+| **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
 
-The clipboard, lock, and battery paths share one connection per device — the relay, or, on the
-same network, a **direct link to the Mac** with no relay (§5.1). The proximity path is completely
-independent — it works with no internet at all.
+The clipboard, lock, battery, and notification paths share one connection per device — the relay,
+or, on the same network, a **direct link to the Mac** with no relay (§5.1). The proximity path is
+completely independent — it works with no internet at all.
 
 ### Tech stack
 
@@ -387,7 +388,7 @@ If the symbol can't be resolved on a future macOS, it falls back to
 
 ## 5. Wire protocol (relay)
 
-JSON text frames over WebSocket. The relay reads control frames but treats `clip`/`cmd`/`stat`
+JSON text frames over WebSocket. The relay reads control frames but treats `clip`/`cmd`/`stat`/`note`
 payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProtocol.swift`
 (Mac) and inline `JSONObject` building in `RelayClient.kt` (Android).
 
@@ -397,6 +398,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "clip", "nonce": "<base64>", "ct": "<base64>" }   // forwarded verbatim
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // action E2E-encrypted, forwarded verbatim
 { "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery), E2E-encrypted, forwarded verbatim
+{ "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
 // relay → client
@@ -405,6 +407,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "clip",   "nonce": "...", "ct": "..." }            // the peer's frame, relayed
 { "t": "cmd",    "nonce": "...", "ct": "..." }            // the peer's command, relayed
 { "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery), relayed
+{ "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
@@ -444,6 +447,35 @@ is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on th
   `ServerConfig` (`lanEnabled`/`lanPort`/`lanHost`). Cleartext `ws://` is permitted via the
   module manifest's `usesCleartextTraffic` (Android) and `NSAllowsLocalNetworking` (macOS); the
   Mac also declares `NSLocalNetworkUsageDescription` + `NSBonjourServices`.
+
+### 5.2 Notification mirroring (`note`, phone → Mac)
+
+An Android `NotificationListenerService` (`NotificationListener.kt`) captures every posted/removed
+notification once the user grants **"Notification access"** (a special access in system settings,
+*not* a runtime permission; opened from the app via `SelfAdbModule.openNotificationAccessSettings`).
+It runs in the app process and survives a JS swipe like the FGS. It filters out noise (its own FGS
+notification, `FLAG_ONGOING_EVENT`/`FLAG_FOREGROUND_SERVICE`/`FLAG_GROUP_SUMMARY`, and notes with no
+title and no text), resolves the posting app's label + launcher icon (scaled to ~72 px, PNG,
+base64, memoized per package), and forwards a `note` via the running `ClipForegroundService`
+(`sendNote` → `ConnectionManager` → the active `RelayClient`/`LanClient`). The decrypted plaintext:
+
+```jsonc
+{ "op": "post" | "remove",        // remove = a phone-side dismissal
+  "key": "<StatusBarNotification.key>",  // stable across an update → dedup/replace/remove
+  "pkg": "com.whatsapp", "app": "WhatsApp",
+  "title": "Mom", "text": "are you coming for dinner?",
+  "category": "msg", "time": 1719300000000,  // postTime, epoch ms
+  "icon": "<base64 PNG ~72px>" }   // omitted on remove; may be absent
+```
+
+The Mac (`RelayClient.applyNotification`) upserts by `key` into an in-memory, newest-first ring
+(cap 100; caches icons per package), raises a native banner via `MacNotifier`
+(`UNUserNotificationCenter`, gated by the **Notification banners** toggle; the source app's icon
+rides as a `UNNotificationAttachment` — though macOS still shows *our* app icon in the banner's
+top-left, which is fixed to the bundle for local notifications), and renders the list in the
+dashboard's Notifications tab (`FeaturePanel`, with the app icon as each row's badge). Mirroring is one-way (the Mac never sends
+`note`) and can be paused phone-side (`setNotificationForwarding`, persisted) without revoking the
+system access grant. Cleared on unpair.
 
 ---
 

@@ -86,6 +86,14 @@ async function main(): Promise<void> {
   await sleep(300);
   assert(!android.inbox().some((m) => m.t === 'clip'), 'sender received no echo');
 
+  // Notification mirroring (phone -> Mac): opaque `note` frame, same fan-out as clips.
+  android.send({ t: 'note', nonce: 'bm90ZW5vbmNl', ct: 'bm90ZWNpcGhlcg==' });
+  const note = await mac.waitFor((m) => m.t === 'note', 'mac receives note');
+  assert(note.nonce === 'bm90ZW5vbmNl' && note.ct === 'bm90ZWNpcGhlcg==', 'note payload intact');
+
+  await sleep(300);
+  assert(!android.inbox().some((m) => m.t === 'note'), 'note sender received no echo');
+
   mac.close();
   await android.waitFor(
     (m) => m.t === 'peer' && m.state === 'offline' && m.device === 'mac',

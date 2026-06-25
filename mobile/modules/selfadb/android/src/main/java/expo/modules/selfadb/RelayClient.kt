@@ -126,6 +126,19 @@ class RelayClient(
     ws?.send(msg.toString())
   }
 
+  /** Send a mirrored device notification to the Mac, E2E-encrypted like a clip. Payload plaintext is
+   *  the notification JSON (see [NotificationListener]). */
+  fun sendNote(payload: String) {
+    if (payload.isEmpty()) return
+    val enc = ClipCodec.encode(payload, key)
+    if (enc == null) {
+      log("encrypt failed (bad pairing key); not sending note")
+      return
+    }
+    val msg = JSONObject().put("t", "note").put("nonce", enc.first).put("ct", enc.second)
+    ws?.send(msg.toString())
+  }
+
   private fun open() {
     cancelReconnect()
     onStatus("connecting", peerOnline, null, attempt)

@@ -121,6 +121,18 @@ class LanClient(
     ws?.send(msg.toString())
   }
 
+  /** Send a mirrored device notification to the Mac, E2E-encrypted like a clip. */
+  fun sendNote(payload: String) {
+    if (payload.isEmpty()) return
+    val enc = ClipCodec.encode(payload, key)
+    if (enc == null) {
+      log("lan encrypt failed (bad pairing key); not sending note")
+      return
+    }
+    val msg = JSONObject().put("t", "note").put("nonce", enc.first).put("ct", enc.second)
+    ws?.send(msg.toString())
+  }
+
   private fun open() {
     cancelReconnect()
     authed = false

@@ -104,6 +104,8 @@ class ConnectionManager(
 
   fun sendStat(payload: String) = post { if (lanUp) lan?.sendStat(payload) else relay?.sendStat(payload) }
 
+  fun sendNote(payload: String) = post { if (lanUp) lan?.sendNote(payload) else relay?.sendNote(payload) }
+
   // ---- internals -----------------------------------------------------------
 
   private fun activeLink(): Any? = if (lanUp) lan else relay
