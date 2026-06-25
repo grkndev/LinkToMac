@@ -27,7 +27,7 @@ const BUNDLE_ID = IS_DEV ? 'com.grkndev.linktomac.dev' : 'com.grkndev.linktomac'
 // older one). For a 2nd+ build on the SAME day, bump the counter via the BUILD_NUMBER env
 // (BUILD_NUMBER=2 -> ...002). Stays under Android's signed 32-bit cap (2,147,483,647): the
 // max representable value is 991231999, i.e. it overflows only in the year 2100.
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const now = new Date();
 const DATE_PREFIX =
   (now.getFullYear() % 100) * 10_000 + (now.getMonth() + 1) * 100 + now.getDate();

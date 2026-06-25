@@ -4,8 +4,7 @@
 - [x] Auto-Lock your mac when Android moves out of range
 - [x] LAN-Direct Mode
 - [x] Show battery percent on Android App
-### In Progress
-- [ ] Notifications sync
+- [x] Notifications sync (Android → mac, with native banners)
 ### Upcoming
 - [ ] FCM push-wake for minimum background battery — while the Mac is offline, drop the persistent relay socket (no idle ping all day) and let a high-priority push wake the phone when the Mac reconnects. Only way to reach ~0 idle battery; relay-path only (not LAN). Big lift: GMS/FCM dependency + the relay must be able to push.
 - [ ] Mirror your Android screen to mac
