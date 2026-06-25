@@ -50,19 +50,14 @@ struct PhonePanel: View {
         }
     }
 
-    /// Transport + phone battery + Mac battery. Each chip is hidden until its value is real, so a
-    /// fresh pairing (or a desktop Mac with no battery) simply shows fewer chips.
+    /// Transport + phone battery. Each chip is hidden until its value is real, so a fresh pairing
+    /// simply shows fewer chips. (This Mac's own battery isn't shown — we're already on the Mac.)
     private var statusChips: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                M3Chip(icon: transportIcon, text: transportText)
-                if let level = client.phoneBatteryLevel {
-                    M3Chip(icon: Self.batteryIcon(level, charging: client.phoneCharging ?? false),
-                           text: "\(level)%")
-                }
-            }
-            if let level = client.macBatteryLevel {
-                M3Chip(icon: "laptopcomputer", text: "Mac \(level)%")
+        HStack(spacing: 10) {
+            M3Chip(icon: transportIcon, text: transportText)
+            if let level = client.phoneBatteryLevel {
+                M3Chip(icon: Self.batteryIcon(level, charging: client.phoneCharging ?? false),
+                       text: "\(level)%")
             }
         }
     }

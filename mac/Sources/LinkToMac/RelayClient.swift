@@ -49,11 +49,6 @@ final class RelayClient {
     private(set) var phoneCharging: Bool?
     private(set) var phoneName: String?
 
-    /// This Mac's own battery, surfaced for the dashboard (the same value sent to the phone via
-    /// `stat`). nil on a desktop Mac (no internal battery).
-    private(set) var macBatteryLevel: Int?
-    private(set) var macCharging: Bool?
-
     /// Generated once and persisted; the room we join and show as a QR for the phone.
     private(set) var pairing: Pairing = PairingStore.loadOrCreate()
 
@@ -116,13 +111,11 @@ final class RelayClient {
         if battery == nil {
             battery = BatteryMonitor { [weak self] payload in
                 guard let self else { return }
-                self.applyMacStat(payload) // surface this Mac's battery in the dashboard
-                self.sendStat(payload)
-                self.onLocalStat?(payload) // fan out to the LAN-direct transport too
+                self.sendStat(payload)              // report this Mac's battery to the phone
+                self.onLocalStat?(payload)          // fan out to the LAN-direct transport too
             }
         }
         battery?.start()
-        if let payload = battery?.currentPayload() { applyMacStat(payload) } // seed without waiting for the poll
         openSocket()
     }
 
@@ -215,13 +208,6 @@ final class RelayClient {
         if let level = stat.level { phoneBatteryLevel = min(max(level, 0), 100) }
         if let charging = stat.charging { phoneCharging = charging }
         if let name = stat.name, !name.isEmpty { phoneName = name }
-    }
-
-    /// Parse this Mac's own outgoing battery payload to surface it in the dashboard.
-    private func applyMacStat(_ payload: String) {
-        guard let stat = Self.decodeStat(payload) else { return }
-        macBatteryLevel = stat.level.map { min(max($0, 0), 100) }
-        macCharging = stat.charging
     }
 
     private struct StatPayload: Decodable {
