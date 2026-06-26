@@ -53,7 +53,7 @@ fourth is a stock-Android system service the Android app talks to through a tric
 |---|---|---|---|
 | **Clipboard sync** | WebSocket `clip` frames | Yes — *or* LAN-direct (§5.1) | Both ways |
 | **Remote lock** | WebSocket `cmd` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
-| **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Mac → Phone |
+| **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Both ways (Mac↔Phone) |
 | **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
 
@@ -94,14 +94,18 @@ between them. It never stores anything and never inspects clipboard content.
 
 ### Forwarding rules (`server/src/relay.ts`)
 
-- `clip`, `cmd`, and `stat` frames are `JSON.stringify`'d and sent **verbatim to the *other*
-  peer only** — the sender never receives its own echo.
+- `clip`, `cmd`, `stat`, and `note` frames are `JSON.stringify`'d and sent **verbatim to the
+  *other* peer only** — the sender never receives its own echo.
 - `cmd` is **fully opaque**: the action plaintext is E2E-encrypted into `nonce`/`ct` (same AEAD
   as `clip`), so the relay can't tell one command from another and forwards it verbatim — new
   remote commands never require a server change, and a malicious relay/room can't forge one.
-- `stat` carries **opaque telemetry** (the Mac's battery level + charging state), E2E-encrypted
-  into `nonce`/`ct` just like `clip`. It is Mac → phone and forwarded the same opaque way; the
-  message type itself was an additive, backward-compatible protocol change.
+- `stat` carries **opaque telemetry**, E2E-encrypted into `nonce`/`ct` just like `clip`, and is
+  now **bidirectional**: the Mac sends `{level, charging}` (its own battery) and the phone sends
+  `{level, charging, name}` (its battery + device name); each side ignores fields it doesn't use.
+  The relay forwards it opaquely either direction.
+- `note` carries an **opaque mirrored notification** (phone → Mac), E2E-encrypted the same way;
+  the relay forwards it verbatim. Like `stat`, the message type was an additive,
+  backward-compatible protocol change (the relay just learned a new type to fan out).
 - **Backpressure:** if a peer's `ws.bufferedAmount` exceeds `maxPayloadBytes * 8`, it is
   declared a slow consumer and dropped (close code `4003`) instead of buffering unbounded.
 - Logs are privacy-preserving: the `roomId` is redacted to a 6-char prefix, and only
@@ -335,38 +339,55 @@ JS runtime attached (e.g. an FGS reconnect while the app was swiped away). `last
 ## 4. macOS: the menu-bar agent (`mac/`)
 
 A SwiftUI `MenuBarExtra` (`.window` style, so the dropdown is a real panel with switches, not
-a plain menu). No Dock icon. Swift 6 with complete strict concurrency; everything observable is
-`@MainActor`-isolated and async loops hop back to the main actor on each step. **Zero
-third-party dependencies** — only system frameworks. Built reproducibly from `project.yml` via
-XcodeGen, ad-hoc signed (`CODE_SIGN_IDENTITY: "-"`, hardened runtime off) so it runs locally
-without a Developer team.
+a plain menu) **plus a separate dashboard window** opened from it. No Dock icon. Swift 6 with
+complete strict concurrency; everything observable is `@MainActor`-isolated and async loops hop
+back to the main actor on each step. **Zero third-party dependencies except Sparkle** (auto-update)
+— otherwise only system frameworks. Built reproducibly from `project.yml` via XcodeGen, ad-hoc
+signed (`CODE_SIGN_IDENTITY: "-"`, hardened runtime off) so it runs locally without a Developer
+team.
+
+The UI is **Material 3-flavoured** (mirroring the mobile app): the menu-bar dropdown is a compact
+phone-identity card (phone render + name + live status dot + tonal transport/battery chips), and
+the dashboard window hosts the phone panel, clip history, a Notifications tab, and
+roadmap-placeholder feature tiles.
 
 | File | Role |
 |---|---|
-| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect |
+| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note` decode, clip-history ring, and notification ring |
+| `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; `onRemoteStat`/`onRemoteNote` for the relay-less path |
 | `PasteboardWatcher.swift` | Polls `NSPasteboard.changeCount`; echo suppression |
-| `ClipCodec.swift` | E2E clip encryption — ChaCha20-Poly1305 (CryptoKit) |
+| `BatteryMonitor.swift` | IOKit power-source poll → outbound `stat` (the Mac's own battery) |
+| `ClipCodec.swift` | E2E payload encryption — ChaCha20-Poly1305 (CryptoKit) |
+| `MacNotifier.swift` | Raises native banners for mirrored notifications (`UNUserNotificationCenter`; icon as a best-effort attachment with a text-only fallback) |
 | `ProximityMonitor.swift` | CoreBluetooth central; RSSI → lock decision |
 | `ScreenLock.swift` | Locks the screen |
-| `Pairing.swift` | Room/key generation, Keychain, QR rendering (v2 also embeds the server config) |
+| `Pairing.swift` | Room/key generation, Keychain, QR rendering (v3 also embeds the server + LAN config) |
 | `ServerSettings.swift` | Runtime relay endpoint store — host/port/TLS in `UserDefaults`, password in Keychain |
-| `ServerSettingsView.swift` | "Server Settings…" window (host / port / TLS / password) |
 | `LoginItem.swift` | `SMAppService` auto-start at login |
-| `MenuPanel.swift` / `PairingView.swift` | UI (menu: Pairing QR + Server Settings) |
+| `MenuPanel.swift` / `PairingView.swift` | Menu-bar UI (phone-identity card, last-copy glance, Pairing QR, Server Settings) |
+| `DashboardWindow.swift` / `DashboardComponents.swift` | Dashboard window shell + shared M3 components |
+| `PhonePanel.swift` | Phone identity: name, connection status, transport + battery chips (hidden when nil) |
+| `ClipHistoryScreen.swift` | Clip history grouped by recency, tap-to-recopy, clear |
+| `FeaturePanel.swift` | Right-column tabs — the **Notifications** tab renders the live note ring; other tabs are placeholders |
+| `SettingsScreen.swift` / `AppearanceSettings.swift` / `AboutView.swift` / `RelayScreen.swift` / `ServerSettingsView.swift` | Settings, appearance, about, relay, and "Server Settings…" surfaces |
 
 ### 4.1 RelayClient (Swift)
 
 `@Observable`, `@MainActor`. Uses a monotonic **`generation` counter** so that loops belonging
 to a replaced socket bail out instead of corrupting current state — important since
 receive/heartbeat run as detached `Task`s. App-level ping every 25 s; exponential backoff
-reconnect capped at 30 s. Joins as `"mac"`. On a received `clip` it writes to the pasteboard;
-on a `cmd` it dispatches to a handler (currently only `"lock"`). It also **reports the Mac's
-battery** as `stat` frames (`BatteryMonitor.swift`, IOKit power sources): pushed the moment a
-peer connects and whenever the level/charging state changes; a desktop Mac with no battery sends
-nothing. A persisted `sendToAndroid` flag is the Mac-side equivalent of the phone's pause toggle. The endpoint comes from
-`ServerSettingsStore`, so it stays **idle until configured** rather than dialing a placeholder;
-`reconnect()` re-dials on a Server Settings change, and `wss://` is used when the `secure`
-flag is set.
+reconnect capped at 30 s. Joins as `"mac"`. On a received `clip` it writes to the pasteboard (and
+appends to an in-memory clip-history ring the dashboard reads); on a `cmd` it dispatches to a
+handler (currently only `"lock"`). It also **reports the Mac's battery** as `stat` frames
+(`BatteryMonitor.swift`, IOKit power sources): pushed the moment a peer connects and whenever the
+level/charging state changes; a desktop Mac with no battery sends nothing. **Inbound** `stat` is
+decoded into `phoneBatteryLevel`/`phoneCharging`/`phoneName` for the dashboard's PhonePanel (the
+Mac no longer displays *its own* battery to itself — you're already on the Mac). Inbound `note`
+frames are upserted by key into the notification ring and raised as banners (§5.2). A persisted
+`sendToAndroid` flag is the Mac-side equivalent of the phone's pause toggle. The endpoint comes
+from `ServerSettingsStore`, so it stays **idle until configured** rather than dialing a
+placeholder; `reconnect()` re-dials on a Server Settings change, and `wss://` is used when the
+`secure` flag is set. Unpair clears the clip-history and notification rings.
 
 ### 4.2 Clipboard watching + echo suppression
 
@@ -397,7 +418,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "join", "room": "<roomId>", "device": "android" | "mac" }
 { "t": "clip", "nonce": "<base64>", "ct": "<base64>" }   // forwarded verbatim
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // action E2E-encrypted, forwarded verbatim
-{ "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery), E2E-encrypted, forwarded verbatim
+{ "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name), bidirectional, E2E-encrypted, forwarded verbatim
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
@@ -406,7 +427,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "peer",   "state": "online" | "offline", "device": "mac" }
 { "t": "clip",   "nonce": "...", "ct": "..." }            // the peer's frame, relayed
 { "t": "cmd",    "nonce": "...", "ct": "..." }            // the peer's command, relayed
-{ "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery), relayed
+{ "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name), relayed
 { "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
@@ -422,7 +443,7 @@ On the same network the phone can skip the relay entirely and talk **straight to
 roles invert: the **Mac becomes the WebSocket server** (`LanServer.swift`, `Network.framework`
 `NWListener` + `NWProtocolWebSocket` — all system frameworks, no third-party deps) and the phone
 is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on the LAN), but
-`clip`/`cmd`/`stat` stay E2E-encrypted, so a sniffer sees only opaque ciphertext.
+`clip`/`cmd`/`stat`/`note` stay E2E-encrypted, so a sniffer sees only opaque ciphertext.
 
 - **Discovery (hybrid).** The Mac advertises Bonjour `_linktomac._tcp` on its LAN port (default
   **53124**) with TXT `rid = base64url(SHA256(room))[:16]` + `name`. The phone recomputes the same
@@ -621,10 +642,11 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   TLS on. `ws://` remains available for a trusted LAN. The relay password still benefits from the
   TLS tunnel; **`cmd` is now E2E-encrypted (AEAD) regardless of transport**, so a forged or
   replayed command fails the Poly1305 tag and is dropped even on plaintext `ws://`. The same
-  holds for `stat` battery telemetry — opaque ciphertext on every transport.
+  holds for `stat` battery telemetry and `note` mirrored notifications — opaque ciphertext on
+  every transport.
 - 🟢 **LAN-direct needs no relay or TLS to stay confidential.** In relay-less LAN mode (§5.1)
-  the transport is plain `ws://`, but `clip`/`cmd`/`stat` remain ChaCha20-Poly1305-encrypted and the
-  socket is gated by an HMAC challenge-response over the pairing key — so a stranger on the LAN
+  the transport is plain `ws://`, but `clip`/`cmd`/`stat`/`note` remain ChaCha20-Poly1305-encrypted
+  and the socket is gated by an HMAC challenge-response over the pairing key — so a stranger on the LAN
   can neither read traffic nor occupy the peer slot. The unencrypted `room`/`rid` it could
   observe are non-secret routing ids.
 - 🟢 **No secrets baked into the build.** The relay address, password, and TLS setting are
@@ -682,12 +704,13 @@ Android's *Pair device with pairing code* dialog and enter the 6-digit code once
 ## 13. Scope & roadmap
 
 v1 links **one phone and one Mac** and syncs **text only** (images/files out of scope; the
-256 KB payload cap reflects that). Implemented: two-way clipboard (end-to-end encrypted with
-ChaCha20-Poly1305), remote lock, proximity auto-lock, **relay-less LAN-direct** mode (§5.1 —
-phone ↔ Mac over the local network with no relay, auto-preferred over the relay on the same
-Wi-Fi), and **live Mac-battery telemetry** (`stat`, Mac → phone). On the roadmap (`RoadMap.md`):
-notification sync, screen mirroring, file transfer, and read-only access to gallery/messages/calls
-from the Mac.
+256 KB payload cap reflects that — mirrored app icons are small base64 PNGs). Implemented: two-way
+clipboard (end-to-end encrypted with ChaCha20-Poly1305), remote lock, proximity auto-lock,
+**relay-less LAN-direct** mode (§5.1 — phone ↔ Mac over the local network with no relay,
+auto-preferred over the relay on the same Wi-Fi), **bidirectional battery/identity telemetry**
+(`stat`, Mac↔phone), and **one-way notification mirroring** (`note`, phone → Mac; §5.2, surfaced
+as a native banner + the dashboard's Notifications tab). On the roadmap (`RoadMap.md`): screen
+mirroring, file transfer, and read-only access to gallery/messages/calls from the Mac.
 
 ---
 
@@ -696,19 +719,20 @@ from the Mac.
 ```
 server/src/
   index.ts        HTTP+WS bootstrap, auth, per-conn wiring, shutdown
-  relay.ts        room map, join/clip/cmd/stat forwarding, backpressure
+  relay.ts        room map, join/clip/cmd/stat/note forwarding, backpressure
   protocol.ts     frame types + validation
   ratelimit.ts    sliding-window limiter
   heartbeat.ts    ws ping/pong reaper
   config.ts       env config
 
 mac/Sources/LinkToMac/
-  LinkToMacApp.swift     MenuBarExtra + AppDelegate
-  RelayClient.swift      WS client, reconnect, cmd dispatch; owns the pasteboard + battery monitor
-  LanServer.swift        LAN-direct WS server (NWListener) + Bonjour + HMAC handshake
+  LinkToMacApp.swift     MenuBarExtra + dashboard scene + AppDelegate
+  RelayClient.swift      WS client, reconnect, cmd dispatch; owns the pasteboard + battery monitor, clip-history + notification rings
+  LanServer.swift        LAN-direct WS server (NWListener) + Bonjour + HMAC handshake (onRemoteStat/onRemoteNote)
   PasteboardWatcher.swift changeCount poll + echo stamp
-  BatteryMonitor.swift   IOKit power-source poll → stat telemetry (Mac → phone)
-  ClipCodec.swift        E2E clip encryption (ChaCha20-Poly1305 / CryptoKit)
+  BatteryMonitor.swift   IOKit power-source poll → outbound stat (Mac's own battery)
+  ClipCodec.swift        E2E payload encryption (ChaCha20-Poly1305 / CryptoKit)
+  MacNotifier.swift      native banner for mirrored notes (UNUserNotificationCenter + icon attachment)
   ProximityMonitor.swift BLE central, RSSI → lock
   ProximityConfig.swift  UUID derivation + tunables
   ScreenLock.swift       SACLockScreenImmediate / CGSession
@@ -716,6 +740,12 @@ mac/Sources/LinkToMac/
   ServerSettings.swift   runtime relay endpoint store (UserDefaults + Keychain)
   ServerSettingsView.swift  "Server Settings…" window
   LoginItem.swift        SMAppService auto-start
+  MenuPanel.swift        menu-bar M3 phone-identity card + last-copy glance
+  DashboardWindow.swift / DashboardComponents.swift  dashboard window shell + shared M3 components
+  PhonePanel.swift       phone identity: name, status, transport + battery chips
+  ClipHistoryScreen.swift  clip history (recency groups, recopy, clear)
+  FeaturePanel.swift     right-column tabs; Notifications tab renders the live note ring
+  SettingsScreen.swift / AppearanceSettings.swift / AboutView.swift / RelayScreen.swift  settings/about/relay surfaces
 
 mobile/modules/selfadb/android/.../selfadb/
   SelfAdbModule.kt          Expo module: autoStart/pair/relay/proximity APIs
@@ -724,12 +754,13 @@ mobile/modules/selfadb/android/.../selfadb/
   ClipForegroundService.kt  START_STICKY host for bridge+connection+BLE
   ClipBridge.kt             localhost NDJSON client to the daemon
   ConnectionManager.kt      LAN-preferred / relay-fallback link arbiter
-  RelayClient.kt            OkHttp WS to the relay
+  RelayClient.kt            OkHttp WS to the relay (sendClip/sendCmd/sendStat/sendNote)
   LanClient.kt              OkHttp WS straight to the Mac (LAN-direct) + HMAC handshake
   LanDiscovery.kt           NsdManager mDNS discovery of the Mac (rid-matched)
+  NotificationListener.kt   NotificationListenerService → note frames (label + icon resolve, noise filter)
   BleAdvertiser.kt          BLE presence beacon
   ClipBus.kt                service ↔ module bridge + ring buffers
-  ClipCodec.kt              E2E clip encryption (ChaCha20-Poly1305 / javax.crypto)
+  ClipCodec.kt              E2E payload encryption (ChaCha20-Poly1305 / javax.crypto)
 
 mobile/native-src/clipboard-agent/
   ClipboardAgent.java       the privileged daemon source

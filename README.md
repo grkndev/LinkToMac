@@ -13,8 +13,12 @@ Windows", but self-hosted.
 - 🔒 **Lock from your phone** — one tap on the Home screen locks your Mac.
 - 🚶 **Auto-lock when you leave** — the Mac locks itself once your phone is out of
   Bluetooth range. (Locking only — macOS has no way to auto-*unlock*.)
-- 🔋 **Mac battery on your phone** — your Mac's charge level and charging state show up on the
-  phone's Home screen, live.
+- 🔋 **Battery both ways** — your Mac's charge shows on the phone's Home screen, and your
+  phone's battery + name show on the Mac's dashboard, live.
+- 🔔 **Notification mirroring** — Android notifications pop up on the Mac as native banners and
+  collect in the dashboard's Notifications tab (one-way, pausable).
+- 🖥️ **Mac dashboard** — a Material 3 menu-bar card plus a window showing your phone, clip
+  history, and notifications.
 - 🔗 **Pair once** with a QR code shown on the Mac.
 - 📶 **No relay on the same Wi-Fi** — the phone connects straight to the Mac (LAN-direct), and
   falls back to the relay automatically when you leave home. Works relay-free if you never set one up.
@@ -25,9 +29,10 @@ Windows", but self-hosted.
 ```
   Android phone                 your relay              Mac
   ┌─────────────────┐           ┌────────────┐        ┌───────────────┐
-  │ background app  │  ◄─────►  │  tiny WS   │  ◄───► │  menubar app  │
-  │  clipboard ·    │           │  server    │        │  clipboard ·  │
-  │  lock command   │           │ (room id)  │        │  lock · QR    │
+  │ background app  │  ◄─────►  │  tiny WS   │  ◄───► │ menubar app + │
+  │  clipboard ·    │           │  server    │        │  dashboard    │
+  │  lock · battery │           │ (room id)  │        │  clipboard ·  │
+  │  notifications  │           │            │        │  lock · QR    │
   └───────┬─────────┘           └────────────┘        └───────┬───────┘
           │                                                   │
           └───────────  Bluetooth presence beacon  ───────────┘
@@ -94,6 +99,12 @@ no internet.
   (*Auto-lock Mac when I leave*) and the Mac menu (*Lock when phone leaves*). On the Mac you
   can tune **Sensitivity** (Near / Balanced / Far) and **Lock after** (10–60s), and watch the
   live signal to calibrate for your space.
+- **Notification mirroring** — grant **Notification access** to the app once (Settings →
+  *Mirror notifications*), and Android notifications appear on the Mac as banners and in the
+  dashboard's **Notifications** tab. It's one-way and can be paused from the phone without
+  revoking the system grant.
+- **Battery & phone identity** — the Mac's charge shows on the phone's Home screen; the phone's
+  battery and name show on the Mac's dashboard. No setup — it rides the same connection.
 
 ## Security & privacy
 
@@ -107,16 +118,19 @@ no internet.
   payloads are still end-to-end encrypted and the connection is gated by a challenge-response over
   your pairing key — a stranger on the Wi-Fi can neither read it nor impersonate your phone.
 - **Proximity lock is local:** it uses Bluetooth only and never touches the relay or internet.
-- **End-to-end encrypted:** both clipboard *and* the lock command are sealed with
-  **ChaCha20-Poly1305**, keyed by the secret exchanged at pairing. The relay (or anyone on your
-  LAN) only ever sees opaque ciphertext — never your clipboard, the command, or the key.
+- **End-to-end encrypted:** clipboard, the lock command, battery telemetry, *and* mirrored
+  notifications are all sealed with **ChaCha20-Poly1305**, keyed by the secret exchanged at
+  pairing. The relay (or anyone on your LAN) only ever sees opaque ciphertext — never your
+  clipboard, the command, your notifications, or the key.
 
 ## Scope & status
 
-v1 links **one phone and one Mac** and syncs **text only** (images/files are out of scope).
-Clipboard sync (end-to-end encrypted), remote lock, proximity auto-lock, and live Mac-battery
-telemetry are implemented; some lifecycle hardening is still on the roadmap. A separate technical document
-([`TECHNICAL.md`](TECHNICAL.md)) covers the internals in depth.
+v1 links **one phone and one Mac** and syncs **text only** (images/files are out of scope; the
+256 KB payload cap reflects that — mirrored app icons are small PNGs). Implemented: clipboard
+sync (end-to-end encrypted), remote lock, proximity auto-lock, **LAN-direct** mode, **two-way
+battery/phone telemetry**, and **one-way notification mirroring** (phone → Mac). Screen
+mirroring, file transfer, and read-only Messages/Calls/Photos tabs are still on the roadmap. A
+separate technical document ([`TECHNICAL.md`](TECHNICAL.md)) covers the internals in depth.
 
 ## License
 
