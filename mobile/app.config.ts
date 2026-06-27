@@ -86,6 +86,8 @@ export default (_: ConfigContext): ExpoConfig => ({
     ],
     'expo-font',
     'expo-image',
+    // Raise the Gradle heap so the release dex-merge (D8) doesn't OOM on this RN 0.85 app.
+    ['./plugins/with-gradle-heap', { xmx: '4g' }],
   ],
   experiments: {
     typedRoutes: true,
