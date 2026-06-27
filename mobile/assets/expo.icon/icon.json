@@ -6,6 +6,7 @@
     {
       "layers" : [
         {
+          "glass" : true,
           "hidden" : false,
           "image-name" : "expo-symbol 2.svg",
           "name" : "expo-symbol 2",
@@ -19,7 +20,7 @@
         },
         {
           "glass" : true,
-          "hidden" : false,
+          "hidden" : true,
           "image-name" : "grid.png",
           "name" : "grid"
         }

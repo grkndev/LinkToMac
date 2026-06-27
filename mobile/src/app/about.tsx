@@ -72,7 +72,7 @@ export default function AboutScreen() {
 
             <Image
               source={require("@/assets/images/icon.png")}
-              className="aspect-square h-24 rounded-4xl"
+              className="aspect-square h-24"
               resizeMode="contain"
             />
 
