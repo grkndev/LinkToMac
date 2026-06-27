@@ -48,6 +48,20 @@ final class ProximityMonitor: NSObject {
 
     private(set) var presence: Presence = .disabled
 
+    /// A compact snapshot of the live proximity, used both for the dashboard distance row and for
+    /// forwarding to the phone (which can't measure this itself — it only advertises). `state` is
+    /// `"near"|"away"|"unseen"|"off"`; `rssi` is the smoothed dBm, present only while the phone is
+    /// actually heard (near/away).
+    struct Reading: Equatable, Sendable {
+        let state: String
+        let rssi: Int?
+    }
+
+    /// Fired when the proximity reading changes meaningfully (bucket flip or ≥2 dBm move), so the
+    /// owner can push it to the phone over the data link. Throttled — see `notifyReading()`.
+    var onReading: ((Reading) -> Void)?
+    private var lastReading: Reading?
+
     /// User opt-in. Persisted, mirroring `RelayClient.sendToAndroid`. Toggling drives scanning.
     var enabled: Bool = UserDefaults.standard.bool(forKey: ProximityMonitor.enabledKey) {
         didSet {
@@ -140,6 +154,7 @@ final class ProximityMonitor: NSObject {
         lastStrong = nil
         smoothedRSSI = nil
         presence = .disabled
+        notifyReading() // tell the phone the beacon went away so it clears its distance chip
     }
 
     private func beginScan() {
@@ -172,6 +187,33 @@ final class ProximityMonitor: NSObject {
         case .unauthorized: presence = .unauthorized
         default: presence = enabled ? .unseen : .disabled
         }
+        notifyReading()
+    }
+
+    /// Map the current presence + smoothed RSSI to a `Reading` and fire `onReading` when it has
+    /// changed enough to be worth forwarding. The dashboard reads the live values directly, so this
+    /// throttle only governs the network sends, not the local UI.
+    private func notifyReading() {
+        let strong = (presence == .near || presence == .away)
+        let rssi = strong ? smoothedRSSI.map { Int($0.rounded()) } : nil
+        let state: String
+        switch presence {
+        case .near: state = "near"
+        case .away: state = "away"
+        case .unseen: state = "unseen"
+        case .disabled, .bluetoothOff, .unauthorized: state = "off"
+        }
+        let reading = Reading(state: state, rssi: rssi)
+        if let last = lastReading, reading.state == last.state {
+            // Same bucket: suppress sub-2 dBm jitter (and the no-rssi → no-rssi case).
+            switch (reading.rssi, last.rssi) {
+            case (nil, nil): return
+            case let (r?, l?) where abs(r - l) < 2: return
+            default: break
+            }
+        }
+        lastReading = reading
+        onReading?(reading)
     }
 
     private func recordSighting(rssi: Int) {
@@ -190,6 +232,8 @@ final class ProximityMonitor: NSObject {
 
     private func evaluate() {
         guard enabled, let central, central.state == .poweredOn else { return }
+        // Forward the (possibly updated) reading on every exit path below.
+        defer { notifyReading() }
 
         // Not yet armed: never seen the phone strong enough to consider it "here", so there's
         // nothing to lock on. Just reflect whether we're hearing anything at all.
@@ -249,5 +293,18 @@ extension ProximityMonitor {
     private var rssiSuffix: String {
         guard let smoothedRSSI else { return "" }
         return " (\(Int(smoothedRSSI.rounded())) dBm)"
+    }
+
+    /// Compact distance line for the dashboard identity block — e.g. "Nearby (−67 dBm)". `nil`
+    /// when there is nothing meaningful to show (feature off, Bluetooth unavailable, or the phone
+    /// hasn't been seen yet), so the row simply hides. Reads the live values, so it updates ahead
+    /// of the throttled network reading.
+    var distanceText: String? {
+        guard enabled else { return nil }
+        switch presence {
+        case .near: return "Nearby\(rssiSuffix)"
+        case .away: return "Away\(rssiSuffix)"
+        case .disabled, .bluetoothOff, .unauthorized, .unseen: return nil
+        }
     }
 }

@@ -44,6 +44,12 @@ final class BatteryMonitor {
         read().map(payload)
     }
 
+    /// Current level + charging, or nil on a desktop Mac. Lets the owner merge battery with other
+    /// telemetry (proximity) into a single `stat` frame.
+    func currentState() -> (level: Int, charging: Bool)? {
+        read()
+    }
+
     private func poll() {
         guard let state = read() else { return } // desktop Mac: nothing to report
         let p = payload(state)

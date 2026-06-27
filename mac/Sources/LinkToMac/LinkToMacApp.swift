@@ -52,8 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.connect()
         // A local copy fans out to whichever LAN server is live (re-read at call time).
         client.onLocalClip = { [weak self] text in self?.lan?.sendClip(text) }
-        // Battery telemetry fans out to the LAN server too, mirroring clips.
+        // Battery + proximity telemetry fans out to the LAN server too, mirroring clips.
         client.onLocalStat = { [weak self] payload in self?.lan?.sendStat(payload) }
+        // Forward the BLE proximity this Mac measures to the phone (over whichever transport is up),
+        // so the phone can show the Mac's distance — it can't measure that itself, it only advertises.
+        proximity.onReading = { [weak self] reading in self?.client.updateProximity(reading) }
         // Re-advertise under the fresh pairing id (and drop stale auth) when the user re-pairs.
         client.onPairingChanged = { [weak self] in self?.applyLanSettings() }
         applyLanSettings()
@@ -94,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server.onPeerChange = { [weak server] connected in
             Task { @MainActor in
                 client.lanPeerConnected = connected
-                if connected, let payload = client.currentBatteryPayload() { server?.sendStat(payload) }
+                if connected, let payload = client.currentStatPayload() { server?.sendStat(payload) }
             }
         }
         lan = server

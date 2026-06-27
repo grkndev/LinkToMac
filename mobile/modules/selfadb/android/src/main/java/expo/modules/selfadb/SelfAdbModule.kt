@@ -497,11 +497,19 @@ class SelfAdbModule : Module() {
     }
   }
 
-  /** Parse the Mac's telemetry JSON (`{"level":85,"charging":true}`) into an event/result map, or
-   *  null if it can't be parsed. Keeps the JS side free of raw-string parsing. */
+  /** Parse the Mac's telemetry JSON into an event/result map, or null if it can't be parsed. Keeps
+   *  the JS side free of raw-string parsing. The Mac merges battery + BLE proximity into one `stat`
+   *  (`{"level":85,"charging":true,"prox":"near","rssi":-67}`) and omits whichever it lacks — a
+   *  desktop Mac sends no battery, proximity-off sends no `prox` — so every field is optional and
+   *  only present ones are forwarded; the JS hooks each pick out their own and ignore the rest. */
   private fun parseStat(json: String): Map<String, Any?>? = try {
     val o = JSONObject(json)
-    mapOf("level" to o.getInt("level"), "charging" to o.optBoolean("charging", false))
+    val m = HashMap<String, Any?>()
+    if (o.has("level")) m["level"] = o.getInt("level")
+    if (o.has("charging")) m["charging"] = o.optBoolean("charging", false)
+    if (o.has("prox")) m["prox"] = o.optString("prox")           // "near"|"away"|"unseen"|"off"
+    if (o.has("rssi")) m["rssi"] = o.getInt("rssi")              // Mac-measured dBm of this phone
+    if (m.isEmpty()) null else m
   } catch (e: Exception) {
     null
   }

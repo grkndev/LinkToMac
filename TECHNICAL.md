@@ -56,6 +56,7 @@ fourth is a stock-Android system service the Android app talks to through a tric
 | **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Both ways (Mac↔Phone) |
 | **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
+| **Proximity distance** | BLE measure → `stat` frame | Yes — *or* LAN-direct (§5.1) | Mac measures → Phone shows |
 
 The clipboard, lock, battery, and notification paths share one connection per device — the relay,
 or, on the same network, a **direct link to the Mac** with no relay (§5.1). The proximity path is
@@ -418,7 +419,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "join", "room": "<roomId>", "device": "android" | "mac" }
 { "t": "clip", "nonce": "<base64>", "ct": "<base64>" }   // forwarded verbatim
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // action E2E-encrypted, forwarded verbatim
-{ "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name), bidirectional, E2E-encrypted, forwarded verbatim
+{ "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name; Mac also ± BLE prox/rssi), bidirectional, E2E-encrypted, forwarded verbatim
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
@@ -427,7 +428,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "peer",   "state": "online" | "offline", "device": "mac" }
 { "t": "clip",   "nonce": "...", "ct": "..." }            // the peer's frame, relayed
 { "t": "cmd",    "nonce": "...", "ct": "..." }            // the peer's command, relayed
-{ "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name), relayed
+{ "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name; Mac also ± BLE prox/rssi), relayed
 { "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
@@ -576,6 +577,13 @@ other with no extra pairing step.
   rather than mere packet receipt means walking to another room — still faintly in range but
   weak — counts as leaving.
 - **Fails secure:** if the phone vanishes entirely, the timer ages out and it locks.
+- **Distance display (both ends):** the same smoothed reading also feeds a UI label. The Mac shows
+  it directly in the dashboard identity row (`ProximityMonitor.distanceText`). For the phone — which
+  only *advertises* and so can't measure RSSI itself (RSSI is read by the receiver) — the Mac
+  **forwards** its reading inside the `stat` frame (`prox`/`rssi`, throttled to ≥2 dBm moves or a
+  bucket flip); `useMacDistance` renders it on Home. No Mac advertiser / phone scanner is needed:
+  the phone↔Mac distance is the same number whichever end measures it. Gated on auto-lock being on
+  (that's what runs the scan), so distance is hidden when the feature is off.
 
 macOS has no API to auto-*unlock*, so this is lock-only by design.
 

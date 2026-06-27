@@ -43,6 +43,10 @@ import { Spacing } from "@/constants/theme";
 import SelfAdb from "@/features/selfadb/client";
 import { useClipHistory } from "@/features/clip-history/use-clip-history";
 import { useMacBattery } from "@/features/relay/use-mac-battery";
+import {
+  macDistanceLabel,
+  useMacDistance,
+} from "@/features/relay/use-mac-distance";
 import { usePairing } from "@/features/relay/pairing-context";
 import { useRelayStatus } from "@/features/relay/use-relay-status";
 
@@ -75,6 +79,7 @@ export default function HomeScreen() {
   const { relay } = useRelayStatus();
   const { items: clipItems } = useClipHistory();
   const { battery } = useMacBattery();
+  const { distance } = useMacDistance();
 
   const connected = relay.peerOnline;
   // The link auto-reconnects with backoff; show "Reconnecting" while it's actively retrying, and
@@ -251,6 +256,28 @@ export default function HomeScreen() {
               </Surface>
             ) : null}
           </Row>
+
+          {/* BLE distance the Mac measured for this phone (it can't measure that itself — it only
+              advertises). Sits between the connection type (chips) and status; only present while
+              the Mac's proximity auto-lock is on and the phone is in range. */}
+          {connected && distance ? (
+            <Row
+              verticalAlignment="center"
+              horizontalArrangement={{ spacedBy: Spacing.one }}
+            >
+              <Icon
+                source={icons.sensors}
+                size={16}
+                tint={colors.onSurfaceVariant}
+              />
+              <Text
+                color={colors.onSurfaceVariant}
+                style={{ typography: "labelLarge", fontWeight: "600" }}
+              >
+                {macDistanceLabel(distance)}
+              </Text>
+            </Row>
+          ) : null}
 
            <Row
             verticalAlignment="center"

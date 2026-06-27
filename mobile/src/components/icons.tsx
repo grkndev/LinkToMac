@@ -20,6 +20,7 @@ const MODULES = {
   cast: require('../../assets/icons/cast.xml'),
   folder: require('../../assets/icons/folder_open.xml'),
   clipboard: require('../../assets/icons/content_paste.xml'),
+  sensors: require('../../assets/icons/sensors.xml'),
   // Settings
   notifications: require('../../assets/icons/notifications.xml'),
   notificationsActive: require('../../assets/icons/notifications_active.xml'),

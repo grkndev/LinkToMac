@@ -107,6 +107,12 @@ final class RelayClient {
     /// Watches this Mac's battery; created on first connect, forwards level/charging to the peer.
     private var battery: BatteryMonitor?
 
+    /// Latest BLE proximity (measured by this Mac scanning the phone's beacon), embedded in the
+    /// outbound `stat` so the phone can show the Mac's distance — it can't measure that itself, it
+    /// only advertises. `state` is `"near"|"away"|"unseen"|"off"`; `rssi` is the smoothed dBm.
+    private var proxState: String?
+    private var proxRSSI: Int?
+
     /// Fan-out hook for a second transport (the LAN-direct server). Called with every local
     /// copy that passes the `sendToAndroid` gate, so a phone on the LAN gets clips too.
     var onLocalClip: ((String) -> Void)?
@@ -137,10 +143,10 @@ final class RelayClient {
         }
         pasteboard?.start()
         if battery == nil {
-            battery = BatteryMonitor { [weak self] payload in
-                guard let self else { return }
-                self.sendStat(payload)              // report this Mac's battery to the phone
-                self.onLocalStat?(payload)          // fan out to the LAN-direct transport too
+            battery = BatteryMonitor { [weak self] _ in
+                // Battery changed → resend the merged telemetry (battery + current proximity) on
+                // both transports. The payload is rebuilt from the live monitors in `pushStatNow`.
+                self?.pushStatNow()
             }
         }
         battery?.start()
@@ -181,15 +187,41 @@ final class RelayClient {
         Task { [weak self] in try? await self?.send(.stat(nonce: nonce, ct: ct)) }
     }
 
-    /// Current battery as the wire payload, or nil if this Mac has no internal battery. Lets the
-    /// owner push a fresh value to a transport the moment its peer connects (see `LinkToMacApp`).
-    func currentBatteryPayload() -> String? {
-        battery?.currentPayload()
+    /// This Mac's battery + BLE proximity merged into one `stat` payload, omitting whichever isn't
+    /// available (no battery on a desktop Mac; no proximity until the user enables auto-lock). `nil`
+    /// when there's nothing to report. The peer updates only the fields present, so a battery-only
+    /// frame and a proximity-only frame never clobber each other. Lets the owner push a fresh value
+    /// to a transport the moment its peer connects (see `LinkToMacApp`).
+    func currentStatPayload() -> String? {
+        var parts: [String] = []
+        if let s = battery?.currentState() {
+            parts.append("\"level\":\(s.level)")
+            parts.append("\"charging\":\(s.charging)")
+        }
+        if let state = proxState {
+            parts.append("\"prox\":\"\(state)\"")
+            if let r = proxRSSI { parts.append("\"rssi\":\(r)") }
+        }
+        guard !parts.isEmpty else { return nil }
+        return "{" + parts.joined(separator: ",") + "}"
     }
 
-    /// Send the current battery over the relay now (no-op on a desktop Mac / before the monitor starts).
-    private func pushBatteryNow() {
-        if let payload = battery?.currentPayload() { sendStat(payload) }
+    /// Record the latest BLE proximity reading (from `ProximityMonitor`, which scans the phone's
+    /// beacon) and forward it to the phone — the phone can't measure distance itself, it only
+    /// advertises, so it relies on the value this Mac measured. Deduped upstream + here.
+    func updateProximity(_ reading: ProximityMonitor.Reading) {
+        guard proxState != reading.state || proxRSSI != reading.rssi else { return }
+        proxState = reading.state
+        proxRSSI = reading.rssi
+        pushStatNow()
+    }
+
+    /// Send the current merged telemetry over both transports now (no-op when there's nothing to
+    /// report or before the monitors start). Used on a peer-online edge and on any telemetry change.
+    private func pushStatNow() {
+        guard let payload = currentStatPayload() else { return }
+        sendStat(payload)          // → the relay peer
+        onLocalStat?(payload)      // → the LAN-direct transport
     }
 
     /// Write a clip that arrived over the LAN-direct transport. Reuses the same echo-suppressed
@@ -349,6 +381,8 @@ final class RelayClient {
         phoneBatteryLevel = nil
         phoneCharging = nil
         phoneName = nil
+        proxState = nil
+        proxRSSI = nil
         onPairingChanged?()
         if wasActive { connect() }
     }
@@ -476,12 +510,12 @@ final class RelayClient {
             reconnectAttempt = 0
             peerOnline = peers.contains(Config.peerDevice)
             log("joined; peers=\(peers)")
-            if peerOnline { pushBatteryNow() } // give the phone a fresh value without waiting for the poll
+            if peerOnline { pushStatNow() } // give the phone a fresh value without waiting for the poll
         case let .peer(state, device):
             if device == Config.peerDevice {
                 let cameOnline = (state == "online") && !peerOnline
                 peerOnline = (state == "online")
-                if cameOnline { pushBatteryNow() }
+                if cameOnline { pushStatNow() }
             }
             log("peer \(device) \(state)")
         case let .error(code, message):

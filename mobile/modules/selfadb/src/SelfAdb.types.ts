@@ -10,10 +10,15 @@ export type LogEvent = {
 };
 
 export type StatEvent = {
-  /** Mac battery charge percent, 0–100 */
-  level: number;
+  /** Mac battery charge percent, 0–100. Absent on a desktop Mac or a proximity-only frame. */
+  level?: number;
   /** whether the Mac is currently charging */
-  charging: boolean;
+  charging?: boolean;
+  /** BLE proximity state the Mac computed from scanning this phone: "near" | "away" | "unseen" | "off".
+   *  The phone can't measure distance itself (it only advertises), so it relies on this. */
+  prox?: 'near' | 'away' | 'unseen' | 'off';
+  /** smoothed signal strength (dBm) the Mac measured for this phone; present only when prox is near/away */
+  rssi?: number;
 };
 
 export type StatusEvent = {

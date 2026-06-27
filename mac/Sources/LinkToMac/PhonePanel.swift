@@ -7,6 +7,9 @@ import SwiftUI
 /// visual-only roadmap tiles.
 struct PhonePanel: View {
     let client: RelayClient
+    /// BLE proximity to the phone, measured by this Mac. Drives the optional distance row; only
+    /// shows a value while auto-lock is on and the phone is in range.
+    let proximity: ProximityMonitor
     let onOpen: (DashRoute) -> Void
 
     var body: some View {
@@ -43,6 +46,10 @@ struct PhonePanel: View {
                     Text(client.isLinked ? "Connected" : "Disconnected")
                         .font(M3.bodyLarge).foregroundStyle(M3.onSurfaceVariant)
                 }
+                if let distance = proximity.distanceText {
+                    Spacer().frame(height: 10)
+                    distanceRow(distance)
+                }
                 Spacer().frame(height: 16)
                 statusChips
             }
@@ -59,6 +66,18 @@ struct PhonePanel: View {
                 M3Chip(icon: Self.batteryIcon(level, charging: client.phoneCharging ?? false),
                        text: "\(level)%")
             }
+        }
+    }
+
+    /// BLE distance to the phone, e.g. "Nearby (−67 dBm)". Sits between the connection status and
+    /// the transport chip; only present while proximity auto-lock is on and the phone is in range.
+    private func distanceRow(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(M3.onSurfaceVariant)
+            Text(text)
+                .font(M3.bodyLarge).foregroundStyle(M3.onSurfaceVariant)
         }
     }
 
