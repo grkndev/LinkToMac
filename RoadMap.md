@@ -5,6 +5,7 @@
 - [x] LAN-Direct Mode
 - [x] Show battery percent on Android App
 - [x] Notifications sync (Android → mac, with native banners)
+- [x] Live BLE distance to the paired device on both dashboards
 ### Upcoming
 - [ ] FCM push-wake for minimum background battery — while the Mac is offline, drop the persistent relay socket (no idle ping all day) and let a high-priority push wake the phone when the Mac reconnects. Only way to reach ~0 idle battery; relay-path only (not LAN). Big lift: GMS/FCM dependency + the relay must be able to push.
 - [ ] Mirror your Android screen to mac
