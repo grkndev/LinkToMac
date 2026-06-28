@@ -396,6 +396,49 @@ class SelfAdbModule : Module() {
       ClipForegroundService.setNotificationForwarding(appCtx, enabled)
     }
 
+    // ---- Messages mirroring (SMS store -> Mac) -------------------------------
+
+    /** Whether we hold BOTH READ_SMS and READ_CONTACTS (needed to read texts + resolve names). */
+    AsyncFunction("hasSmsAccess") {
+      appCtx.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED &&
+        appCtx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Request READ_SMS + READ_CONTACTS at runtime; resolves whether SMS reading is now possible
+     *  (READ_SMS granted — contacts only affect name resolution). On grant, kick an immediate sync. */
+    AsyncFunction("requestSmsAccess") { promise: Promise ->
+      val manager = appContext.permissions
+      if (manager == null) {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+      manager.askForPermissions({ result ->
+        val granted = result[Manifest.permission.READ_SMS]?.status == PermissionsStatus.GRANTED
+        if (granted) ClipForegroundService.instance?.startSmsMirroring()
+        promise.resolve(granted)
+      }, Manifest.permission.READ_SMS, Manifest.permission.READ_CONTACTS)
+    }
+
+    /** Whether SMS messages are forwarded to the Mac (persisted, default true). Soft pause that
+     *  doesn't revoke the OS permission. */
+    AsyncFunction("getSmsForwarding") {
+      ClipForegroundService.getSmsForwarding(appCtx)
+    }
+
+    AsyncFunction("setSmsForwarding") { enabled: Boolean ->
+      val svc = ClipForegroundService.instance
+      if (svc != null) {
+        svc.applySmsForwarding(enabled)
+      } else {
+        ClipForegroundService.setSmsForwarding(appCtx, enabled)
+      }
+    }
+
+    /** Force an immediate SMS (re)sync to the Mac — used right after the access grant. */
+    AsyncFunction("syncSms") {
+      ClipForegroundService.instance?.startSmsMirroring()
+    }
+
     AsyncFunction("hasIgnoreBatteryOptimizations") {
       val pm = appCtx.getSystemService(Context.POWER_SERVICE) as PowerManager
       pm.isIgnoringBatteryOptimizations(appCtx.packageName)

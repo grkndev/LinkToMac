@@ -82,6 +82,16 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   getNotificationForwarding(): Promise<boolean>;
   /** pause/resume mirroring notifications to the Mac without revoking the system access grant. */
   setNotificationForwarding(enabled: boolean): Promise<void>;
+  /** whether we hold both READ_SMS and READ_CONTACTS (read texts + resolve sender names). */
+  hasSmsAccess(): Promise<boolean>;
+  /** request READ_SMS + READ_CONTACTS; resolves whether SMS reading is granted. Syncs on grant. */
+  requestSmsAccess(): Promise<boolean>;
+  /** whether SMS messages are forwarded to the Mac (persisted, default true). */
+  getSmsForwarding(): Promise<boolean>;
+  /** pause/resume mirroring SMS to the Mac without revoking the OS permission. */
+  setSmsForwarding(enabled: boolean): Promise<void>;
+  /** force an immediate SMS (re)sync to the Mac (used right after granting access). */
+  syncSms(): Promise<void>;
   /** whether the app is exempt from battery optimizations (more resilient FGS). */
   hasIgnoreBatteryOptimizations(): Promise<boolean>;
   /** open the system dialog to request battery-optimization exemption. */

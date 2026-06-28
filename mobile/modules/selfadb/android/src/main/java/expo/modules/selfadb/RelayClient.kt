@@ -139,6 +139,19 @@ class RelayClient(
     ws?.send(msg.toString())
   }
 
+  /** Send a batch/delta of mirrored SMS messages to the Mac, E2E-encrypted like a clip. Payload
+   *  plaintext is the SMS JSON (see [SmsMirror]). */
+  fun sendSms(payload: String) {
+    if (payload.isEmpty()) return
+    val enc = ClipCodec.encode(payload, key)
+    if (enc == null) {
+      log("encrypt failed (bad pairing key); not sending sms")
+      return
+    }
+    val msg = JSONObject().put("t", "sms").put("nonce", enc.first).put("ct", enc.second)
+    ws?.send(msg.toString())
+  }
+
   private fun open() {
     cancelReconnect()
     onStatus("connecting", peerOnline, null, attempt)

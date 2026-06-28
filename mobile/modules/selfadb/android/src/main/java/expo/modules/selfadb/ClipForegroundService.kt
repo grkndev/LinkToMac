@@ -1,5 +1,6 @@
 package expo.modules.selfadb
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.BatteryManager
 import android.os.Build
@@ -32,6 +34,9 @@ class ClipForegroundService : Service() {
   private var bridge: ClipBridge? = null
   private var conn: ConnectionManager? = null
   private var bleAdvertiser: BleAdvertiser? = null
+  /** Reads + live-observes the SMS store, forwarding to the Mac over the `sms` channel. Started
+   *  only when the user enabled message mirroring AND granted READ_SMS. */
+  private var sms: SmsMirror? = null
 
   /** Last text we wrote to the device clipboard; its echo `onClip` is swallowed. */
   @Volatile private var lastWritten: String? = null
@@ -78,6 +83,8 @@ class ClipForegroundService : Service() {
     maybeStartConnection()
     // Same for the BLE presence beacon (proximity auto-lock), if the user opted in.
     maybeStartAdvertising()
+    // And the SMS mirror (live observer), if enabled + permitted. Backfill runs on the peer-online edge.
+    maybeStartSmsMirroring()
     return START_STICKY
   }
 
@@ -103,6 +110,14 @@ class ClipForegroundService : Service() {
    */
   fun sendNote(json: String) {
     conn?.sendNote(json)
+  }
+
+  /**
+   * Forward a batch/delta of mirrored SMS messages to the Mac. Called by [SmsMirror] (same process).
+   * Independent of [sendPaused] (that gate is clipboard-only). No-op if not connected.
+   */
+  fun sendSms(json: String) {
+    conn?.sendSms(json)
   }
 
   // ---- Connection (LAN-direct preferred, relay fallback) -------------------
@@ -193,8 +208,13 @@ class ClipForegroundService : Service() {
       onStatus = { transport, status, peerOnline, error, attempt ->
         ClipBus.relay(status, peerOnline, error, transport, attempt)
         updateNotification(peerOnline)
-        // Give the Mac fresh battery + name the moment it (re)connects, without waiting for a change.
-        if (peerOnline && !lastPeerOnline) pushBatteryStat(force = true)
+        // Give the Mac fresh battery + name + SMS history the moment it (re)connects, without
+        // waiting for a change. The Mac store is in-memory, so a (re)connect re-backfills (the Mac
+        // upserts by id, so it's idempotent).
+        if (peerOnline && !lastPeerOnline) {
+          pushBatteryStat(force = true)
+          sms?.backfill()
+        }
         lastPeerOnline = peerOnline
       },
       log = { ClipBus.log(it) },
@@ -287,12 +307,47 @@ class ClipForegroundService : Service() {
     maybeStartAdvertising()
   }
 
+  // ---- SMS mirroring (SmsMirror -> Mac) ------------------------------------
+  // Lives in the service so reads + the live observer survive an app swipe. Gated by the forwarding
+  // toggle AND the READ_SMS runtime grant. Independent of [sendPaused] (that gate is clipboard-only).
+
+  private fun hasSmsPermission(): Boolean =
+    checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+
+  /** Start the live SMS observer if enabled + permitted (idempotent). The peer-online edge does
+   *  the actual backfill; this just keeps the delta-observer running. */
+  private fun maybeStartSmsMirroring() {
+    if (sms != null) return
+    if (!getSmsForwarding(this) || !hasSmsPermission()) return
+    sms = SmsMirror(this, send = { json -> sendSms(json) }, log = { ClipBus.log(it) }).also { it.start() }
+  }
+
+  /** Public hook for the module after the user grants SMS access from Settings — starts the
+   *  observer and pushes an immediate backfill so the Mac fills without waiting for a reconnect. */
+  fun startSmsMirroring() {
+    maybeStartSmsMirroring()
+    sms?.backfill()
+  }
+
+  /** Live toggle of message mirroring. Persisted so a START_STICKY restart with no JS honors it. */
+  fun applySmsForwarding(enabled: Boolean) {
+    setSmsForwarding(this, enabled)
+    if (enabled) {
+      startSmsMirroring()
+    } else {
+      sms?.stop()
+      sms = null
+    }
+  }
+
   override fun onDestroy() {
     unregisterBatteryReceiver()
     conn?.shutdown()
     conn = null
     bleAdvertiser?.stop()
     bleAdvertiser = null
+    sms?.stop()
+    sms = null
     bridge?.stop()
     bridge = null
     instance = null
@@ -407,6 +462,7 @@ class ClipForegroundService : Service() {
     private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"
     private const val KEY_CLIP_SEND_PAUSED = "clipSendPaused"
     private const val KEY_NOTIFICATION_FORWARDING = "notificationForwarding"
+    private const val KEY_SMS_FORWARDING = "smsForwarding"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     const val DEFAULT_PORT = 53123
 
@@ -442,6 +498,18 @@ class ClipForegroundService : Service() {
     fun setNotificationForwarding(ctx: Context, enabled: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_NOTIFICATION_FORWARDING, enabled)
+        .apply()
+    }
+
+    /** Whether mirroring SMS messages to the Mac is enabled (default true). The real gate is the
+     *  READ_SMS runtime grant; this is the soft pause. Persisted in PREFS_UI (survives unpair). */
+    fun getSmsForwarding(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getBoolean(KEY_SMS_FORWARDING, true)
+
+    fun setSmsForwarding(ctx: Context, enabled: Boolean) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_SMS_FORWARDING, enabled)
         .apply()
     }
 

@@ -28,6 +28,8 @@ export default function SettingsScreen() {
   const [notifGranted, setNotifGranted] = useState<boolean | null>(null);
   const [notifMirrorOn, setNotifMirrorOn] = useState(true);
   const [notifAccess, setNotifAccess] = useState<boolean | null>(null);
+  const [smsMirrorOn, setSmsMirrorOn] = useState(true);
+  const [smsAccess, setSmsAccess] = useState<boolean | null>(null);
   const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
   const [proximityOn, setProximityOn] = useState(false);
   // True while a proximity toggle is mid-flight. The permission prompt below
@@ -48,6 +50,12 @@ export default function SettingsScreen() {
     SelfAdb.hasNotificationAccess()
       .then(setNotifAccess)
       .catch(() => setNotifAccess(null));
+    SelfAdb.getSmsForwarding()
+      .then(setSmsMirrorOn)
+      .catch(() => {});
+    SelfAdb.hasSmsAccess()
+      .then(setSmsAccess)
+      .catch(() => setSmsAccess(null));
     SelfAdb.hasIgnoreBatteryOptimizations()
       .then(setBatteryOk)
       .catch(() => setBatteryOk(null));
@@ -67,6 +75,10 @@ export default function SettingsScreen() {
       // "Notification access" is granted in a system settings screen -> re-check on return.
       SelfAdb.hasNotificationAccess()
         .then(setNotifAccess)
+        .catch(() => {});
+      // The READ_SMS/READ_CONTACTS runtime prompt backgrounds us -> re-check the grant on return.
+      SelfAdb.hasSmsAccess()
+        .then(setSmsAccess)
         .catch(() => {});
       // The OS may have revoked Nearby Devices behind our back -> reflect the real
       // beacon state. Skip while a toggle is in flight so we don't read the beacon
@@ -88,6 +100,11 @@ export default function SettingsScreen() {
   const toggleNotifMirror = (on: boolean) => {
     setNotifMirrorOn(on);
     SelfAdb.setNotificationForwarding(on).catch(() => {});
+  };
+
+  const toggleSmsMirror = (on: boolean) => {
+    setSmsMirrorOn(on);
+    SelfAdb.setSmsForwarding(on).catch(() => {});
   };
 
   // Auto-lock needs Nearby Devices to advertise the BLE beacon; ask before enabling.
@@ -191,6 +208,27 @@ export default function SettingsScreen() {
               hint="Allow Link to macOS to read notifications so they can be mirrored to your Mac."
               onPress={() => {
                 SelfAdb.openNotificationAccessSettings().catch(() => {});
+              }}
+            />
+          ) : null}
+          <SwitchRow
+            colors={colors}
+            icon={icons.chat}
+            label="Mirror messages to Mac"
+            hint="Read this phone's text messages on your Mac. Requires SMS access."
+            value={smsMirrorOn}
+            onValueChange={toggleSmsMirror}
+          />
+          {smsMirrorOn && smsAccess === false ? (
+            <ActionRow
+              colors={colors}
+              icon={icons.chat}
+              label="Grant SMS access"
+              hint="Allow Link to macOS to read your messages and contacts so they can be shown on your Mac."
+              onPress={() => {
+                SelfAdb.requestSmsAccess()
+                  .then(setSmsAccess)
+                  .catch(() => {});
               }}
             />
           ) : null}

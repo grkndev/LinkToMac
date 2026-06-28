@@ -133,6 +133,18 @@ class LanClient(
     ws?.send(msg.toString())
   }
 
+  /** Send a batch/delta of mirrored SMS messages to the Mac, E2E-encrypted like a clip. */
+  fun sendSms(payload: String) {
+    if (payload.isEmpty()) return
+    val enc = ClipCodec.encode(payload, key)
+    if (enc == null) {
+      log("lan encrypt failed (bad pairing key); not sending sms")
+      return
+    }
+    val msg = JSONObject().put("t", "sms").put("nonce", enc.first).put("ct", enc.second)
+    ws?.send(msg.toString())
+  }
+
   private fun open() {
     cancelReconnect()
     authed = false

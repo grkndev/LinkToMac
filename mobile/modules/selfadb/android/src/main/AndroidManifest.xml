@@ -21,6 +21,16 @@
   <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
+  <!--
+    Messages mirroring (Android → Mac): read the SMS store and resolve sender contact names so the
+    Mac dashboard can show real conversation threads. Both are dangerous runtime permissions, granted
+    via the in-app "Grant SMS access" action (Settings). READ_SMS is Play-restricted, but this app is
+    sideloaded (EAS preview APK), so the policy doesn't apply. Reading runs in the foreground service
+    (SmsMirror), so it survives an app swipe like the notification listener.
+  -->
+  <uses-permission android:name="android.permission.READ_SMS" />
+  <uses-permission android:name="android.permission.READ_CONTACTS" />
+
   <!-- mDNS discovery of _adb-tls-pairing / _adb-tls-connect via NsdManager -->
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
