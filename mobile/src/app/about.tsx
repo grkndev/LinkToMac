@@ -85,7 +85,7 @@ export default function AboutScreen() {
               textAlign: "center",
             }}
           >
-            Link To Mac
+            Link to Mac
           </Text>
           <Text
             color={colors.onSurfaceVariant}
