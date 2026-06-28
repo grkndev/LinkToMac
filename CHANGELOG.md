@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.5.1 (2026-06-28)
+
+### Features
+- **Read your phone's messages on the Mac** — your Android SMS now show up on the Mac's
+  dashboard **Messages** tab as real **conversation threads** (one row per contact, latest
+  message previewed; tap to open the thread and read the back-and-forth in chat bubbles). Grant
+  **"SMS access"** once on the phone (Settings → *Grant SMS access*) and keep the **"Mirror
+  messages"** toggle on. It's **read-only** and one-way (the Mac can't reply yet), resolves
+  contact names, and can be paused phone-side without revoking the system grant. Cleared on unpair.
+- **Paged Messages & Notifications lists** — both dashboard tabs now page through their history
+  (7 per page, with a ‹ / › control) so a long backlog no longer overflows the window; long
+  threads scroll.
+
+### Internal
+- New `sms` wire frame (phone → Mac), E2E-encrypted (ChaCha20-Poly1305) and forwarded opaquely by
+  the relay exactly like `clip`/`cmd`/`stat`/`note`, over both LAN-direct and relay transports —
+  hand-mirrored across `server/` (`protocol.ts`/`relay.ts`/`index.ts`), `mac/`
+  (`RelayProtocol.swift`), and `mobile/` (`RelayClient.kt`/`LanClient.kt`). `smoke.ts` asserts a
+  one-way `sms` round-trip.
+- Android: an FGS-owned `SmsMirror` reads `content://sms` (newest ~200, chunked) and observes it
+  for live deltas, resolving sender names via `PhoneLookup`; gated by the `READ_SMS`/`READ_CONTACTS`
+  runtime grants + a "Mirror messages" toggle. New JS surface: `hasSmsAccess`, `requestSmsAccess`,
+  `get/setSmsForwarding`, `syncSms`.
+- Mac: `RelayClient` upserts inbound messages by `id` and groups them into `conversations`
+  (by thread, newest-activity first); `FeaturePanel`'s Messages tab renders the thread list +
+  chat-bubble view, both paged.
+
+### Known limitations
+- The Mac's message list is **in-memory** (like Notifications): it clears when the Mac app
+  relaunches, and the phone re-sends the history when it next sees the Mac connect.
+
+### Updating
+- **macOS** auto-updates via Sparkle. **Android** needs the new APK reinstalled — this release
+  changes native code, so it is **not** an over-the-air (EAS Update) change.
+
+## v0.5.0 (2026-06-27)
+
+### Features
+- **Live distance to your phone, on both dashboards** — the Mac measures the phone's BLE signal
+  and now shows the proximity/distance ("Nearby", "Away", with the live dBm) right in the
+  dashboard's identity row, *and* forwards that reading to the phone so the phone's Home screen
+  shows the same distance (it only advertises the beacon, so it can't measure it itself). Shown
+  only while auto-lock is on (that's what runs the scan).
+
+### Internal
+- The Mac's outbound `stat` frame now merges battery **and** BLE proximity (`prox`/`rssi`,
+  throttled), and each side updates only the fields present — so battery and proximity frames
+  never clobber each other.
+- Updated app icon.
+
+### Updating
+- **macOS** auto-updates via Sparkle. **Android** needs the new APK reinstalled (native code changed).
+
 ## v0.4.0 (2026-06-25)
 
 ### Features
