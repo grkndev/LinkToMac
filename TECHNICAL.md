@@ -55,12 +55,13 @@ fourth is a stock-Android system service the Android app talks to through a tric
 | **Remote lock** | WebSocket `cmd` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Both ways (Mac↔Phone) |
 | **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
+| **Message (SMS) mirroring** | WebSocket `sms` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
 | **Proximity distance** | BLE measure → `stat` frame | Yes — *or* LAN-direct (§5.1) | Mac measures → Phone shows |
 
-The clipboard, lock, battery, and notification paths share one connection per device — the relay,
-or, on the same network, a **direct link to the Mac** with no relay (§5.1). The proximity path is
-completely independent — it works with no internet at all.
+The clipboard, lock, battery, notification, and message paths share one connection per device — the
+relay, or, on the same network, a **direct link to the Mac** with no relay (§5.1). The proximity path
+is completely independent — it works with no internet at all.
 
 ### Tech stack
 
@@ -354,8 +355,8 @@ roadmap-placeholder feature tiles.
 
 | File | Role |
 |---|---|
-| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note` decode, clip-history ring, and notification ring |
-| `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; `onRemoteStat`/`onRemoteNote` for the relay-less path |
+| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note`/`sms` decode, clip-history ring, notification ring, and message store (`conversations`) |
+| `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; `onRemoteStat`/`onRemoteNote`/`onRemoteSms` for the relay-less path |
 | `PasteboardWatcher.swift` | Polls `NSPasteboard.changeCount`; echo suppression |
 | `BatteryMonitor.swift` | IOKit power-source poll → outbound `stat` (the Mac's own battery) |
 | `ClipCodec.swift` | E2E payload encryption — ChaCha20-Poly1305 (CryptoKit) |
@@ -369,7 +370,7 @@ roadmap-placeholder feature tiles.
 | `DashboardWindow.swift` / `DashboardComponents.swift` | Dashboard window shell + shared M3 components |
 | `PhonePanel.swift` | Phone identity: name, connection status, transport + battery chips (hidden when nil) |
 | `ClipHistoryScreen.swift` | Clip history grouped by recency, tap-to-recopy, clear |
-| `FeaturePanel.swift` | Right-column tabs — the **Notifications** tab renders the live note ring; other tabs are placeholders |
+| `FeaturePanel.swift` | Right-column tabs — the **Notifications** tab renders the live note ring, the **Messages** tab renders `conversations` (thread list → chat bubbles); Calls/Photos are placeholders |
 | `SettingsScreen.swift` / `AppearanceSettings.swift` / `AboutView.swift` / `RelayScreen.swift` / `ServerSettingsView.swift` | Settings, appearance, about, relay, and "Server Settings…" surfaces |
 
 ### 4.1 RelayClient (Swift)
@@ -421,6 +422,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // action E2E-encrypted, forwarded verbatim
 { "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name; Mac also ± BLE prox/rssi), bidirectional, E2E-encrypted, forwarded verbatim
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
+{ "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // mirrored SMS batch/delta (phone → Mac), E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
 // relay → client
@@ -430,6 +432,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "cmd",    "nonce": "...", "ct": "..." }            // the peer's command, relayed
 { "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name; Mac also ± BLE prox/rssi), relayed
 { "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
+{ "t": "sms",    "nonce": "...", "ct": "..." }            // the peer's mirrored SMS batch/delta, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
@@ -498,6 +501,47 @@ top-left, which is fixed to the bundle for local notifications), and renders the
 dashboard's Notifications tab (`FeaturePanel`, with the app icon as each row's badge). Mirroring is one-way (the Mac never sends
 `note`) and can be paused phone-side (`setNotificationForwarding`, persisted) without revoking the
 system access grant. Cleared on unpair.
+
+### 5.3 Message mirroring (`sms`, phone → Mac)
+
+The phone reads its **SMS store** and shows it as real conversation threads on the Mac's Messages
+tab. The reader, `SmsMirror.kt`, is **owned by the `ClipForegroundService`** (not a system service),
+so it survives a JS swipe like the notification listener. It needs two **dangerous runtime
+permissions** — `READ_SMS` (the texts) and `READ_CONTACTS` (resolve sender names) — granted from the
+app's settings via `SelfAdbModule.requestSmsAccess`. `READ_SMS` is Play-restricted, but the app is
+**sideloaded** (EAS `preview` APK), so the policy doesn't apply. SMS-only for v1 (no MMS/RCS).
+
+Two paths, both gated by the grant + the **Mirror messages** toggle (`getSmsForwarding`, PREFS_UI,
+default on; the soft pause that doesn't revoke the OS permission):
+
+- **Backfill.** `SmsMirror.backfill()` queries `content://sms` for the newest ~200 messages,
+  resolves each sender's contact name via `ContactsContract.PhoneLookup` (memoized per address in an
+  `LruCache`), and pushes them as chunked `op:"batch"` `sms` frames (≤50 msgs/frame to stay well
+  under the 256 KB cap). It runs **on every peer-online edge** (next to `pushBatteryStat(force=true)`
+  in `ClipForegroundService`) — because the Mac's store is in-memory, a (re)connecting Mac
+  re-receives the history. Idempotent: the Mac upserts by `id`.
+- **Live deltas.** A `ContentObserver` on `content://sms` fires on any change; `SmsMirror` queries
+  rows newer than the last-seen `_id` and pushes them as an `op:"add"` frame (covers received *and*
+  sent messages, since `content://sms` includes both).
+
+The decrypted plaintext:
+
+```jsonc
+{ "op": "batch" | "add",          // batch = backfill chunk; add = live delta (Mac upserts either way)
+  "msgs": [
+    { "id": 4711,                 // SMS _id — stable, drives dedup/upsert
+      "thread": 12,               // thread_id — groups a conversation (falls back to addr)
+      "addr": "+90555…", "name": "Ada",   // name omitted if no contact / no READ_CONTACTS
+      "body": "see you then", "date": 1719300000000,  // epoch ms
+      "dir": "in" | "out", "read": true }, … ] }
+```
+
+The Mac (`RelayClient.applySms`) upserts each message by `id` into an in-memory store (cap 500), and
+`conversations` groups them by `thread` (newest activity first) for `FeaturePanel`'s Messages tab —
+a thread list that drills into a chat-bubble view (outgoing trailing/`primaryContainer`, incoming
+leading/`surfaceContainerHigh`). Mirroring is **one-way and read-only** (the Mac never sends `sms`;
+replying from the Mac is roadmap). No delete/edit handling in v1 (SMS deletions are rare). Cleared on
+unpair.
 
 ---
 
@@ -716,9 +760,11 @@ v1 links **one phone and one Mac** and syncs **text only** (images/files out of 
 clipboard (end-to-end encrypted with ChaCha20-Poly1305), remote lock, proximity auto-lock,
 **relay-less LAN-direct** mode (§5.1 — phone ↔ Mac over the local network with no relay,
 auto-preferred over the relay on the same Wi-Fi), **bidirectional battery/identity telemetry**
-(`stat`, Mac↔phone), and **one-way notification mirroring** (`note`, phone → Mac; §5.2, surfaced
-as a native banner + the dashboard's Notifications tab). On the roadmap (`RoadMap.md`): screen
-mirroring, file transfer, and read-only access to gallery/messages/calls from the Mac.
+(`stat`, Mac↔phone), **one-way notification mirroring** (`note`, phone → Mac; §5.2, surfaced
+as a native banner + the dashboard's Notifications tab), and **one-way message (SMS) mirroring**
+(`sms`, phone → Mac; §5.3, read-only conversation threads in the dashboard's Messages tab). On the
+roadmap (`RoadMap.md`): screen mirroring, file transfer, replying to messages, and read-only access
+to gallery/calls from the Mac.
 
 ---
 
@@ -735,8 +781,8 @@ server/src/
 
 mac/Sources/LinkToMac/
   LinkToMacApp.swift     MenuBarExtra + dashboard scene + AppDelegate
-  RelayClient.swift      WS client, reconnect, cmd dispatch; owns the pasteboard + battery monitor, clip-history + notification rings
-  LanServer.swift        LAN-direct WS server (NWListener) + Bonjour + HMAC handshake (onRemoteStat/onRemoteNote)
+  RelayClient.swift      WS client, reconnect, cmd dispatch; owns the pasteboard + battery monitor, clip-history + notification rings + message store
+  LanServer.swift        LAN-direct WS server (NWListener) + Bonjour + HMAC handshake (onRemoteStat/onRemoteNote/onRemoteSms)
   PasteboardWatcher.swift changeCount poll + echo stamp
   BatteryMonitor.swift   IOKit power-source poll → outbound stat (Mac's own battery)
   ClipCodec.swift        E2E payload encryption (ChaCha20-Poly1305 / CryptoKit)
@@ -752,7 +798,7 @@ mac/Sources/LinkToMac/
   DashboardWindow.swift / DashboardComponents.swift  dashboard window shell + shared M3 components
   PhonePanel.swift       phone identity: name, status, transport + battery chips
   ClipHistoryScreen.swift  clip history (recency groups, recopy, clear)
-  FeaturePanel.swift     right-column tabs; Notifications tab renders the live note ring
+  FeaturePanel.swift     right-column tabs; Notifications tab renders the note ring, Messages tab renders conversation threads
   SettingsScreen.swift / AppearanceSettings.swift / AboutView.swift / RelayScreen.swift  settings/about/relay surfaces
 
 mobile/modules/selfadb/android/.../selfadb/
@@ -766,6 +812,7 @@ mobile/modules/selfadb/android/.../selfadb/
   LanClient.kt              OkHttp WS straight to the Mac (LAN-direct) + HMAC handshake
   LanDiscovery.kt           NsdManager mDNS discovery of the Mac (rid-matched)
   NotificationListener.kt   NotificationListenerService → note frames (label + icon resolve, noise filter)
+  SmsMirror.kt              FGS-owned SMS reader → sms frames (backfill + ContentObserver deltas, name resolve)
   BleAdvertiser.kt          BLE presence beacon
   ClipBus.kt                service ↔ module bridge + ring buffers
   ClipCodec.kt              E2E payload encryption (ChaCha20-Poly1305 / javax.crypto)

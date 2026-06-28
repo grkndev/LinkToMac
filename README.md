@@ -17,8 +17,10 @@ Windows", but self-hosted.
   phone's battery + name show on the Mac's dashboard, live.
 - 🔔 **Notification mirroring** — Android notifications pop up on the Mac as native banners and
   collect in the dashboard's Notifications tab (one-way, pausable).
+- 💬 **Read your messages** — your phone's SMS show up as conversation threads on the Mac's
+  Messages tab, so you can read texts without unlocking your phone (read-only for now, pausable).
 - 🖥️ **Mac dashboard** — a Material 3 menu-bar card plus a window showing your phone, clip
-  history, and notifications.
+  history, notifications, and messages.
 - 🔗 **Pair once** with a QR code shown on the Mac.
 - 📶 **No relay on the same Wi-Fi** — the phone connects straight to the Mac (LAN-direct), and
   falls back to the relay automatically when you leave home. Works relay-free if you never set one up.
@@ -103,6 +105,9 @@ no internet.
   *Mirror notifications*), and Android notifications appear on the Mac as banners and in the
   dashboard's **Notifications** tab. It's one-way and can be paused from the phone without
   revoking the system grant.
+- **Read your messages** — grant **SMS access** once (Settings → *Grant SMS access*), and your
+  recent texts plus new ones arrive as conversation threads on the Mac's **Messages** tab. It's
+  read-only and one-way for now, and can be paused from the phone without revoking the grant.
 - **Battery & phone identity** — the Mac's charge shows on the phone's Home screen; the phone's
   battery and name show on the Mac's dashboard. No setup — it rides the same connection.
 
@@ -118,19 +123,20 @@ no internet.
   payloads are still end-to-end encrypted and the connection is gated by a challenge-response over
   your pairing key — a stranger on the Wi-Fi can neither read it nor impersonate your phone.
 - **Proximity lock is local:** it uses Bluetooth only and never touches the relay or internet.
-- **End-to-end encrypted:** clipboard, the lock command, battery telemetry, *and* mirrored
-  notifications are all sealed with **ChaCha20-Poly1305**, keyed by the secret exchanged at
-  pairing. The relay (or anyone on your LAN) only ever sees opaque ciphertext — never your
-  clipboard, the command, your notifications, or the key.
+- **End-to-end encrypted:** clipboard, the lock command, battery telemetry, mirrored
+  notifications, *and* mirrored messages are all sealed with **ChaCha20-Poly1305**, keyed by the
+  secret exchanged at pairing. The relay (or anyone on your LAN) only ever sees opaque ciphertext —
+  never your clipboard, the command, your notifications, your texts, or the key.
 
 ## Scope & status
 
 v1 links **one phone and one Mac** and syncs **text only** (images/files are out of scope; the
 256 KB payload cap reflects that — mirrored app icons are small PNGs). Implemented: clipboard
 sync (end-to-end encrypted), remote lock, proximity auto-lock, **LAN-direct** mode, **two-way
-battery/phone telemetry**, and **one-way notification mirroring** (phone → Mac). Screen
-mirroring, file transfer, and read-only Messages/Calls/Photos tabs are still on the roadmap. A
-separate technical document ([`TECHNICAL.md`](TECHNICAL.md)) covers the internals in depth.
+battery/phone telemetry**, **one-way notification mirroring**, and **read-only SMS mirroring**
+(phone → Mac). Screen mirroring, file transfer, replying to messages, and read-only Calls/Photos
+tabs are still on the roadmap. A separate technical document ([`TECHNICAL.md`](TECHNICAL.md))
+covers the internals in depth.
 
 ## License
 
