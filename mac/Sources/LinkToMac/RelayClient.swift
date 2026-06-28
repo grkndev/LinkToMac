@@ -71,6 +71,48 @@ final class RelayClient {
     /// App-icon cache keyed by package, so a `note` that omits an icon still renders the app's badge.
     private var iconCache: [String: NSImage] = [:]
 
+    /// One mirrored SMS message. `id` is the Android `_id` (stable → drives upsert/dedup). `threadKey`
+    /// groups messages into a conversation (Android `thread_id`, falling back to the address).
+    struct MessageEntry: Identifiable {
+        let id: Int64
+        let threadKey: String
+        let addr: String
+        let name: String?
+        let body: String
+        let date: Date
+        let outgoing: Bool
+        let read: Bool
+
+        /// Contact name when known, else the raw address.
+        var display: String { (name?.isEmpty == false) ? name! : addr }
+    }
+
+    /// A conversation: all messages sharing a `threadKey`, chronological (oldest → newest). Derived
+    /// on demand from `messages` by `conversations`.
+    struct Conversation: Identifiable {
+        let id: String
+        let display: String
+        let messages: [MessageEntry]
+        var latest: MessageEntry { messages[messages.count - 1] }
+        var unread: Int { messages.lazy.filter { !$0.read && !$0.outgoing }.count }
+    }
+
+    /// Mirrored phone SMS (deduped/upserted by `id`, capped). Feeds the dashboard's Messages tab via
+    /// the `conversations` grouping. In-memory only — cleared on quit / unpair.
+    private(set) var messages: [MessageEntry] = []
+    private static let messagesCap = 500
+
+    /// Messages grouped into conversations, newest activity first. Computed from `messages`.
+    var conversations: [Conversation] {
+        Dictionary(grouping: messages, by: { $0.threadKey }).map { key, msgs in
+            let sorted = msgs.sorted { $0.date < $1.date }
+            // Prefer a contact-name label if any message in the thread resolved one.
+            let display = sorted.last(where: { $0.name?.isEmpty == false })?.display ?? sorted[sorted.count - 1].display
+            return Conversation(id: key, display: display, messages: sorted)
+        }
+        .sorted { $0.latest.date > $1.latest.date }
+    }
+
     /// Whether an inbound notification also raises a native macOS banner (the dashboard tab is always
     /// updated). Persisted; defaults on. `@Observable` makes the Settings toggle reflect changes live.
     var showNotificationBanners: Bool = UserDefaults.standard.object(forKey: "showNotificationBanners") as? Bool ?? true {
@@ -248,6 +290,11 @@ final class RelayClient {
         applyNotification(json)
     }
 
+    /// Apply a phone `sms` batch/delta that arrived over the LAN-direct transport (already decrypted by `LanServer`).
+    func writeRemoteSms(_ json: String) {
+        applySms(json)
+    }
+
     /// Re-copy a clip-history entry to the pasteboard. Echo-suppressed (same writer as inbound
     /// clips), so it doesn't bounce back to the phone.
     func recopy(_ text: String) {
@@ -259,6 +306,8 @@ final class RelayClient {
     func clearClipHistory() { clipHistory.removeAll() }
 
     func clearNotifications() { notifications.removeAll() }
+
+    func clearMessages() { messages.removeAll() }
 
     /// Append a received clip to the in-memory history (newest first, capped, skip consecutive dupes).
     private func recordClip(_ text: String) {
@@ -353,6 +402,57 @@ final class RelayClient {
         return try? JSONDecoder().decode(NotePayload.self, from: data)
     }
 
+    /// Parse + apply a decrypted phone `sms` payload (`{op, msgs:[…]}`). Each item is upserted by `id`
+    /// (a backfill chunk and a live delta are handled identically — re-sends are idempotent). Trims to
+    /// the cap by dropping the oldest. Grouping into threads happens in `conversations`.
+    private func applySms(_ json: String) {
+        guard let payload = Self.decodeSms(json) else { log("sms parse failed"); return }
+        for m in payload.msgs {
+            let threadKey: String
+            if let t = m.thread, t > 0 { threadKey = "t\(t)" } else { threadKey = m.addr }
+            let entry = MessageEntry(
+                id: m.id,
+                threadKey: threadKey,
+                addr: m.addr,
+                name: m.name,
+                body: m.body,
+                date: Date(timeIntervalSince1970: Double(m.date) / 1000),
+                outgoing: m.dir == "out",
+                read: m.read ?? true
+            )
+            if let idx = messages.firstIndex(where: { $0.id == entry.id }) {
+                messages[idx] = entry
+            } else {
+                messages.append(entry)
+            }
+        }
+        if messages.count > Self.messagesCap {
+            messages.sort { $0.date > $1.date }
+            messages.removeLast(messages.count - Self.messagesCap)
+        }
+        log("sms: +\(payload.msgs.count) (\(messages.count) total)")
+    }
+
+    private struct SmsPayload: Decodable {
+        struct Item: Decodable {
+            let id: Int64
+            let thread: Int64?
+            let addr: String
+            let name: String?
+            let body: String
+            let date: Int64
+            let dir: String?
+            let read: Bool?
+        }
+        let op: String?
+        let msgs: [Item]
+    }
+
+    private static func decodeSms(_ json: String) -> SmsPayload? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(SmsPayload.self, from: data)
+    }
+
     func toggle() {
         shouldStay ? disconnect() : connect()
     }
@@ -377,6 +477,7 @@ final class RelayClient {
         lastClip = nil
         clipHistory.removeAll()
         notifications.removeAll()
+        messages.removeAll()
         iconCache.removeAll()
         phoneBatteryLevel = nil
         phoneCharging = nil
@@ -560,6 +661,13 @@ final class RelayClient {
                 applyNotification(json)
             } else {
                 log("note decrypt failed (key mismatch or corrupt)")
+            }
+        case let .sms(nonce, ct):
+            // A mirrored phone SMS batch/delta. Same AEAD as clips; drop anything unauthenticated.
+            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+                applySms(json)
+            } else {
+                log("sms decrypt failed (key mismatch or corrupt)")
             }
         case .pong:
             break

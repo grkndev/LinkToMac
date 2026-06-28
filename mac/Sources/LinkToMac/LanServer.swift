@@ -31,6 +31,8 @@ final class LanServer: @unchecked Sendable {
     var onRemoteStat: (@Sendable (String) -> Void)?
     /// Called (off the main actor) with a decrypted mirrored-notification JSON payload.
     var onRemoteNote: (@Sendable (String) -> Void)?
+    /// Called (off the main actor) with a decrypted mirrored-SMS batch/delta JSON payload.
+    var onRemoteSms: (@Sendable (String) -> Void)?
     /// Called when the authenticated peer connects/disconnects (for UI/status aggregation).
     var onPeerChange: (@Sendable (Bool) -> Void)?
 
@@ -205,6 +207,11 @@ final class LanServer: @unchecked Sendable {
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
                   let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
             onRemoteNote?(json)
+        case "sms":
+            guard authed, let key = pairingProvider()?.key,
+                  let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
+                  let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
+            onRemoteSms?(json)
         case "ping":
             if authed { send(["t": "pong"], on: conn) }
         default:
