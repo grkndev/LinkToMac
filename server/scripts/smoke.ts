@@ -94,6 +94,14 @@ async function main(): Promise<void> {
   await sleep(300);
   assert(!android.inbox().some((m) => m.t === 'note'), 'note sender received no echo');
 
+  // SMS mirroring (phone -> Mac): opaque `sms` frame, same fan-out as clips.
+  android.send({ t: 'sms', nonce: 'c21zbm9uY2U=', ct: 'c21zY2lwaGVy' });
+  const sms = await mac.waitFor((m) => m.t === 'sms', 'mac receives sms');
+  assert(sms.nonce === 'c21zbm9uY2U=' && sms.ct === 'c21zY2lwaGVy', 'sms payload intact');
+
+  await sleep(300);
+  assert(!android.inbox().some((m) => m.t === 'sms'), 'sms sender received no echo');
+
   mac.close();
   await android.waitFor(
     (m) => m.t === 'peer' && m.state === 'offline' && m.device === 'mac',
