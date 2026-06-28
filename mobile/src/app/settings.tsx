@@ -195,7 +195,7 @@ export default function SettingsScreen() {
           <SwitchRow
             colors={colors}
             icon={icons.notificationsActive}
-            label="Mirror notifications to Mac"
+            label="Mirror notifications"
             hint="Forward this phone's notifications to your Mac. Requires notification access."
             value={notifMirrorOn}
             onValueChange={toggleNotifMirror}
@@ -214,7 +214,7 @@ export default function SettingsScreen() {
           <SwitchRow
             colors={colors}
             icon={icons.chat}
-            label="Mirror messages to Mac"
+            label="Mirror messages"
             hint="Read this phone's text messages on your Mac. Requires SMS access."
             value={smsMirrorOn}
             onValueChange={toggleSmsMirror}
@@ -235,7 +235,7 @@ export default function SettingsScreen() {
           <SwitchRow
             colors={colors}
             icon={icons.contentCopy}
-            label="Send copies to Mac"
+            label="Send copies"
             hint="Copies on this phone are sent to your Mac. You'll still receive the Mac's copies when off."
             value={!paused}
             onValueChange={(on) => setPaused(!on)}
