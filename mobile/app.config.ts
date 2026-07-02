@@ -13,7 +13,7 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 const variant = process.env.APP_VARIANT ?? process.env.EAS_BUILD_PROFILE;
 const IS_DEV = variant === 'development';
 
-const NAME = IS_DEV ? 'LinkToMac (Dev)' : 'Link To Mac';
+const NAME = IS_DEV ? 'LinkToMac (Dev)' : 'Link to Mac';
 const BUNDLE_ID = IS_DEV ? 'com.grkndev.linktomac.dev' : 'com.grkndev.linktomac';
 
 // User-facing version (the `vX.Y.Z` release tag) and the Android build number.
