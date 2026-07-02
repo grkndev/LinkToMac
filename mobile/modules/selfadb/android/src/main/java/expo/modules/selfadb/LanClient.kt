@@ -97,7 +97,7 @@ class LanClient(
 
   fun sendClip(text: String) {
     if (text.isEmpty()) return
-    val enc = ClipCodec.encode(text, key)
+    val enc = ClipCodec.encode(text, key, "clip")
     if (enc == null) {
       log("lan encrypt failed (bad pairing key); not sending")
       return
@@ -109,7 +109,7 @@ class LanClient(
   /** Send a remote action to the Mac (e.g. "lock"), E2E-encrypted like a clip. */
   fun sendCmd(action: String) {
     if (action.isEmpty()) return
-    val enc = ClipCodec.encode(action, key)
+    val enc = ClipCodec.encode(action, key, "cmd")
     if (enc == null) {
       log("lan encrypt failed (bad pairing key); not sending cmd")
       return
@@ -121,7 +121,7 @@ class LanClient(
   /** Send telemetry (this phone's battery + name) to the Mac, E2E-encrypted like a clip. */
   fun sendStat(payload: String) {
     if (payload.isEmpty()) return
-    val enc = ClipCodec.encode(payload, key)
+    val enc = ClipCodec.encode(payload, key, "stat")
     if (enc == null) {
       log("lan encrypt failed (bad pairing key); not sending stat")
       return
@@ -133,7 +133,7 @@ class LanClient(
   /** Send a mirrored device notification to the Mac, E2E-encrypted like a clip. */
   fun sendNote(payload: String) {
     if (payload.isEmpty()) return
-    val enc = ClipCodec.encode(payload, key)
+    val enc = ClipCodec.encode(payload, key, "note")
     if (enc == null) {
       log("lan encrypt failed (bad pairing key); not sending note")
       return
@@ -145,7 +145,7 @@ class LanClient(
   /** Send a batch/delta of mirrored SMS messages to the Mac, E2E-encrypted like a clip. */
   fun sendSms(payload: String) {
     if (payload.isEmpty()) return
-    val enc = ClipCodec.encode(payload, key)
+    val enc = ClipCodec.encode(payload, key, "sms")
     if (enc == null) {
       log("lan encrypt failed (bad pairing key); not sending sms")
       return
@@ -223,11 +223,11 @@ class LanClient(
         log("lan authenticated")
       }
       "clip" -> {
-        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
+        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key, "clip")
         if (decoded != null) onClipReceived(decoded) else log("lan clip decrypt failed")
       }
       "stat" -> {
-        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
+        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key, "stat")
         if (decoded != null) onStatReceived(decoded) else log("lan stat decrypt failed")
       }
       "pong" -> {}

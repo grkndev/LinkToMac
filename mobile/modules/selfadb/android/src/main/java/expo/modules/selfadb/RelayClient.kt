@@ -98,7 +98,7 @@ class RelayClient(
   fun sendClip(text: String) {
     if (text.isEmpty()) return
     // Fail closed: never send plaintext if the pairing key is malformed.
-    val enc = ClipCodec.encode(text, key)
+    val enc = ClipCodec.encode(text, key, "clip")
     if (enc == null) {
       log("encrypt failed (bad pairing key); not sending")
       return
@@ -111,7 +111,7 @@ class RelayClient(
    *  never sees the action; no-op if the socket isn't open or the pairing key is malformed. */
   fun sendCmd(action: String) {
     if (action.isEmpty()) return
-    val enc = ClipCodec.encode(action, key)
+    val enc = ClipCodec.encode(action, key, "cmd")
     if (enc == null) {
       log("encrypt failed (bad pairing key); not sending cmd")
       return
@@ -124,7 +124,7 @@ class RelayClient(
    *  Payload plaintext is `{"level":N,"charging":bool,"name":"…"}`. */
   fun sendStat(payload: String) {
     if (payload.isEmpty()) return
-    val enc = ClipCodec.encode(payload, key)
+    val enc = ClipCodec.encode(payload, key, "stat")
     if (enc == null) {
       log("encrypt failed (bad pairing key); not sending stat")
       return
@@ -137,7 +137,7 @@ class RelayClient(
    *  the notification JSON (see [NotificationListener]). */
   fun sendNote(payload: String) {
     if (payload.isEmpty()) return
-    val enc = ClipCodec.encode(payload, key)
+    val enc = ClipCodec.encode(payload, key, "note")
     if (enc == null) {
       log("encrypt failed (bad pairing key); not sending note")
       return
@@ -150,7 +150,7 @@ class RelayClient(
    *  plaintext is the SMS JSON (see [SmsMirror]). */
   fun sendSms(payload: String) {
     if (payload.isEmpty()) return
-    val enc = ClipCodec.encode(payload, key)
+    val enc = ClipCodec.encode(payload, key, "sms")
     if (enc == null) {
       log("encrypt failed (bad pairing key); not sending sms")
       return
@@ -218,11 +218,11 @@ class RelayClient(
       }
       "error" -> onStatus("error", peerOnline, o.optString("code") + ": " + o.optString("message"), attempt)
       "clip" -> {
-        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
+        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key, "clip")
         if (decoded != null) onClipReceived(decoded) else log("clip decrypt failed (key mismatch or corrupt)")
       }
       "stat" -> {
-        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key)
+        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key, "stat")
         if (decoded != null) onStatReceived(decoded) else log("stat decrypt failed (key mismatch or corrupt)")
       }
       "pong" -> {}

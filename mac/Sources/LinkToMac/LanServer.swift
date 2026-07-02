@@ -250,27 +250,27 @@ final class LanServer: @unchecked Sendable {
         case "clip":
             guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
-                  let text = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
+                  let text = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key, type: "clip") else { return }
             onRemoteClip?(text)
         case "cmd":
             guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
-                  let action = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
+                  let action = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key, type: "cmd") else { return }
             onRemoteCommand?(action)
         case "stat":
             guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
-                  let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
+                  let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key, type: "stat") else { return }
             onRemoteStat?(json)
         case "note":
             guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
-                  let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
+                  let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key, type: "note") else { return }
             onRemoteNote?(json)
         case "sms":
             guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
-                  let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
+                  let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key, type: "sms") else { return }
             onRemoteSms?(json)
         case "ping":
             send(["t": "pong"], on: conn)
@@ -311,7 +311,7 @@ final class LanServer: @unchecked Sendable {
             // `connection` is only ever assigned by verifyAuth, so non-nil implies authed.
             guard let conn = connection, !text.isEmpty,
                   let key = pairingProvider()?.key,
-                  let (nonce, ct) = ClipCodec.encode(text, keyBase64: key) else { return }
+                  let (nonce, ct) = ClipCodec.encode(text, keyBase64: key, type: "clip") else { return }
             send(["t": "clip", "nonce": nonce, "ct": ct], on: conn)
         }
     }
@@ -322,7 +322,7 @@ final class LanServer: @unchecked Sendable {
         queue.async { [self] in
             guard let conn = connection, !payload.isEmpty,
                   let key = pairingProvider()?.key,
-                  let (nonce, ct) = ClipCodec.encode(payload, keyBase64: key) else { return }
+                  let (nonce, ct) = ClipCodec.encode(payload, keyBase64: key, type: "stat") else { return }
             send(["t": "stat", "nonce": nonce, "ct": ct], on: conn)
         }
     }

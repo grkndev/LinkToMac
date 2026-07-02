@@ -229,7 +229,7 @@ final class RelayClient {
     /// pairing key is malformed (fail closed — never fall back to sending plaintext).
     func sendClip(_ text: String) {
         guard !text.isEmpty else { return }
-        guard let (nonce, ct) = ClipCodec.encode(text, keyBase64: pairing.key) else {
+        guard let (nonce, ct) = ClipCodec.encode(text, keyBase64: pairing.key, type: "clip") else {
             log("encrypt failed (bad pairing key); not sending")
             return
         }
@@ -240,7 +240,7 @@ final class RelayClient {
     /// `sendClip`: never falls back to plaintext if the pairing key is malformed.
     func sendStat(_ payload: String) {
         guard !payload.isEmpty else { return }
-        guard let (nonce, ct) = ClipCodec.encode(payload, keyBase64: pairing.key) else {
+        guard let (nonce, ct) = ClipCodec.encode(payload, keyBase64: pairing.key, type: "stat") else {
             log("encrypt failed (bad pairing key); not sending stat")
             return
         }
@@ -664,7 +664,7 @@ final class RelayClient {
         case let .clip(nonce, ct):
             // ChaCha20-Poly1305, keyed by the pairing secret. Drops anything that fails to
             // authenticate (corrupt, tampered, or a key mismatch after a re-pair).
-            if let text = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+            if let text = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "clip") {
                 pasteboard?.write(text)
                 lastClip = text
                 recordClip(text)
@@ -675,28 +675,28 @@ final class RelayClient {
         case let .cmd(nonce, ct):
             // Same AEAD as clips: drop anything that fails to authenticate (corrupt, tampered,
             // a key mismatch after re-pair, or a forged command from a LAN/relay attacker).
-            if let action = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+            if let action = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "cmd") {
                 handleCommand(action)
             } else {
                 log("cmd decrypt failed (key mismatch or corrupt)")
             }
         case let .stat(nonce, ct):
             // Phone telemetry (battery + name). Same AEAD as clips; drop anything unauthenticated.
-            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "stat") {
                 applyPhoneStat(json)
             } else {
                 log("stat decrypt failed (key mismatch or corrupt)")
             }
         case let .note(nonce, ct):
             // A mirrored phone notification. Same AEAD as clips; drop anything unauthenticated.
-            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "note") {
                 applyNotification(json)
             } else {
                 log("note decrypt failed (key mismatch or corrupt)")
             }
         case let .sms(nonce, ct):
             // A mirrored phone SMS batch/delta. Same AEAD as clips; drop anything unauthenticated.
-            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key) {
+            if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "sms") {
                 applySms(json)
             } else {
                 log("sms decrypt failed (key mismatch or corrupt)")
