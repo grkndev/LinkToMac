@@ -90,9 +90,16 @@ class ClipBridge(
   fun write(text: String) {
     val o = JSONObject().put("cmd", "write").put("text", text)
     val o2 = out ?: return
-    synchronized(o2) {
-      o2.write((o.toString() + "\n").toByteArray(StandardCharsets.UTF_8))
-      o2.flush()
+    try {
+      synchronized(o2) {
+        o2.write((o.toString() + "\n").toByteArray(StandardCharsets.UTF_8))
+        o2.flush()
+      }
+    } catch (e: Exception) {
+      // Callers run on the WS receive thread / a JS promise — an IOException here must not
+      // propagate. Drop the stream; the reader loop notices the dead socket and reconnects.
+      out = null
+      onLog("bridge write failed (${e.message})")
     }
   }
 

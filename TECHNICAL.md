@@ -277,16 +277,18 @@ to *launch* (or relaunch) it — never for the steady-state data path.
   `auth` line first (the persisted daemon secret — see §3.3), then reads `clip` lines and
   writes `write` commands. `stop()` closes the socket (an `interrupt()` can't unblock a parked
   `readLine()`), and every exit path closes the per-iteration socket so an abnormal read error
-  can't leak the fd — critical because the daemon's backlog-1 `ServerSocket` means one leaked
-  connection blocks all future bridges.
+  can't leak the fd. The daemon serves connections on **per-connection handler threads with
+  newest-wins eviction**: a freshly authenticated bridge replaces (closes) the previous live
+  connection, so a wedged old connection can never lock a restarted bridge out.
 - **`ClipForegroundService`** owns the bridge, the relay WS client, and the BLE advertiser. It
   runs as a **`START_STICKY` foreground service** with type `specialUse|connectedDevice`
   (Android 14+ requires a declared type). Because it's `START_STICKY`, the system restarts it
   with a null intent after a kill, and `onStartCommand` re-reads persisted config
   (`SharedPreferences`) and reconnects everything **with no JS runtime present**.
-- Echo suppression on the Android side: when a clip arrives from the Mac, the service records
-  it as `lastWritten` and writes it to the device clipboard; the resulting `onClip` from the
-  daemon is recognized and swallowed.
+- Echo suppression on the Android side: when a clip arrives from the Mac, the service stamps
+  it into a **time-bounded recent-writes map** (10 s window, consumed on match — a single slot
+  bounced rapid A-then-B sequences back to the Mac) and writes it to the device clipboard; the
+  resulting `onClip` from the daemon is recognized and swallowed.
 - A `sendPaused` flag gates **outbound** (Mac-bound) forwarding only — inbound clips from the
   Mac still arrive while paused. This backs the *"pause sending from the phone"* setting.
 
@@ -576,10 +578,10 @@ unpair.
 
 1. `PasteboardWatcher` poll sees a new `changeCount`, reads the string.
 2. `RelayClient.sendClip` → `{ t:"clip", … }` → relay → phone.
-3. The Android service records the text as `lastWritten`, writes it through the bridge → the
-   daemon's `setPrimaryClip`. The agent's resulting change event is swallowed via `lastSeen`,
-   and the service's own `onClip` is swallowed via `lastWritten` — **double echo suppression**
-   because the write traverses two echo-producing boundaries.
+3. The Android service stamps the text into its recent-writes map, writes it through the
+   bridge → the daemon's `setPrimaryClip`. The agent's resulting change event is swallowed via
+   `lastSeen`, and the service's own `onClip` is swallowed by the recent-writes stamp —
+   **double echo suppression** because the write traverses two echo-producing boundaries.
 
 Loop prevention is **per-boundary echo stamping** (not the version-vector/seq scheme sketched
 in `workflow.md` — the implementation uses the simpler stamp because the relay never echoes to

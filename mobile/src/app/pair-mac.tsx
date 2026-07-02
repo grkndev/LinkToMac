@@ -22,11 +22,8 @@ import { useRouter } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useM3Colors } from '@/components/m3';
+import { SEED, useM3Colors } from '@/components/m3';
 import { Spacing } from '@/constants/theme';
-
-/** Brand blue (app.json notification color) — seeds the Material 3 palette. Matches Settings. */
-const SEED = '#208AEF';
 
 /** Mac pairing entry: shown when ADB is ready but no Mac has been paired yet. */
 export default function PairMacScreen() {

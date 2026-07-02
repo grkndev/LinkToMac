@@ -1,6 +1,6 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Share, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, ScrollView, Share, Text, View } from 'react-native';
 
 import SelfAdb from '@/features/selfadb/client';
 import { useTheme } from '@/hooks/use-theme';
@@ -25,16 +25,17 @@ function preview(text: string): string {
  * the ground truth for whether the agent is alive and the clip-changed listener is firing.
  */
 export default function LogsScreen() {
+  // Newest-first: index 0 is the latest line, so the list reads top-down with no per-render
+  // reverse and no forced scroll — maintainVisibleContentPosition keeps the reader in place.
   const [lines, setLines] = useState<LogLine[]>([]);
   const [daemonLog, setDaemonLog] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
   const idRef = useRef(0); // monotonic, so every line gets a stable unique key
 
   const append = useCallback((text: string) => {
     setLines((prev) => {
-      const next = prev.length >= MAX_LINES ? prev.slice(prev.length - MAX_LINES + 1) : prev;
-      return [...next, { id: idRef.current++, text }];
+      const next = prev.length >= MAX_LINES ? prev.slice(0, MAX_LINES - 1) : prev;
+      return [{ id: idRef.current++, text }, ...next];
     });
   }, []);
 
@@ -42,7 +43,10 @@ export default function LogsScreen() {
     SelfAdb.getLogs()
       .then((seed) => {
         const texts = seed.length ? seed : ['(no logs yet)'];
-        setLines(texts.map((text) => ({ id: idRef.current++, text })));
+        const seedLines = texts.map((text) => ({ id: idRef.current++, text })).reverse();
+        // Functional merge: live events that arrived while getLogs() was in flight are newer
+        // than the snapshot — keep them in front instead of overwriting them away.
+        setLines((prev) => (prev.length ? [...prev, ...seedLines] : seedLines));
       })
       .catch(() => {});
 
@@ -79,7 +83,7 @@ export default function LogsScreen() {
   const shareAll = useCallback(() => {
     const body = [
       '=== Application Logs ===',
-      ...lines.map((l) => l.text),
+      ...[...lines].reverse().map((l) => l.text), // chronological for sharing
       ...(daemonLog ? ['', '=== Device (daemon) Log ===', daemonLog] : []),
     ].join('\n');
     Share.share({ message: body }).catch(() => {});
@@ -111,19 +115,20 @@ export default function LogsScreen() {
         </View>
       ) : null}
 
-      <ScrollView
-        ref={scrollRef}
+      <FlatList
+        data={lines}
+        keyExtractor={(line) => String(line.id)}
         className="flex-1 rounded-2xl"
         contentContainerClassName="gap-0.5 p-4"
-        onContentSizeChange={() => scrollRef.current?.scrollTo({ y: 0, animated: false })}>
-        {[...lines].reverse().map((line) => (
+        // Pinned to the newest line while at the top; stable (no jump) while reading older lines.
+        maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 16 }}
+        renderItem={({ item }) => (
           <Text
-            key={line.id}
-            className={`font-[monospace] text-[11px] font-medium leading-4 ${lineClass(line.text)}`}>
-            {line.text}
+            className={`font-[monospace] text-[11px] font-medium leading-4 ${lineClass(item.text)}`}>
+            {item.text}
           </Text>
-        ))}
-      </ScrollView>
+        )}
+      />
     </View>
   );
 }

@@ -127,11 +127,11 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openDownload = useCallback(() => {
-    setUpdate((u) => {
-      if (u?.kind === 'native') Linking.openURL(u.url).catch(() => {});
-      return null;
-    });
-  }, []);
+    // Side effect OUTSIDE the setState updater: React may invoke updaters twice (StrictMode),
+    // which double-opened the download.
+    if (update?.kind === 'native') Linking.openURL(update.url).catch(() => {});
+    setUpdate(null);
+  }, [update]);
 
   const dismiss = useCallback(() => setUpdate(null), []);
 

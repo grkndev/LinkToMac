@@ -54,6 +54,9 @@ class LanClient(
   private var authed = false
   private var attempt = 0
   private var reconnectFuture: ScheduledFuture<*>? = null
+  /** Deadline for the hello/auth/ready handshake — a TCP-connected but silent Mac must not
+   *  wedge us in "connected" forever (it blocks the LAN/relay arbiter from falling back). */
+  private var authDeadline: ScheduledFuture<*>? = null
 
   fun start() {
     if (running) return
@@ -83,6 +86,12 @@ class LanClient(
 
   fun shutdown() {
     stop()
+    // Full OkHttp teardown (mirrors RelayClient): dispatcher + connection pool would
+    // otherwise linger after every Wi-Fi/host cycle.
+    post {
+      http.dispatcher.executorService.shutdown()
+      http.connectionPool.evictAll()
+    }
     exec.shutdown()
   }
 
@@ -151,6 +160,21 @@ class LanClient(
     onStatus("connecting", false, null, attempt)
     val request = Request.Builder().url(url).build()
     ws = http.newWebSocket(request, listener)
+    armAuthDeadline()
+  }
+
+  private fun armAuthDeadline() {
+    authDeadline?.cancel(false)
+    authDeadline = try {
+      exec.schedule({
+        if (running && !authed) {
+          ws?.cancel() // hard-close; the late onFailure callback no-ops against the pending reconnect
+          fail("auth timeout (no ready within 7s)")
+        }
+      }, 7, TimeUnit.SECONDS)
+    } catch (e: RejectedExecutionException) {
+      null
+    }
   }
 
   private val listener = object : WebSocketListener() {
@@ -193,6 +217,8 @@ class LanClient(
       "ready" -> {
         attempt = 0
         authed = true
+        authDeadline?.cancel(false)
+        authDeadline = null
         onStatus("joined", true, null, 0)
         log("lan authenticated")
       }
@@ -225,6 +251,8 @@ class LanClient(
     log("lan $reason")
     ws = null
     authed = false
+    authDeadline?.cancel(false)
+    authDeadline = null
     if (!running) return
     val pending = reconnectFuture
     if (pending != null && !pending.isDone) return

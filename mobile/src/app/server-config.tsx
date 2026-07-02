@@ -80,6 +80,9 @@ export default function ServerConfigScreen() {
         ...(server?.certFingerprint ? { certFingerprint: server.certFingerprint } : {}),
       });
       router.back();
+    } catch (e: any) {
+      // A SecureStore/native reject used to vanish silently, leaving the screen stuck.
+      Alert.alert('Save failed', e?.message ?? 'Could not save the server settings. Try again.');
     } finally {
       setSaving(false);
     }

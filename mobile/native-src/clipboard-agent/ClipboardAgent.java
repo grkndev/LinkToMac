@@ -46,10 +46,12 @@ public class ClipboardAgent {
 
     static final String PKG = "com.android.shell";
     static volatile String lastSeen = null;
-    static Object svc; // IClipboard
+    static volatile Object svc; // IClipboard; volatile + DCL — raced by the startup threads
+    static final Object svcLock = new Object();
 
-    // single connected app client
+    // single connected app client (newest-wins: a fresh authenticated connection evicts the old)
     static volatile OutputStream out;
+    static volatile Socket liveClient;
     static final Object outLock = new Object();
 
     // Bounded in-memory copy of this process's log, served to the app over the bridge on
@@ -62,13 +64,20 @@ public class ClipboardAgent {
     // IClipboard reflection (unchanged core from the original proof)
     // ---------------------------------------------------------------------
     static Object svc() throws Exception {
-        if (svc == null) {
-            Class<?> sm = Class.forName("android.os.ServiceManager");
-            IBinder b = (IBinder) sm.getMethod("getService", String.class).invoke(null, "clipboard");
-            Class<?> stub = Class.forName("android.content.IClipboard$Stub");
-            svc = stub.getMethod("asInterface", IBinder.class).invoke(null, b);
+        Object local = svc;
+        if (local == null) {
+            synchronized (svcLock) {
+                local = svc;
+                if (local == null) {
+                    Class<?> sm = Class.forName("android.os.ServiceManager");
+                    IBinder b = (IBinder) sm.getMethod("getService", String.class).invoke(null, "clipboard");
+                    Class<?> stub = Class.forName("android.content.IClipboard$Stub");
+                    local = stub.getMethod("asInterface", IBinder.class).invoke(null, b);
+                    svc = local;
+                }
+            }
         }
-        return svc;
+        return local;
     }
 
     static Method find(String name) throws Exception {
@@ -145,9 +154,14 @@ public class ClipboardAgent {
             JSONObject o = new JSONObject(line);
             String cmd = o.optString("cmd");
             if ("write".equals(cmd)) {
+                if (!o.has("text")) {
+                    log("write ignored (no text field)"); // optString would silently CLEAR the clipboard
+                    return;
+                }
                 String text = o.optString("text");
-                lastSeen = text;       // suppress echo of our own write
                 write(text);
+                lastSeen = text;       // stamp only after a successful write, or a throw
+                                       // leaves a stale stamp that mis-suppresses a real copy
                 log("wrote from app");
             } else if ("log".equals(cmd)) {
                 sendLog();
@@ -204,62 +218,113 @@ public class ClipboardAgent {
         }
     }
 
+    /**
+     * Accept loop: every inbound connection gets its own handler thread, and a newly
+     * AUTHENTICATED connection evicts the previous live one (newest-wins). The old
+     * single-threaded design let one stuck authenticated socket block accept() forever —
+     * a restarted bridge could never get back in without a daemon restart. A post-auth read
+     * timeout is not an option (idle-with-no-clips is normal), so eviction is the fix.
+     */
     static void serve(int port, String secret) throws Exception {
         ServerSocket server = new ServerSocket(port, 1, InetAddress.getByName("127.0.0.1"));
-        log("listening 127.0.0.1:" + port + (secret != null ? " (auth required)" : ""));
-        while (true) {
-            Socket s = server.accept();
-            log("client connected");
+        try {
+            log("listening 127.0.0.1:" + port + (secret != null ? " (auth required)" : ""));
+            while (true) {
+                final Socket s = server.accept();
+                log("client connected");
+                Thread t = new Thread(() -> handleClient(s, secret), "clip-client");
+                t.setDaemon(true);
+                t.start();
+            }
+        } finally {
+            // A fatal accept error must release the port, or it stays bound (unusable,
+            // yet probe()-able as "alive") until the process dies.
             try {
-                BufferedReader r = new BufferedReader(
-                        new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
-                // Auth gate BEFORE anything is served (no `out`, no initial clip sync). The
-                // read timeout also stops a silent client from camping the single slot.
-                if (secret != null) {
-                    s.setSoTimeout(5000);
-                    String first = r.readLine();
-                    if (first == null || !authOk(first, secret)) {
-                        log("client rejected (bad or missing auth)");
-                        continue; // finally closes the socket, loop re-accepts
-                    }
-                    s.setSoTimeout(0);
-                    log("client authenticated");
-                }
-                synchronized (outLock) {
-                    out = s.getOutputStream();
-                }
-                // send current clipboard once on connect (initial sync)
-                try {
-                    CharSequence cur = read();
-                    if (cur != null) {
-                        lastSeen = cur.toString();
-                        emitClip(cur.toString());
-                    }
-                } catch (Exception ignored) {
-                }
-                // reader loop for this connection
-                String line;
-                while ((line = r.readLine()) != null) {
-                    handleCommand(line);
-                }
-            } catch (Exception e) {
-                log("client read end: " + e.getMessage());
-            } finally {
-                synchronized (outLock) {
-                    out = null;
-                }
-                try {
-                    s.close();
-                } catch (Exception ignored) {
-                }
-                log("client disconnected");
+                server.close();
+            } catch (Exception ignored) {
             }
         }
     }
 
+    static void handleClient(Socket s, String secret) {
+        try {
+            BufferedReader r = new BufferedReader(
+                    new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+            // Auth gate BEFORE anything is served (no `out`, no initial clip sync). The
+            // read timeout stops a silent client from tying up a handler thread.
+            if (secret != null) {
+                s.setSoTimeout(5000);
+                String first = r.readLine();
+                if (first == null || !authOk(first, secret)) {
+                    log("client rejected (bad or missing auth)");
+                    return; // finally closes the socket
+                }
+                s.setSoTimeout(0);
+                log("client authenticated");
+            }
+            // Newest-wins: become the live client; closing the old socket unblocks its
+            // handler's readLine() so that thread unwinds on its own.
+            Socket old;
+            synchronized (outLock) {
+                old = liveClient;
+                liveClient = s;
+                out = s.getOutputStream();
+            }
+            if (old != null && old != s) {
+                log("replacing previous client");
+                try {
+                    old.close();
+                } catch (Exception ignored) {
+                }
+            }
+            // send current clipboard once on connect (initial sync)
+            try {
+                CharSequence cur = read();
+                if (cur != null) {
+                    lastSeen = cur.toString();
+                    emitClip(cur.toString());
+                }
+            } catch (Exception ignored) {
+            }
+            // reader loop for this connection
+            String line;
+            while ((line = r.readLine()) != null) {
+                handleCommand(line);
+            }
+        } catch (Exception e) {
+            log("client read end: " + e.getMessage());
+        } finally {
+            synchronized (outLock) {
+                if (liveClient == s) { // an evicted client must not null the successor's `out`
+                    liveClient = null;
+                    out = null;
+                }
+            }
+            try {
+                s.close();
+            } catch (Exception ignored) {
+            }
+            log("client disconnected");
+        }
+    }
+
     // ---------------------------------------------------------------------
+    /** Parse the port arg defensively — a malformed value must not kill the daemon pre-bind. */
+    static int parsePort(String[] x) {
+        if (x.length > 0) {
+            try {
+                int p = Integer.parseInt(x[0]);
+                if (p >= 1 && p <= 65535) {
+                    return p;
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 53123;
+    }
+
     public static void main(String[] x) throws Exception {
-        final int port = (x.length > 0) ? Integer.parseInt(x[0]) : 53123;
+        final int port = parsePort(x);
         // Bridge-auth secret (never logged). Absent -> legacy open mode, for a stale launcher.
         final String secret = (x.length > 1 && !x[1].isEmpty()) ? x[1] : null;
         Looper.prepareMainLooper();

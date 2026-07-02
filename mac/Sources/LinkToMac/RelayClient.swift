@@ -51,9 +51,10 @@ final class RelayClient {
     private(set) var phoneName: String?
 
     /// One mirrored phone notification. `key` is the Android `sbn.key` — stable across an update of
-    /// the same notification, so it drives dedup/update/removal. `id` lets SwiftUI lists diff stably.
+    /// the same notification, so it drives dedup/update/removal AND the SwiftUI identity: a fresh
+    /// `UUID()` per upsert made every in-place update diff as delete+insert (row rebuilt, state lost).
     struct NotificationEntry: Identifiable {
-        let id = UUID()
+        var id: String { key }
         let key: String
         let pkg: String
         let app: String
@@ -102,15 +103,25 @@ final class RelayClient {
     private(set) var messages: [MessageEntry] = []
     private static let messagesCap = 500
 
-    /// Messages grouped into conversations, newest activity first. Computed from `messages`.
-    var conversations: [Conversation] {
-        Dictionary(grouping: messages, by: { $0.threadKey }).map { key, msgs in
+    /// Messages grouped into conversations, newest activity first. Rebuilt eagerly on every
+    /// `messages` mutation — as a computed property it re-grouped and re-sorted up to 500
+    /// messages on every FeaturePanel body evaluation.
+    private(set) var conversations: [Conversation] = []
+
+    private func rebuildConversations() {
+        conversations = Dictionary(grouping: messages, by: { $0.threadKey }).map { key, msgs in
             let sorted = msgs.sorted { $0.date < $1.date }
             // Prefer a contact-name label if any message in the thread resolved one.
             let display = sorted.last(where: { $0.name?.isEmpty == false })?.display ?? sorted[sorted.count - 1].display
             return Conversation(id: key, display: display, messages: sorted)
         }
         .sorted { $0.latest.date > $1.latest.date }
+    }
+
+    /// Strip formatting noise from a phone-number address so the thread fallback key is stable.
+    private static func normalizeAddr(_ addr: String) -> String {
+        let stripped = addr.filter { !$0.isWhitespace && !"-().".contains($0) }
+        return stripped.isEmpty ? addr : stripped
     }
 
     /// Whether an inbound notification also raises a native macOS banner (the dashboard tab is always
@@ -314,7 +325,10 @@ final class RelayClient {
 
     func clearNotifications() { notifications.removeAll() }
 
-    func clearMessages() { messages.removeAll() }
+    func clearMessages() {
+        messages.removeAll()
+        rebuildConversations()
+    }
 
     /// Append a received clip to the in-memory history (newest first, capped, skip consecutive dupes).
     private func recordClip(_ text: String) {
@@ -416,7 +430,9 @@ final class RelayClient {
         guard let payload = Self.decodeSms(json) else { log("sms parse failed"); return }
         for m in payload.msgs {
             let threadKey: String
-            if let t = m.thread, t > 0 { threadKey = "t\(t)" } else { threadKey = m.addr }
+            // The addr fallback must be normalized: "+90 555 123 45 67" and "+905551234567" are
+            // the same correspondent and must not split one conversation into two threads.
+            if let t = m.thread, t > 0 { threadKey = "t\(t)" } else { threadKey = Self.normalizeAddr(m.addr) }
             let entry = MessageEntry(
                 id: m.id,
                 threadKey: threadKey,
@@ -437,6 +453,7 @@ final class RelayClient {
             messages.sort { $0.date > $1.date }
             messages.removeLast(messages.count - Self.messagesCap)
         }
+        rebuildConversations()
         log("sms: +\(payload.msgs.count) (\(messages.count) total)")
     }
 
@@ -485,6 +502,7 @@ final class RelayClient {
         clipHistory.removeAll()
         notifications.removeAll()
         messages.removeAll()
+        rebuildConversations()
         iconCache.removeAll()
         phoneBatteryLevel = nil
         phoneCharging = nil

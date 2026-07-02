@@ -18,10 +18,17 @@ export function useClipHistory(): { items: ClipItem[] | null; clear: () => void 
     let cancelled = false;
     SelfAdb.getClipHistory()
       .then((seed) => {
-        if (!cancelled) setItems(seed);
+        if (cancelled) return;
+        // Functional merge: a Mac clip that arrived while the fetch was in flight was already
+        // prepended by the listener — keep it in front of the seed instead of overwriting it.
+        setItems((prev) => {
+          if (!prev?.length) return seed;
+          const seen = new Set(prev.map((i) => `${i.ts}:${i.text}`));
+          return [...prev, ...seed.filter((i) => !seen.has(`${i.ts}:${i.text}`))];
+        });
       })
       .catch(() => {
-        if (!cancelled) setItems([]);
+        if (!cancelled) setItems((prev) => prev ?? []);
       });
 
     const sub = SelfAdb.addListener('onMacClip', (e) =>

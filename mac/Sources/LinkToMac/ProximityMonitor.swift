@@ -158,11 +158,18 @@ final class ProximityMonitor: NSObject {
     }
 
     private func beginScan() {
-        guard enabled, let central, central.state == .poweredOn, let serviceUUID else { return }
+        guard enabled, let central, central.state == .poweredOn else { return }
+        // Stop + reset BEFORE the serviceUUID guard: after an unpair the UUID is gone, and
+        // bailing out first kept the old scan running against the abandoned room — stale
+        // RSSI could then drive a spurious auto-lock.
         central.stopScan()
         lastStrong = nil
         smoothedRSSI = nil
         armed = false
+        guard let serviceUUID else {
+            presence = .disabled
+            return
+        }
         presence = .unseen
         central.scanForPeripherals(
             withServices: [serviceUUID],

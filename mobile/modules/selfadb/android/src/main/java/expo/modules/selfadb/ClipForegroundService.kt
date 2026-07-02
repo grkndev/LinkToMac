@@ -14,6 +14,7 @@ import android.content.pm.ServiceInfo
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
 import expo.modules.selfadb.R
@@ -42,8 +43,31 @@ class ClipForegroundService : Service() {
    *  only when the user enabled message mirroring AND granted READ_SMS. */
   private var sms: SmsMirror? = null
 
-  /** Last text we wrote to the device clipboard; its echo `onClip` is swallowed. */
-  @Volatile private var lastWritten: String? = null
+  /** Texts we recently wrote to the device clipboard, each stamped; their daemon echoes are
+   *  swallowed. A time-bounded MAP (not a single slot): rapid Mac→phone clips A then B used to
+   *  overwrite the slot with B before A's echo arrived, bouncing A back to the Mac as a fresh
+   *  clip. Entries are consumed on match and pruned after [ECHO_WINDOW_MS]. */
+  private val recentWrites = LinkedHashMap<String, Long>()
+
+  private fun stampWrite(text: String) {
+    synchronized(recentWrites) {
+      pruneWritesLocked()
+      recentWrites[text] = SystemClock.elapsedRealtime()
+    }
+  }
+
+  /** True (and consumes the stamp) when [text] is the echo of one of our own recent writes. */
+  private fun consumeEcho(text: String): Boolean {
+    synchronized(recentWrites) {
+      pruneWritesLocked()
+      return recentWrites.remove(text) != null
+    }
+  }
+
+  private fun pruneWritesLocked() {
+    val cutoff = SystemClock.elapsedRealtime() - ECHO_WINDOW_MS
+    recentWrites.entries.removeAll { it.value < cutoff }
+  }
 
   /** Outbound gate: when true, captured clips are NOT forwarded to the Mac (inbound still
    *  works). Seeded from PREFS_UI in onStartCommand so a START_STICKY restart with no JS
@@ -81,8 +105,8 @@ class ClipForegroundService : Service() {
         port = port,
         secret = daemonSecret,
         onClip = { text, ts ->
-          if (text == lastWritten) {
-            lastWritten = null // echo of our own write -> swallow
+          if (consumeEcho(text)) {
+            // echo of our own recent write -> swallow
           } else {
             ClipBus.log("clip: ${text.take(60)}")
             ClipBus.clip(text, ts)
@@ -213,7 +237,7 @@ class ClipForegroundService : Service() {
       lanPort = lanPort,
       lanHost = lanHost,
       onClipReceived = { text ->
-        lastWritten = text
+        stampWrite(text)
         bridge?.write(text)
         ClipBus.macClip(text, System.currentTimeMillis().toDouble())
         ClipBus.log("clip -> clipboard (${text.length})")
@@ -479,6 +503,8 @@ class ClipForegroundService : Service() {
     private const val KEY_SMS_FORWARDING = "smsForwarding"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     private const val KEY_DAEMON_SECRET = "daemonSecret"
+    /** How long a write stamp lives before it can no longer suppress an echo. */
+    private const val ECHO_WINDOW_MS = 10_000L
     const val DEFAULT_PORT = 53123
 
     /** The bridge-auth secret the daemon was launched with (null = never launched an

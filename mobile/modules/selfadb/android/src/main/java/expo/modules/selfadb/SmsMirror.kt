@@ -11,6 +11,7 @@ import android.util.LruCache
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * Reads this phone's SMS store and forwards it to the Mac over the E2E `sms` channel, so the Mac
@@ -38,8 +39,10 @@ class SmsMirror(
 ) {
   private val resolver = context.applicationContext.contentResolver
 
-  /** Heavy work (provider queries, contact lookups, JSON build) off the observer/caller thread. */
-  private val worker = Executors.newSingleThreadExecutor()
+  /** Heavy work (provider queries, contact lookups, JSON build) off the observer/caller thread.
+   *  Recreated by [start] after a [stop] — callers happen to reconstruct the whole object today,
+   *  but a reused instance must not silently drop work on a dead executor. */
+  private var worker = Executors.newSingleThreadExecutor()
 
   /** Contact display names keyed by address, resolved once per number (PhoneLookup isn't free).
    *  Negative lookups are cached as "" so we don't re-query numbers with no contact. */
@@ -58,6 +61,7 @@ class SmsMirror(
 
   fun start() {
     if (observer != null) return
+    if (worker.isShutdown) worker = Executors.newSingleThreadExecutor()
     val thread = HandlerThread("sms-observer").also { it.start() }
     observerThread = thread
     val obs = object : ContentObserver(Handler(thread.looper)) {
@@ -80,11 +84,21 @@ class SmsMirror(
     worker.shutdown()
   }
 
+  /** Run on the worker, dropping the task if [stop] already shut it down (a late observer
+   *  callback racing stop() must not crash the observer thread). */
+  private fun post(task: Runnable) {
+    try {
+      worker.execute(task)
+    } catch (e: RejectedExecutionException) {
+      // stopped; late work intentionally dropped
+    }
+  }
+
   /** Push the most recent [BACKFILL_LIMIT] messages as `op:"batch"` chunks (newest-first). */
   fun backfill() {
-    worker.execute {
+    post {
       val rows = query(null, null, "${Telephony.Sms.DATE} DESC LIMIT $BACKFILL_LIMIT")
-      if (rows.isEmpty()) { log("sms backfill: none"); return@execute }
+      if (rows.isEmpty()) { log("sms backfill: none"); return@post }
       lastMaxId = maxOf(lastMaxId, rows.maxOf { it.id })
       rows.chunked(CHUNK).forEach { emit("batch", it) }
       log("sms backfill: ${rows.size} msgs")
@@ -93,16 +107,16 @@ class SmsMirror(
 
   /** Query rows newer than [lastMaxId] and push them as an `op:"add"` delta. */
   private fun pushNew() {
-    worker.execute {
+    post {
       if (lastMaxId < 0) {
         // No baseline yet (observer fired before the first backfill). Set one without emitting;
         // the peer-online backfill sends the full recent history.
         val newest = query(null, null, "${Telephony.Sms._ID} DESC LIMIT 1")
         if (newest.isNotEmpty()) lastMaxId = newest.first().id
-        return@execute
+        return@post
       }
       val rows = query("${Telephony.Sms._ID} > ?", arrayOf(lastMaxId.toString()), "${Telephony.Sms._ID} ASC")
-      if (rows.isEmpty()) return@execute
+      if (rows.isEmpty()) return@post
       lastMaxId = maxOf(lastMaxId, rows.maxOf { it.id })
       rows.chunked(CHUNK).forEach { emit("add", it) }
       log("sms delta: ${rows.size} new")

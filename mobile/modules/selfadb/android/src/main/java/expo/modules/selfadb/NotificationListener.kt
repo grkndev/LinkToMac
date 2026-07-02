@@ -14,6 +14,7 @@ import android.util.LruCache
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * Mirrors device notifications to the Mac. A system-bound [NotificationListenerService] — it needs
@@ -36,6 +37,18 @@ class NotificationListener : NotificationListenerService() {
   /** Heavy work (icon decode/scale/encode, app-label lookup) runs off the binder callback thread
    *  to keep the listener responsive — system callbacks arrive on the main thread. */
   private val worker = Executors.newSingleThreadExecutor()
+
+  /** Run on the worker, dropping the task after [onDestroy] — the system can still deliver
+   *  binder callbacks during teardown, and an unguarded execute() would throw
+   *  [RejectedExecutionException] on the binder thread. */
+  private fun post(task: Runnable) {
+    if (worker.isShutdown) return
+    try {
+      worker.execute(task)
+    } catch (e: RejectedExecutionException) {
+      // shutting down; late notification intentionally dropped
+    }
+  }
 
   /** base64-PNG app icons keyed by package, so we encode each app's icon once, not per notification.
    *  ~64 entries × ~10 KB ≈ tolerable; evicted LRU. */
@@ -76,7 +89,7 @@ class NotificationListener : NotificationListenerService() {
     val key = sbn.key
     val time = sbn.postTime
     val category = n.category
-    worker.execute {
+    post {
       val json = JSONObject()
         .put("op", "post")
         .put("key", key)
@@ -101,7 +114,7 @@ class NotificationListener : NotificationListenerService() {
     if (!ClipForegroundService.getNotificationForwarding(this)) return
     if (sbn.packageName == packageName) return
     val key = sbn.key
-    worker.execute {
+    post {
       val json = JSONObject().put("op", "remove").put("key", key)
       ClipForegroundService.instance?.sendNote(json.toString())
     }

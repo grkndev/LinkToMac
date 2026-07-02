@@ -85,6 +85,13 @@ class RelayClient(
 
   fun shutdown() {
     stop()
+    // Full OkHttp teardown: exec.shutdown() alone leaves the dispatcher + connection-pool
+    // threads lingering after every setRelay/Wi-Fi cycle. Queued after stop()'s task so the
+    // socket closes gracefully first; exec.shutdown() still drains already-queued tasks.
+    post {
+      http.dispatcher.executorService.shutdown()
+      http.connectionPool.evictAll()
+    }
     exec.shutdown()
   }
 

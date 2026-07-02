@@ -75,6 +75,9 @@ final class LanServer: @unchecked Sendable {
             pending?.cancel()
             pending = nil
             pendingChallenge = nil
+            // Report the disconnect before nil'ing: cancel()'s .cancelled callback runs after
+            // `connection` is already nil, so dropIfCurrent can't fire onPeerChange for us.
+            if connection != nil { onPeerChange?(false) }
             connection?.cancel()
             connection = nil
             listener?.cancel()
@@ -89,6 +92,7 @@ final class LanServer: @unchecked Sendable {
             pending?.cancel()
             pending = nil
             pendingChallenge = nil
+            if connection != nil { onPeerChange?(false) }
             connection?.cancel()
             connection = nil
             listener?.cancel()
@@ -105,7 +109,10 @@ final class LanServer: @unchecked Sendable {
 
         guard let nwPort = NWEndpoint.Port(rawValue: port),
               let listener = try? NWListener(using: params, on: nwPort) else {
-            log("failed to create listener on :\(port)")
+            // Port busy (stale process, quick relaunch) used to leave LAN dead until app
+            // restart — `running` stayed true so start()'s guard blocked any retry.
+            log("failed to create listener on :\(port); retrying in 3s")
+            scheduleListenerRetry()
             return
         }
         listener.service = NWListener.Service(
@@ -113,9 +120,17 @@ final class LanServer: @unchecked Sendable {
             txtRecord: txtRecord()
         )
         listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
             switch state {
-            case .ready: self?.log("listening on :\(self?.port ?? 0), advertising \(LanServer.serviceType)")
-            case let .failed(error): self?.log("listener failed: \(error)")
+            case .ready:
+                self.log("listening on :\(self.port), advertising \(LanServer.serviceType)")
+            case let .failed(error):
+                self.log("listener failed: \(error)")
+                if self.listener === listener {
+                    listener.cancel()
+                    self.listener = nil
+                    self.scheduleListenerRetry()
+                }
             default: break
             }
         }
@@ -124,6 +139,14 @@ final class LanServer: @unchecked Sendable {
         }
         listener.start(queue: queue)
         self.listener = listener
+    }
+
+    /// Rebuild the listener shortly after a creation failure / `.failed`, while still running.
+    private func scheduleListenerRetry() {
+        queue.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, self.running, self.listener == nil else { return }
+            self.startListener()
+        }
     }
 
     /// Bonjour TXT: `rid` lets the phone pick *its* paired Mac on a multi-Mac LAN; `name` is shown in UI.
@@ -181,7 +204,13 @@ final class LanServer: @unchecked Sendable {
     private func sendHello(_ conn: NWConnection) {
         guard conn === pending else { return }
         var nonce = Data(count: 16)
-        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let status = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        guard status == errSecSuccess else {
+            // Never challenge with a predictable (all-zero) nonce — drop the connection instead.
+            log("SecRandomCopyBytes failed (\(status)); refusing connection")
+            conn.cancel()
+            return
+        }
         pendingChallenge = nonce
         send(["t": "hello", "nonce": nonce.base64EncodedString()], on: conn)
         // A peer that never answers the challenge must not camp in the pending slot.

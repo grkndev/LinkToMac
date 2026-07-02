@@ -15,7 +15,10 @@ android {
   compileSdk 35
 
   defaultConfig {
-    minSdk 24
+    // 30 is the real floor: wireless ADB pairing (the whole self-ADB pipeline) needs
+    // Android 11, and ClipCodec's ChaCha20-Poly1305 JCA cipher needs API 28+ anyway.
+    // Declaring lower just ships an install that can never work (crypto fails closed).
+    minSdk 30
     targetSdk 34
   }
 

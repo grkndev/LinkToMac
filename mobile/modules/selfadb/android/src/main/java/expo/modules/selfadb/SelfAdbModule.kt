@@ -119,8 +119,8 @@ class SelfAdbModule : Module() {
       }
       // 3. Paired but daemon dead (typical after reboot). Bring wireless
       //    debugging up ourselves if we hold the permission, then mDNS-connect.
+      val canToggle = hasSecureSettings()
       try {
-        val canToggle = hasSecureSettings()
         if (canToggle) {
           log("self-enabling wireless debugging")
           setWifiDebug(true)
@@ -157,7 +157,6 @@ class SelfAdbModule : Module() {
           log("grant for future silent reconnects: " + adb.grantSecureSettings(appCtx.packageName))
         }
         deploy(clipPort)
-        if (canToggle) setWifiDebug(false) // detached daemon survives; minimise surface
         status("connected", "running")
         "ready"
       } catch (e: DaemonNotStartedException) {
@@ -174,6 +173,11 @@ class SelfAdbModule : Module() {
         log("adbd requires re-pairing -> need-pair (${e.message})")
         status("failed", "idle")
         "need-pair"
+      } finally {
+        // Every exit — happy, need-connect, throw — turns Wireless Debugging back off if we
+        // turned it on (the detached daemon survives; leaving adbd listening after an error
+        // path was a needless open surface). Mirrors readDaemonLog's try/finally.
+        if (canToggle) setWifiDebug(false)
       }
     }
 

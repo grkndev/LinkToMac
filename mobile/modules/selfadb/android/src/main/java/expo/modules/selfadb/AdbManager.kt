@@ -47,7 +47,8 @@ class AdbManager(private val context: Context) {
 
   private val manager: AbsAdbConnectionManager by lazy { Manager(context) }
 
-  fun isPaired(): Boolean = File(context.filesDir, KEY_FILE).exists()
+  fun isPaired(): Boolean =
+    File(context.filesDir, KEY_FILE).exists() && File(context.filesDir, PUB_FILE).exists()
 
   fun pair(host: String, port: Int, code: String): Boolean =
     manager.pair(host, port, code)
@@ -177,10 +178,18 @@ class AdbManager(private val context: Context) {
 
     val push = manager.openStream("exec:cat > $devicePath")
     log("exec stream opened, writing...")
-    val os = push.openOutputStream()
-    os.write(bytes)
-    os.flush()
-    push.close() // adb CLSE -> remote `cat` sees EOF and writes the file
+    try {
+      val os = push.openOutputStream()
+      os.write(bytes)
+      os.flush()
+    } finally {
+      // Happy path: adb CLSE -> remote `cat` sees EOF and writes the file.
+      // Failure path: without this the exec stream leaks on a write error.
+      try {
+        push.close()
+      } catch (_: Exception) {
+      }
+    }
     log("write done, EOF sent")
 
     // verify + fix perms on a separate stream that completes quickly
@@ -234,13 +243,24 @@ class AdbManager(private val context: Context) {
     private fun loadOrCreateKeyPair(context: Context): KeyPair {
       val priv = File(context.filesDir, KEY_FILE)
       val pub = File(context.filesDir, PUB_FILE)
+      val cert = File(context.filesDir, CERT_FILE)
       if (priv.exists() && pub.exists()) {
-        val kf = KeyFactory.getInstance("RSA")
-        return KeyPair(
-          kf.generatePublic(X509EncodedKeySpec(pub.readBytes())),
-          kf.generatePrivate(PKCS8EncodedKeySpec(priv.readBytes()))
-        )
+        try {
+          val kf = KeyFactory.getInstance("RSA")
+          return KeyPair(
+            kf.generatePublic(X509EncodedKeySpec(pub.readBytes())),
+            kf.generatePrivate(PKCS8EncodedKeySpec(priv.readBytes()))
+          )
+        } catch (e: Exception) {
+          // corrupt key material -> regenerate the whole identity below
+        }
       }
+      // Key + cert are ONE identity unit: a fresh key invalidates any existing cert (it was
+      // signed for the old public key, and adbd would present a mismatched identity while
+      // isPaired() still says "paired"). Drop all three, then regenerate key + (lazily) cert.
+      priv.delete()
+      pub.delete()
+      cert.delete()
       val gen = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }
       val kp = gen.generateKeyPair()
       priv.writeBytes(kp.private.encoded)
@@ -251,8 +271,12 @@ class AdbManager(private val context: Context) {
     private fun loadOrCreateCertificate(context: Context, kp: KeyPair): Certificate {
       val certFile = File(context.filesDir, CERT_FILE)
       if (certFile.exists()) {
-        return certFile.inputStream().use {
-          CertificateFactory.getInstance("X.509").generateCertificate(it)
+        try {
+          return certFile.inputStream().use {
+            CertificateFactory.getInstance("X.509").generateCertificate(it)
+          }
+        } catch (e: Exception) {
+          certFile.delete() // corrupt -> rebuild below for the current key
         }
       }
       val cert = generateSelfSigned(kp)

@@ -88,9 +88,15 @@ export function PairingProvider({ children }: { children: ReactNode }) {
     setPausedState(false);
   }, []);
 
-  const setPaused = useCallback((next: boolean) => {
+  const setPaused = useCallback(async (next: boolean) => {
+    // Optimistic flip for a snappy toggle, but roll back if the native gate rejects —
+    // otherwise the UI shows "paused" while clips keep flowing (or vice versa) until relaunch.
     setPausedState(next);
-    SelfAdb.relaySetPaused(next).catch(() => {});
+    try {
+      await SelfAdb.relaySetPaused(next);
+    } catch {
+      setPausedState(!next);
+    }
   }, []);
 
   const value = useMemo(

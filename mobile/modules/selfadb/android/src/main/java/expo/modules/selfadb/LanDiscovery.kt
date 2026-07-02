@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import java.security.MessageDigest
 import java.util.ArrayDeque
@@ -34,6 +36,9 @@ class LanDiscovery(
   @Volatile private var running = false
   private val pending = ArrayDeque<NsdServiceInfo>()
   private var resolving = false
+  /** Bumped per resolveService call; the watchdog only clears the resolve it armed for. */
+  private var resolveGen = 0
+  private val watchdog = Handler(Looper.getMainLooper())
 
   fun start() {
     if (running) return
@@ -90,10 +95,23 @@ class LanDiscovery(
   private fun resolveNext() {
     if (resolving || pending.isEmpty() || !running) return
     resolving = true
+    val gen = ++resolveGen
     val info = pending.poll()
     try {
       nsd.resolveService(info, resolveListener)
+      // NsdManager resolve callbacks can simply never fire (framework flakiness); without a
+      // watchdog `resolving` stays true forever and every later resolve stalls behind it.
+      watchdog.postDelayed({ onResolveTimeout(gen) }, RESOLVE_TIMEOUT_MS)
     } catch (e: Exception) {
+      resolving = false
+      resolveNext()
+    }
+  }
+
+  @Synchronized
+  private fun onResolveTimeout(gen: Int) {
+    if (resolving && gen == resolveGen) {
+      log("mdns: resolve watchdog fired, moving on")
       resolving = false
       resolveNext()
     }
@@ -117,6 +135,8 @@ class LanDiscovery(
 
   companion object {
     const val SERVICE_TYPE = "_linktomac._tcp."
+    /** How long one resolveService call may dangle before the watchdog unwedges the queue. */
+    private const val RESOLVE_TIMEOUT_MS = 10_000L
 
     /** Stable per-pairing id = base64url(SHA256(room))[:16]; must match the Mac's LanServer.serviceId. */
     fun serviceId(room: String): String {

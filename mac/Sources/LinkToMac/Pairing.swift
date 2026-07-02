@@ -94,7 +94,9 @@ enum PairingStore {
 
     private static func randomBase64(_ count: Int) -> String {
         var bytes = [UInt8](repeating: 0, count: count)
-        _ = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
+        // An RNG failure must never silently mint an all-zero pairing key — crash loud instead.
+        precondition(status == errSecSuccess, "SecRandomCopyBytes failed (\(status))")
         return Data(bytes).base64EncodedString()
     }
 
@@ -121,6 +123,9 @@ enum PairingStore {
         SecItemDelete(baseQuery() as CFDictionary)
         var add = baseQuery()
         add[kSecValueData as String] = data
+        // Device-only: the 256-bit E2E pairing key must not migrate off this Mac via
+        // Keychain backup/sync — a re-pair is cheap, a leaked key is not.
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         return SecItemAdd(add as CFDictionary, nil)
     }
 }

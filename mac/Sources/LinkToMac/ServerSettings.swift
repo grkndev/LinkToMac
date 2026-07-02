@@ -39,7 +39,7 @@ enum ServerSettingsStore {
             host: d.string(forKey: kHost) ?? "",
             port: d.object(forKey: kPort) as? Int ?? 443,
             secure: d.object(forKey: kSecure) as? Bool ?? true,
-            token: keychainGet() ?? "",
+            token: cachedToken(),
             lanEnabled: d.object(forKey: kLanEnabled) as? Bool ?? true,
             lanPort: d.object(forKey: kLanPort) as? Int ?? defaultLanPort
         )
@@ -53,6 +53,24 @@ enum ServerSettingsStore {
         d.set(s.lanEnabled, forKey: kLanEnabled)
         d.set(s.lanPort, forKey: kLanPort)
         keychainSet(s.token)
+        tokenLock.withLock { tokenCache = .some(s.token) }
+    }
+
+    // MARK: - Token cache
+    // `Config`'s accessors call load() from anywhere, including SwiftUI render — a synchronous
+    // SecItemCopyMatching on every body evaluation is real, avoidable cost. The Keychain is hit
+    // once; save() writes through. (This process is the only writer of the item.)
+
+    nonisolated(unsafe) private static var tokenCache: String?? = .none
+    private static let tokenLock = NSLock()
+
+    private static func cachedToken() -> String {
+        tokenLock.withLock {
+            if case let .some(cached) = tokenCache { return cached ?? "" }
+            let fresh = keychainGet()
+            tokenCache = .some(fresh)
+            return fresh ?? ""
+        }
     }
 
     // MARK: - Keychain (generic password)
@@ -80,6 +98,8 @@ enum ServerSettingsStore {
         guard !token.isEmpty else { return }
         var add = baseQuery()
         add[kSecValueData as String] = Data(token.utf8)
+        // Device-only: the relay password must not migrate off this Mac via Keychain backup/sync.
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }
 }

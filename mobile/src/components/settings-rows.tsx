@@ -74,7 +74,9 @@ export function SwitchRow({
           </ListItem.SupportingContent>
         ) : null}
         <ListItem.TrailingContent>
-          <Switch value={value} onCheckedChange={onValueChange} />
+          {/* Display-only: the toggleable Surface owns the change (with haptics). Wiring the
+              Switch too made a direct tap fire BOTH handlers — a latent double-toggle. */}
+          <Switch value={value} />
         </ListItem.TrailingContent>
       </ListItem>
     </Surface>

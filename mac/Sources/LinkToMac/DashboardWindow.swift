@@ -23,6 +23,12 @@ struct DashboardView: View {
     var body: some View {
         ZStack {
             M3.surface.ignoresSafeArea()
+            // `home` stays mounted underneath the sub-screen instead of being swapped out —
+            // unmounting it destroyed FeaturePanel's @State (selected tab, open SMS thread,
+            // pagination) on every push. Hidden + hit-test-disabled while a route is up.
+            home
+                .opacity(path.isEmpty ? 1 : 0)
+                .allowsHitTesting(path.isEmpty)
             if let route = path.last {
                 VStack(spacing: 0) {
                     backBar(title: title(for: route))
@@ -30,11 +36,10 @@ struct DashboardView: View {
                     screen(for: route)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
+                .background(M3.surface)
                 // Let the back bar rise into the titlebar region so it sits level with the traffic
                 // lights instead of below the top safe-area inset.
                 .ignoresSafeArea(.container, edges: .top)
-            } else {
-                home
             }
         }
         .preferredColorScheme(.dark)
