@@ -210,8 +210,12 @@ A tiny Java program compiled to dex (`clipboard-agent.dex`, built by
 
 ```
 CLASSPATH=/data/local/tmp/clipboard-agent.dex app_process /system/bin \
-  --nice-name=linktomac_clip com.grkndev.clipboard.ClipboardAgent 53123
+  --nice-name=linktomac_clip com.grkndev.clipboard.ClipboardAgent 53123 <SECRET>
 ```
+
+The trailing `<SECRET>` is the **bridge-auth secret**: a random 32-byte base64 value the app
+mints once, persists (`PREFS_UI`, so an unpair can't orphan a running daemon), and passes at
+every launch. When launched without it (a stale launcher) the daemon runs in legacy open mode.
 
 What it does, all via **reflection into hidden framework APIs** (it runs as `shell`, so it's
 allowed to):
@@ -227,6 +231,11 @@ allowed to):
   `dispatchPrimaryClipChanged` callback lands as `onTransact(FIRST_CALL_TRANSACTION, …)`,
   where the agent re-reads the clip and emits it.
 - Opens `ServerSocket(53123, … 127.0.0.1)` and speaks **NDJSON** (newline-delimited JSON):
+  - app → daemon: `{"cmd":"auth","secret":"…"}` — **required first line** when the daemon was
+    launched with a secret. Until it arrives (5 s `soTimeout`) and matches (constant-time
+    `MessageDigest.isEqual`), the connection is served **nothing** — no initial clip sync, no
+    command handling — and a mismatch/timeout closes it. This is what stops any other app with
+    `INTERNET` (auto-granted) from reaching loopback and reading/injecting the clipboard.
   - daemon → app: `{"type":"clip","text":"…","ts":1234}`
   - app → daemon: `{"cmd":"write","text":"…"}`
 - A `lastSeen` string suppresses the echo of the agent's *own* writes.
@@ -264,8 +273,12 @@ to *launch* (or relaunch) it — never for the steady-state data path.
 ### 3.4 The bridge + foreground service (`ClipBridge.kt`, `ClipForegroundService.kt`)
 
 - **`ClipBridge`** is the on-device localhost *client* to the daemon. It connects to
-  `127.0.0.1:53123`, retries with backoff until the daemon's `ServerSocket` is up, reads
-  `clip` lines, and writes `write` commands.
+  `127.0.0.1:53123`, retries with backoff until the daemon's `ServerSocket` is up, sends the
+  `auth` line first (the persisted daemon secret — see §3.3), then reads `clip` lines and
+  writes `write` commands. `stop()` closes the socket (an `interrupt()` can't unblock a parked
+  `readLine()`), and every exit path closes the per-iteration socket so an abnormal read error
+  can't leak the fd — critical because the daemon's backlog-1 `ServerSocket` means one leaked
+  connection blocks all future bridges.
 - **`ClipForegroundService`** owns the bridge, the relay WS client, and the BLE advertiser. It
   runs as a **`START_STICKY` foreground service** with type `specialUse|connectedDevice`
   (Android 14+ requires a declared type). Because it's `START_STICKY`, the system restarts it
@@ -296,8 +309,8 @@ One `autoStart(clipPort)` call drives the whole bring-up and returns a state str
 root layout gates a screen on:
 
 ```
-probe localhost:53123 ── alive ──────────────────────────────────► "ready"   (attach, no ADB)
-        │ dead
+probe localhost:53123 ── alive + secret known ───────────────────► "ready"   (attach, no ADB)
+        │ dead (or alive with an unknown secret -> restart it via ADB below)
    isPaired()? ── no ──────────────────────────────────────────► "need-pair"
         │ yes
    self-enable Wireless Debugging (if WRITE_SECURE_SETTINGS held)

@@ -149,9 +149,13 @@ class AdbManager(private val context: Context) {
    * (Verified: same launch dies via `exec:` when it returns immediately, survives
    * when it waits for `listening`.) `rm` first so a stale log can't false-match.
    */
-  fun launchDaemon(clipPort: Int): String {
+  fun launchDaemon(clipPort: Int, secret: String? = null): String {
+    // The optional second arg is the bridge-auth secret (base64, shell-safe inside the single
+    // quotes): the daemon serves nothing on its localhost socket until a client presents it.
+    // Other apps can't read our /proc/<pid>/cmdline on modern Android, so it doesn't leak.
     val inner = "CLASSPATH=$DEX_PATH app_process /system/bin " +
-      "--nice-name=$NICE_NAME $MAIN_CLASS $clipPort"
+      "--nice-name=$NICE_NAME $MAIN_CLASS $clipPort" +
+      (secret?.let { " $it" } ?: "")
     val cmd = "rm -f $LOG_PATH; nohup setsid sh -c '$inner' >$LOG_PATH 2>&1 </dev/null & " +
       "i=0; while [ \$i -lt 40 ]; do grep -q listening $LOG_PATH 2>/dev/null && { echo LAUNCHED; exit 0; }; " +
       "sleep 0.2; i=\$((i+1)); done; echo LAUNCH_TIMEOUT"

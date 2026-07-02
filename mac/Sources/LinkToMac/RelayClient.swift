@@ -167,7 +167,14 @@ final class RelayClient {
     var onPairingChanged: (() -> Void)?
 
     private static let heartbeatInterval: Duration = .seconds(25)
+    /// Declare the link dead when nothing has been received for two heartbeat intervals.
+    private static let pongTimeout: TimeInterval = 50
     private static let maxBackoff = 30.0
+
+    /// Last proof of relay liveness: the `pong` reply to our app-level ping, or any inbound
+    /// frame. On a half-open socket (Wi-Fi drop, NAT timeout, sleep/wake) `send` keeps
+    /// succeeding into the kernel buffer, so *sending* proves nothing — only receiving does.
+    private var lastLiveness = Date()
 
     // MARK: - Public control
 
@@ -516,8 +523,11 @@ final class RelayClient {
         // `wss://` with a publicly-trusted (Let's Encrypt) cert works out of the box. For the
         // future LAN-direct mode (self-signed cert on the Mac), pin it via a URLSessionDelegate
         // `urlSession(_:didReceive:completionHandler:)` trust callback built from the QR fingerprint.
-        let session = URLSession(configuration: .default)
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        let session = URLSession(configuration: configuration)
         let task = session.webSocketTask(with: request)
+        lastLiveness = Date() // fresh socket starts with a clean liveness clock
         self.session = session
         self.task = task
         task.resume()
@@ -605,6 +615,7 @@ final class RelayClient {
             log("ignoring undecodable frame: \(text)")
             return
         }
+        lastLiveness = Date() // any inbound frame proves the socket is alive, not just pong
         switch msg {
         case let .joined(peers):
             status = .joined
@@ -700,6 +711,14 @@ final class RelayClient {
 
     private func heartbeatTick(generation gen: Int) async -> Bool {
         guard !Task.isCancelled, gen == generation else { return false }
+        // Sending proves nothing on a half-open socket (it succeeds into the kernel buffer for
+        // minutes while every clip is silently lost) — receiving does. Two missed intervals
+        // with no inbound frame at all means the link is dead: tear down and reconnect instead
+        // of showing "linked".
+        if Date().timeIntervalSince(lastLiveness) > RelayClient.pongTimeout {
+            handleFailure("pong timeout (no frame for \(Int(RelayClient.pongTimeout))s)")
+            return false
+        }
         do {
             try await send(.ping)
             return true

@@ -15,8 +15,10 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
+import android.util.Base64
 import expo.modules.selfadb.R
 import org.json.JSONObject
+import java.security.SecureRandom
 
 /**
  * Hosts the clipboard pipeline so it survives the app being swiped away.
@@ -32,6 +34,8 @@ import org.json.JSONObject
 class ClipForegroundService : Service() {
 
   private var bridge: ClipBridge? = null
+  /** The secret [bridge] was built with, to detect a daemon relaunch under a fresh secret. */
+  @Volatile private var bridgeSecret: String? = null
   private var conn: ConnectionManager? = null
   private var bleAdvertiser: BleAdvertiser? = null
   /** Reads + live-observes the SMS store, forwarding to the Mac over the `sms` channel. Started
@@ -62,10 +66,20 @@ class ClipForegroundService : Service() {
     val port = intent?.getIntExtra(EXTRA_PORT, DEFAULT_PORT) ?: DEFAULT_PORT
     instance = this
     sendPaused = getClipSendPaused(this)
+    val daemonSecret = getDaemonSecret(this)
+    if (bridge != null && bridgeSecret != daemonSecret) {
+      // deploy() relaunched the daemon under a fresh secret; a bridge still holding the old
+      // one would be rejected forever. Drop it and rebuild below.
+      ClipBus.log("service: daemon secret changed -> restarting bridge")
+      bridge?.stop()
+      bridge = null
+    }
     if (bridge == null) {
       ClipBus.log("service: starting bridge on :$port")
+      bridgeSecret = daemonSecret
       bridge = ClipBridge(
         port = port,
+        secret = daemonSecret,
         onClip = { text, ts ->
           if (text == lastWritten) {
             lastWritten = null // echo of our own write -> swallow
@@ -464,7 +478,28 @@ class ClipForegroundService : Service() {
     private const val KEY_NOTIFICATION_FORWARDING = "notificationForwarding"
     private const val KEY_SMS_FORWARDING = "smsForwarding"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
+    private const val KEY_DAEMON_SECRET = "daemonSecret"
     const val DEFAULT_PORT = 53123
+
+    /** The bridge-auth secret the daemon was launched with (null = never launched an
+     *  auth-aware daemon). Lives in PREFS_UI, NOT PREFS: an unpair wipes PREFS but must not
+     *  orphan the still-running daemon, whose expected secret can't change until relaunch. */
+    fun getDaemonSecret(ctx: Context): String? =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getString(KEY_DAEMON_SECRET, null)
+
+    /** Returns the persisted secret, minting + persisting a fresh 32-byte one if absent.
+     *  Called only from the daemon launch path so the persisted value always matches what
+     *  the running daemon expects. */
+    fun getOrCreateDaemonSecret(ctx: Context): String {
+      getDaemonSecret(ctx)?.let { return it }
+      val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+      val secret = Base64.encodeToString(bytes, Base64.NO_WRAP)
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putString(KEY_DAEMON_SECRET, secret)
+        .apply()
+      return secret
+    }
 
     /** Whether the foreground notification should show a status-bar icon (default true). */
     fun getStatusNotificationVisible(ctx: Context): Boolean =

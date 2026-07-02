@@ -42,10 +42,17 @@ final class LanServer: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "dev.grkn.LinkToMac.lan")
     private var listener: NWListener?
+    /// The **authenticated** live peer. Only `verifyAuth` ever assigns this — an inbound
+    /// socket must prove the pairing key before it can occupy (or evict) the peer slot.
     private var connection: NWConnection?
-    private var authed = false
-    private var challenge: Data?
+    /// The newest inbound socket that has not yet authenticated. It gets the hello/auth
+    /// exchange (and a deadline) but is served nothing else.
+    private var pending: NWConnection?
+    private var pendingChallenge: Data?
     private var running = false
+
+    /// How long an inbound socket may sit unauthenticated before being dropped.
+    private static let authTimeout: TimeInterval = 5
 
     init(port: UInt16 = LanServer.defaultPort, pairingProvider: @escaping @Sendable () -> Pairing?) {
         self.port = port
@@ -65,9 +72,11 @@ final class LanServer: @unchecked Sendable {
     func stop() {
         queue.async { [self] in
             running = false
+            pending?.cancel()
+            pending = nil
+            pendingChallenge = nil
             connection?.cancel()
             connection = nil
-            authed = false
             listener?.cancel()
             listener = nil
         }
@@ -77,9 +86,11 @@ final class LanServer: @unchecked Sendable {
     func reload() {
         queue.async { [self] in
             guard running else { return }
+            pending?.cancel()
+            pending = nil
+            pendingChallenge = nil
             connection?.cancel()
             connection = nil
-            authed = false
             listener?.cancel()
             listener = nil
             startListener()
@@ -137,10 +148,13 @@ final class LanServer: @unchecked Sendable {
     // MARK: - Connection handling
 
     private func accept(_ conn: NWConnection) {
-        // Single peer, newest-wins: a fresh connection replaces a stale one.
-        connection?.cancel()
-        connection = conn
-        authed = false
+        // An unauthenticated newcomer only ever displaces another *pending* socket. The
+        // authenticated peer keeps its slot until the newcomer proves the pairing key
+        // (newest-wins moves to `verifyAuth`) — otherwise any LAN host could evict the
+        // phone just by connecting to the Bonjour-advertised port.
+        pending?.cancel()
+        pending = conn
+        pendingChallenge = nil
         conn.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -154,17 +168,28 @@ final class LanServer: @unchecked Sendable {
     }
 
     private func dropIfCurrent(_ conn: NWConnection) {
-        guard conn === connection else { return }
-        connection = nil
-        if authed { onPeerChange?(false) }
-        authed = false
+        if conn === pending {
+            pending = nil
+            pendingChallenge = nil
+        }
+        if conn === connection {
+            connection = nil
+            onPeerChange?(false)
+        }
     }
 
     private func sendHello(_ conn: NWConnection) {
+        guard conn === pending else { return }
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
-        challenge = nonce
+        pendingChallenge = nonce
         send(["t": "hello", "nonce": nonce.base64EncodedString()], on: conn)
+        // A peer that never answers the challenge must not camp in the pending slot.
+        queue.asyncAfter(deadline: .now() + LanServer.authTimeout) { [weak self] in
+            guard let self, conn === self.pending else { return }
+            self.log("dropping unauthenticated connection (auth timeout)")
+            conn.cancel() // its .cancelled state clears the slot via dropIfCurrent
+        }
     }
 
     private func receive(on conn: NWConnection) {
@@ -174,46 +199,52 @@ final class LanServer: @unchecked Sendable {
             let isText = (context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
                 as? NWProtocolWebSocket.Metadata)?.opcode == .text
             if isText, let data = content { self.handle(data, on: conn) }
-            // Keep receiving while this connection is the live one.
-            if conn === self.connection { self.receive(on: conn) }
+            // Keep receiving while this connection is the live peer or the pending one.
+            if conn === self.connection || conn === self.pending { self.receive(on: conn) }
         }
     }
 
     private func handle(_ data: Data, on conn: NWConnection) {
-        guard conn === connection,
-              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let t = obj["t"] as? String else { return }
 
-        switch t {
-        case "auth":
+        // The only frame a pending (unauthenticated) socket may send is the auth proof.
+        if t == "auth" {
+            guard conn === pending else { return }
             verifyAuth(proof: obj["proof"] as? String, on: conn)
+            return
+        }
+        // Everything else is served exclusively to the authenticated live peer.
+        guard conn === connection else { return }
+
+        switch t {
         case "clip":
-            guard authed, let key = pairingProvider()?.key,
+            guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
                   let text = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
             onRemoteClip?(text)
         case "cmd":
-            guard authed, let key = pairingProvider()?.key,
+            guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
                   let action = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
             onRemoteCommand?(action)
         case "stat":
-            guard authed, let key = pairingProvider()?.key,
+            guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
                   let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
             onRemoteStat?(json)
         case "note":
-            guard authed, let key = pairingProvider()?.key,
+            guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
                   let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
             onRemoteNote?(json)
         case "sms":
-            guard authed, let key = pairingProvider()?.key,
+            guard let key = pairingProvider()?.key,
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
                   let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key) else { return }
             onRemoteSms?(json)
         case "ping":
-            if authed { send(["t": "pong"], on: conn) }
+            send(["t": "pong"], on: conn)
         default:
             break
         }
@@ -221,7 +252,7 @@ final class LanServer: @unchecked Sendable {
 
     private func verifyAuth(proof: String?, on conn: NWConnection) {
         guard let proof, let proofData = Data(base64Encoded: proof),
-              let nonce = challenge, let keyB64 = pairingProvider()?.key,
+              let nonce = pendingChallenge, let keyB64 = pairingProvider()?.key,
               let keyData = Data(base64Encoded: keyB64), keyData.count == 32 else {
             log("auth rejected (malformed)"); conn.cancel(); return
         }
@@ -230,7 +261,14 @@ final class LanServer: @unchecked Sendable {
         guard HMAC<SHA256>.isValidAuthenticationCode(proofData, authenticating: nonce, using: key) else {
             log("auth rejected (bad proof)"); conn.cancel(); return
         }
-        authed = true
+        // Proven: NOW newest-wins applies — the fresh socket replaces the previous peer.
+        // Reassign before cancelling the old one so its .cancelled → dropIfCurrent no-ops
+        // instead of firing a spurious onPeerChange(false).
+        let previous = connection
+        connection = conn
+        pending = nil
+        pendingChallenge = nil
+        previous?.cancel()
         log("peer authenticated")
         send(["t": "ready"], on: conn)
         onPeerChange?(true)
@@ -241,7 +279,8 @@ final class LanServer: @unchecked Sendable {
     /// Encrypt + send a local clip to the authenticated phone. No-op if no peer / bad key.
     func sendClip(_ text: String) {
         queue.async { [self] in
-            guard authed, let conn = connection, !text.isEmpty,
+            // `connection` is only ever assigned by verifyAuth, so non-nil implies authed.
+            guard let conn = connection, !text.isEmpty,
                   let key = pairingProvider()?.key,
                   let (nonce, ct) = ClipCodec.encode(text, keyBase64: key) else { return }
             send(["t": "clip", "nonce": nonce, "ct": ct], on: conn)
@@ -252,7 +291,7 @@ final class LanServer: @unchecked Sendable {
     /// `sendClip`; no-op if no peer / bad key.
     func sendStat(_ payload: String) {
         queue.async { [self] in
-            guard authed, let conn = connection, !payload.isEmpty,
+            guard let conn = connection, !payload.isEmpty,
                   let key = pairingProvider()?.key,
                   let (nonce, ct) = ClipCodec.encode(payload, keyBase64: key) else { return }
             send(["t": "stat", "nonce": nonce, "ct": ct], on: conn)

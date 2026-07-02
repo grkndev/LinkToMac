@@ -102,8 +102,11 @@ class SelfAdbModule : Module() {
      *                     self-enable it yet -> PairScreen reconnect mode
      */
     AsyncFunction("autoStart") { clipPort: Int ->
-      // 1. Daemon still alive from a previous run? Attach, touch no adb.
-      if (daemonAlive(clipPort)) {
+      // 1. Daemon still alive from a previous run? Attach, touch no adb. Only when we
+      //    still hold the secret it was launched with — alive + no persisted secret means
+      //    our data was cleared since its launch, the bridge could never authenticate, so
+      //    fall through to the ADB path where deploy() restarts it under a fresh secret.
+      if (daemonAlive(clipPort) && ClipForegroundService.getDaemonSecret(appCtx) != null) {
         log("daemon already alive on :$clipPort")
         ClipForegroundService.start(appCtx, clipPort)
         status("connected", "running")
@@ -559,13 +562,23 @@ class SelfAdbModule : Module() {
 
   /** Push (if needed) + launch the detached daemon, then own the bridge in the FGS. */
   private fun deploy(clipPort: Int) {
-    if (daemonAlive(clipPort)) {
+    // The daemon requires its launch secret as the bridge's first line. Reuse the persisted
+    // one (a running daemon's expectation can't change); mint one only when absent.
+    val hadSecret = ClipForegroundService.getDaemonSecret(appCtx) != null
+    val secret = ClipForegroundService.getOrCreateDaemonSecret(appCtx)
+    if (daemonAlive(clipPort) && hadSecret) {
       log("daemon already alive on :$clipPort")
     } else {
+      if (daemonAlive(clipPort)) {
+        // Alive but launched under a secret we no longer know (fresh install / cleared
+        // data) — it would reject our bridge forever. Restart it under the fresh secret.
+        log("daemon alive but its secret is unknown -> restarting it")
+        log("kill: " + adb.killDaemon())
+      }
       log("pushing clipboard-agent.dex -> /data/local/tmp")
       adb.pushAsset("clipboard-agent.dex", "/data/local/tmp/clipboard-agent.dex") { log(it) }
       log("launching detached daemon...")
-      log("launch: " + adb.launchDaemon(clipPort))
+      log("launch: " + adb.launchDaemon(clipPort, secret))
       // launchDaemon only echoes LAUNCHED; confirm the daemon actually bound its socket.
       // On the half-trusted first adb session after a reboot the launch can silently fail,
       // and without this check autoStart would report a false "ready" while the bridge loops

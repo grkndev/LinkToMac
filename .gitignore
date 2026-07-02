@@ -1,4 +1,7 @@
 *.java
+# …except the privileged daemon's source: its compiled .dex is a committed module asset,
+# and the committed binary must not exist in the repo without the source it was built from.
+!/mobile/native-src/clipboard-agent/ClipboardAgent.java
 workflow.md
 .claude/
 /mobile/node_modules/

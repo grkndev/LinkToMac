@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets
 /**
  * On-device localhost client to the privileged ClipboardAgent process.
  *
+ *   app -> jar : {"cmd":"auth","secret":"..."}   (first line; daemon serves nothing until it matches)
  *   jar -> app : {"type":"clip","text":"...","ts":1234}
  *   app -> jar : {"cmd":"write","text":"..."}
  *
@@ -18,11 +19,13 @@ import java.nio.charset.StandardCharsets
  */
 class ClipBridge(
   private val port: Int,
+  private val secret: String?,
   private val onClip: (text: String, ts: Double) -> Unit,
   private val onLog: (String) -> Unit,
 ) {
   @Volatile private var running = false
   @Volatile private var out: OutputStream? = null
+  @Volatile private var sock: Socket? = null
   private var thread: Thread? = null
 
   fun start() {
@@ -33,10 +36,19 @@ class ClipBridge(
   private fun loop() {
     var attempt = 0
     while (running) {
+      val s = Socket()
       try {
-        val s = Socket()
         s.connect(InetSocketAddress("127.0.0.1", port), 2000)
-        out = s.getOutputStream()
+        sock = s // published so stop() can close it out from under a blocked readLine()
+        val o = s.getOutputStream()
+        // Authenticate FIRST: the daemon serves nothing (not even the initial clip sync)
+        // until it sees the launch secret. A pre-auth daemon ignores the unknown cmd.
+        secret?.let { sec ->
+          val auth = JSONObject().put("cmd", "auth").put("secret", sec)
+          o.write((auth.toString() + "\n").toByteArray(StandardCharsets.UTF_8))
+          o.flush()
+        }
+        out = o
         attempt = 0
         onLog("bridge connected :$port")
         val r = BufferedReader(InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8))
@@ -45,11 +57,14 @@ class ClipBridge(
           handle(line)
           line = r.readLine()
         }
-        out = null
-        s.close()
       } catch (e: Exception) {
+        if (running) onLog("bridge retry (${e.message})")
+      } finally {
+        // Every exit path (clean EOF, IOException, stop()) drops the fd — the old code
+        // leaked the socket on an abnormal read error.
         out = null
-        onLog("bridge retry (${e.message})")
+        sock = null
+        try { s.close() } catch (_: Exception) {}
       }
       if (!running) break
       attempt++
@@ -86,6 +101,10 @@ class ClipBridge(
 
   fun stop() {
     running = false
+    // close() is what actually unblocks a readLine() parked on the socket — interrupt() alone
+    // can't, and a bridge stuck here holds the daemon's single (backlog 1) connection slot,
+    // so a restarted bridge could never be accept()ed again.
+    try { sock?.close() } catch (_: Exception) {}
     thread?.interrupt()
   }
 }

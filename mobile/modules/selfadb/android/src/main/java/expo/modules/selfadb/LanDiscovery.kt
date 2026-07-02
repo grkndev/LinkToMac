@@ -43,7 +43,16 @@ class LanDiscovery(
       nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
     } catch (e: Exception) {
       log("mdns start failed: ${e.message}")
+      // Leave no residue: a held multicast lock drains the battery for the whole Wi-Fi
+      // session, and running=true would make every later start() a no-op (LAN auto-heal dead).
+      releaseFailedStart()
     }
+  }
+
+  /** Roll back a failed start so a later [start] can retry cleanly. */
+  private fun releaseFailedStart() {
+    running = false
+    if (multicastLock.isHeld) try { multicastLock.release() } catch (e: Exception) {}
   }
 
   fun stop() {
@@ -62,6 +71,7 @@ class LanDiscovery(
     override fun onDiscoveryStopped(serviceType: String) {}
     override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
       log("mdns discovery start failed: $errorCode")
+      releaseFailedStart()
     }
     override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
     override fun onServiceFound(serviceInfo: NsdServiceInfo) {

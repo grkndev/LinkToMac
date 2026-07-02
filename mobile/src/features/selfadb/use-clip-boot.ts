@@ -60,17 +60,44 @@ export function useClipBoot(): ClipBoot {
     if (busy.current) return;
     busy.current = true;
     setError(null);
+
+    // The busy gate must follow the NATIVE promise, not the UI timeout race below: a timed-out
+    // autoStart keeps running inside the single shared AdbManager, and starting a second one
+    // would interleave connect/deploy on the same adb session (issue #5's failure class). The
+    // 20s timeout only flips UI state; the gate frees when the native call truly settles.
+    const native = SelfAdb.autoStart(CLIP_PORT);
+    let timedOut = false;
+    native
+      .then((result) => {
+        // Late result after a timeout: a late 'ready' heals the UI; only touch the
+        // recoverable states so we never disturb an in-progress pair.
+        if (timedOut && (stateRef.current === 'need-connect' || stateRef.current === 'error')) {
+          setState(result === 'ready' ? 'ready' : result);
+        }
+      })
+      .catch((e: any) => {
+        // Late failure after a timeout: stay on the recoverable screen, surface the reason.
+        if (timedOut) setError(e?.message ?? String(e));
+      })
+      .finally(() => {
+        busy.current = false;
+      });
+
     try {
-      const result = await withTimeout(SelfAdb.autoStart(CLIP_PORT), AUTOSTART_TIMEOUT_MS, 'autoStart');
+      const result = await withTimeout(native, AUTOSTART_TIMEOUT_MS, 'autoStart');
       setState(result === 'ready' ? 'ready' : result); // 'need-pair' | 'need-connect'
     } catch (e: any) {
       setError(e?.message ?? String(e));
       // A stall only happens past isPaired(), in the connect/deploy phase, so the
       // device is paired — route to the recoverable reconnect screen (which the
-      // foreground-resume effect retries) instead of stranding on the spinner.
-      setState(e instanceof TimeoutError ? 'need-connect' : 'error');
-    } finally {
-      busy.current = false;
+      // foreground-resume effect retries once the native call settles) instead of
+      // stranding on the spinner.
+      if (e instanceof TimeoutError) {
+        timedOut = true;
+        setState('need-connect');
+      } else {
+        setState('error');
+      }
     }
   }, []);
 

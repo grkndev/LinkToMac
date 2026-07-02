@@ -98,13 +98,14 @@ wss.on('connection', (ws: WebSocket) => {
   });
 
   ws.on('message', (data, isBinary) => {
-    if (isBinary) {
-      ws.send(serialize({ t: 'error', code: 'bad-message', message: 'binary frames not supported' }));
-      return;
-    }
+    // Rate-limit first: binary frames must count too, or a flood of them never closes the socket.
     if (!conn.limiter.hit()) {
       ws.send(serialize({ t: 'error', code: 'rate-limit', message: 'rate limit exceeded' }));
       ws.close(CLOSE_RATE_LIMIT, 'rate-limit');
+      return;
+    }
+    if (isBinary) {
+      ws.send(serialize({ t: 'error', code: 'bad-message', message: 'binary frames not supported' }));
       return;
     }
     const msg = parseClientMessage(data.toString());

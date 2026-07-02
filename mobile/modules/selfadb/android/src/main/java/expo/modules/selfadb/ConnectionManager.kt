@@ -173,7 +173,10 @@ class ConnectionManager(
   }
 
   private fun startDiscovery() {
-    if (discovery != null) return
+    // An existing instance may have had its start() fail (NsdManager error released its state):
+    // start() is a no-op while healthy and a retry after a failure, so call it either way —
+    // otherwise a failed discovery stays dead until Wi-Fi cycles.
+    discovery?.let { it.start(); return }
     discovery = LanDiscovery(
       appCtx,
       room,
