@@ -19,6 +19,8 @@ const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest
 
 export type AppUpdate =
   | { kind: 'none' }
+  /** The check itself failed (connectivity / API error) — "no update found" would be a lie. */
+  | { kind: 'failed' }
   | { kind: 'ota' }
   | { kind: 'native'; version: string; notes: string | null; url: string };
 
@@ -81,6 +83,10 @@ export async function fetchLatestNativeRelease(
  * Resolve which update (if any) to offer. Native takes precedence: a newer APK is the bigger
  * change and an OTA only ever ships under the same version, so a newer GitHub version always means
  * the JS-only path can't deliver it. Falls back to an OTA check for the current runtime otherwise.
+ *
+ * Returns `{kind:'failed'}` when no update was found AND the native probe failed — "up to date"
+ * is only ever claimed after the native check actually succeeded (a manual check on a dead
+ * connection must say "check failed", not lie).
  */
 export async function checkForAppUpdate(signal?: AbortSignal): Promise<AppUpdate> {
   const latest = await fetchLatestNativeRelease(signal);
@@ -92,8 +98,8 @@ export async function checkForAppUpdate(signal?: AbortSignal): Promise<AppUpdate
       const result = await Updates.checkForUpdateAsync();
       if (result.isAvailable) return { kind: 'ota' };
     } catch {
-      // Network/registry hiccup — treat as "no OTA" and stay quiet.
+      // Network/registry hiccup — the native-check result below decides none vs failed.
     }
   }
-  return { kind: 'none' };
+  return latest ? { kind: 'none' } : { kind: 'failed' };
 }

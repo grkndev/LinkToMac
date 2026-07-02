@@ -637,9 +637,12 @@ final class RelayClient {
                 log("relay rejected a frame: \(message)")
                 return
             }
-            status = .error(code)
+            // Everything else (bad-join / room-full / not-joined / rate-limit / join-timeout)
+            // invalidates the session. Setting `.error` and stopping used to wedge: the relay
+            // won't resend `joined` on a live socket, so nothing ever cleared the status. Tear
+            // down and reconnect with backoff instead — a rejoin resets the state either way.
             lastError = message
-            log("relay error: \(code) \(message)")
+            handleFailure("relay error: \(code) — \(message)")
         case let .clip(nonce, ct):
             // ChaCha20-Poly1305, keyed by the pairing secret. Drops anything that fails to
             // authenticate (corrupt, tampered, or a key mismatch after a re-pair).

@@ -174,16 +174,30 @@ struct FeaturePanel: View {
                 }
                 Spacer(minLength: 0)
             }
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(convo.messages) { message in
-                        MessageBubble(message: message)
+            // Chat order: open anchored to the NEWEST message (the bottom — `messages` is
+            // oldest→newest) and follow live deltas, like every other messaging UI.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(convo.messages) { message in
+                            MessageBubble(message: message)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: .infinity)
+                .onAppear {
+                    if let last = convo.messages.last?.id {
+                        proxy.scrollTo(last, anchor: .bottom)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 2)
+                .onChange(of: convo.latest.id) {
+                    if let last = convo.messages.last?.id {
+                        withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                    }
+                }
             }
-            .frame(maxHeight: .infinity)
         }
     }
 

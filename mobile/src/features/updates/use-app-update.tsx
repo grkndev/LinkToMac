@@ -12,7 +12,7 @@ import { Alert, Linking } from 'react-native';
 
 import { checkForAppUpdate, type AppUpdate } from './check';
 
-type PendingUpdate = Exclude<AppUpdate, { kind: 'none' }>;
+type PendingUpdate = Exclude<AppUpdate, { kind: 'none' } | { kind: 'failed' }>;
 
 type UpdateState = {
   /** The pending update to surface in the modal, or null when nothing is pending / dismissed. */
@@ -61,6 +61,11 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
     setChecking(true);
     try {
       const result = await checkForAppUpdate();
+      if (result.kind === 'failed') {
+        // The probe itself failed (offline / API error) — an auto-check stays silent.
+        if (manual) Alert.alert('Check failed', "Couldn't check for updates. Try again later.");
+        return;
+      }
       if (result.kind === 'none') {
         if (manual) Alert.alert("You're up to date", 'No new version is available.');
         return;

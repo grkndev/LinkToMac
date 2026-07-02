@@ -11,12 +11,22 @@ const STORAGE_KEY = 'linktomac.pairing';
  */
 export type Pairing = { room: string; key: string; name?: string };
 
+/**
+ * The E2E key must be standard padded base64 of exactly 32 bytes (44 chars, one `=` pad) —
+ * the exact shape both generators produce (`Pairing.swift` `randomBase64(32)`). Anything else
+ * makes the native `ClipCodec.secretKey()` return null and every clip fail closed with no
+ * error surfaced ("paired but dead"), so reject it at the door instead.
+ */
+function isValidKey(key: string): boolean {
+  return /^[A-Za-z0-9+/]{43}=$/.test(key);
+}
+
 export async function loadPairing(): Promise<Pairing | null> {
   const raw = await SecureStore.getItemAsync(STORAGE_KEY);
   if (!raw) return null;
   try {
     const obj = JSON.parse(raw) as Partial<Pairing>;
-    if (typeof obj.room === 'string' && typeof obj.key === 'string') {
+    if (typeof obj.room === 'string' && typeof obj.key === 'string' && isValidKey(obj.key)) {
       return {
         room: obj.room,
         key: obj.key,
@@ -46,7 +56,8 @@ export type PairingScan = { pairing: Pairing; server: ServerConfig | null };
  *   v2: `{"v":2,...,"host","port","secure","token","fp"?}` — also carries the relay server config.
  *   v3: v2 + `{"lport","lan","lhost"?}` — adds the LAN-direct params (the Mac's WebSocket port,
  *       whether LAN is enabled, and an optional seed host). `host` may be empty for LAN-only.
- * Returns null for anything that isn't a valid pairing (incl. relay's 16–128 char room).
+ * Returns null for anything that isn't a valid pairing (incl. relay's 16–128 char room and a
+ * key that isn't base64 of exactly 32 bytes).
  */
 export function parsePairingQR(data: string): PairingScan | null {
   try {
@@ -55,6 +66,7 @@ export function parsePairingQR(data: string): PairingScan | null {
       (obj.v !== 1 && obj.v !== 2 && obj.v !== 3) ||
       typeof obj.room !== 'string' ||
       typeof obj.key !== 'string' ||
+      !isValidKey(obj.key) ||
       obj.room.length < 16 ||
       obj.room.length > 128
     ) {

@@ -536,6 +536,8 @@ default on; the soft pause that doesn't revoke the OS permission):
 - **Live deltas.** A `ContentObserver` on `content://sms` fires on any change; `SmsMirror` queries
   rows newer than the last-seen `_id` and pushes them as an `op:"add"` frame (covers received *and*
   sent messages, since `content://sms` includes both).
+- **Only INBOX(1) and SENT(2) rows are mirrored** — DRAFT/OUTBOX/FAILED/QUEUED are skipped in the
+  cursor loop, otherwise drafts and failed sends would render on the Mac as messages the user sent.
 
 The decrypted plaintext:
 

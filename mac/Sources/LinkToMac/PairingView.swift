@@ -28,6 +28,16 @@ struct PairingView: View {
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+
+            // A Keychain save failure means this pairing only lives for the session — the next
+            // launch mints a different room/key and strands the phone. Don't let that be silent.
+            if PairingStore.persistFailed {
+                Label("Eşleştirme Anahtarlığa kaydedilemedi — uygulama yeniden başlatılınca sıfırlanır.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.leading)
+            }
         }
         .padding(24)
         .frame(width: 320)

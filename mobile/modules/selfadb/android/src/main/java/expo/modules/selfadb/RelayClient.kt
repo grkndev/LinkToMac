@@ -225,6 +225,10 @@ class RelayClient(
   private fun fail(reason: String) {
     log("relay $reason")
     ws = null
+    // The socket is gone, so the Mac is unreachable no matter what it last reported —
+    // carrying the stale flag through the backoff makes Home show it online while a
+    // "Lock Mac" tap would be silently dropped. `joined` re-establishes truth on reconnect.
+    peerOnline = false
     if (!running) return
     val pending = reconnectFuture
     if (pending != null && !pending.isDone) return

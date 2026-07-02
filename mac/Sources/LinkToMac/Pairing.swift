@@ -17,6 +17,14 @@ enum PairingStore {
     private static let service = "dev.grkn.LinkToMac"
     private static let account = "pairing"
 
+    /// True when the last save could not be persisted to the Keychain (locked/ACL failure).
+    /// The freshly minted room/key then only lives for this session — the next launch mints a
+    /// DIFFERENT pairing and strands the already-paired phone — so surface it (PairingView)
+    /// instead of failing silently. MainActor-isolated (Swift 6): every writer (`save`, via
+    /// `loadOrCreate` from the `@MainActor` RelayClient) and reader (PairingView) is main-actor.
+    @MainActor private(set) static var persistFailed = false
+
+    @MainActor
     static func loadOrCreate() -> Pairing {
         if let existing = load() { return existing }
         let fresh = Pairing(room: randomBase64(32), key: randomBase64(32))
@@ -29,9 +37,19 @@ enum PairingStore {
         return try? JSONDecoder().decode(Pairing.self, from: data)
     }
 
-    static func save(_ pairing: Pairing) {
-        guard let data = try? JSONEncoder().encode(pairing) else { return }
-        keychainSet(data)
+    @MainActor
+    @discardableResult
+    static func save(_ pairing: Pairing) -> Bool {
+        guard let data = try? JSONEncoder().encode(pairing) else {
+            persistFailed = true
+            return false
+        }
+        let status = keychainSet(data)
+        persistFailed = (status != errSecSuccess)
+        if persistFailed {
+            NSLog("[PairingStore] Keychain save failed (OSStatus %d) — pairing will not survive relaunch", status)
+        }
+        return !persistFailed
     }
 
     /// Deletes the persisted pairing; the next `loadOrCreate()` mints a fresh room/key.
@@ -99,11 +117,11 @@ enum PairingStore {
         return item as? Data
     }
 
-    private static func keychainSet(_ data: Data) {
+    private static func keychainSet(_ data: Data) -> OSStatus {
         SecItemDelete(baseQuery() as CFDictionary)
         var add = baseQuery()
         add[kSecValueData as String] = data
-        SecItemAdd(add as CFDictionary, nil)
+        return SecItemAdd(add as CFDictionary, nil)
     }
 }
 

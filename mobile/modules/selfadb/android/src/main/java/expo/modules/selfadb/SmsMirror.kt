@@ -144,6 +144,9 @@ class SmsMirror(
         val iRead = c.getColumnIndexOrThrow(Telephony.Sms.READ)
         while (c.moveToNext()) {
           val type = c.getInt(iType)
+          // Only real conversation traffic: DRAFT(3)/OUTBOX(4)/FAILED(5)/QUEUED(6) would
+          // otherwise render on the Mac as sent messages the user never sent.
+          if (type != Telephony.Sms.MESSAGE_TYPE_INBOX && type != Telephony.Sms.MESSAGE_TYPE_SENT) continue
           out.add(
             Row(
               id = c.getLong(iId),
