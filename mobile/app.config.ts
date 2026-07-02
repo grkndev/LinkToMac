@@ -65,6 +65,10 @@ export default (_: ConfigContext): ExpoConfig => ({
     favicon: './assets/images/favicon.png',
   },
   plugins: [
+    // minSdk 30 = the app's real floor (wireless ADB pairing needs Android 11; ClipCodec's
+    // ChaCha20-Poly1305 needs API 28+). Must match the selfadb module's build.gradle minSdk,
+    // or the app-level manifest merge fails.
+    ['expo-build-properties', { android: { minSdkVersion: 30 } }],
     'expo-router',
     [
       'expo-splash-screen',
