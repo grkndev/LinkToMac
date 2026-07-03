@@ -191,7 +191,7 @@ export default function HowItWorks() {
             <Reveal
               key={name}
               delay={(i % 2) * 80}
-              className="group rounded-(--radius-card-lg) bg-surface-2 p-7 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/25"
+              className="group rounded-(--radius-card-lg) bg-surface-2 p-7 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10 dark:hover:shadow-black/25"
             >
               <div className="flex items-center gap-4">
                 <IconBadge>{icon}</IconBadge>

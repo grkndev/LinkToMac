@@ -5,20 +5,22 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --bg: #0b0d11;
-  --surface: #14171c;
-  --surface-2: #1c2026;
-  --surface-3: #262b33;
-  --surface-4: #333a45;
-  --badge: #454d5c;
-  --line: rgba(255, 255, 255, 0.08);
-  --fg: #f4f5f7;
-  --fg-2: #a8b0bc;
-  --fg-3: #737c8a;
-  --green: #4ade80;
-  --amber: #fbbf24;
-  --blue: #60a5fa;
-  --cyan: #22d3ee;
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --surface: #eef0f4;
+  --surface-2: #ffffff;
+  --surface-3: #e7eaef;
+  --surface-4: #d9dee6;
+  --badge: #c9d1db;
+  --line: rgba(13, 18, 28, 0.1);
+  --fg: #10141a;
+  --fg-2: #4d5766;
+  --fg-3: #6e7887;
+  --green: #16a34a;
+  --amber: #d97706;
+  --blue: #2563eb;
+  --cyan: #0891b2;
+  --shimmer-hi: #1d4ed8;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -163,8 +165,8 @@ body {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(96, 165, 250, 0.65),
-    rgba(34, 211, 238, 0.65),
+    color-mix(in srgb, var(--blue) 65%, transparent),
+    color-mix(in srgb, var(--cyan) 65%, transparent),
     transparent
   );
   opacity: 0;
@@ -184,7 +186,7 @@ body {
   background: linear-gradient(
     100deg,
     var(--fg-2) 42%,
-    #dbeafe 50%,
+    var(--shimmer-hi) 50%,
     var(--fg-2) 58%
   );
   background-size: 200% 100%;
@@ -259,11 +261,11 @@ body {
 /* Pulsing status dot — expanding ring like a live connection */
 @keyframes dot-ping {
   0% {
-    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent);
   }
   70%,
   100% {
-    box-shadow: 0 0 0 7px rgba(74, 222, 128, 0);
+    box-shadow: 0 0 0 7px transparent;
   }
 }
 
@@ -315,6 +317,30 @@ body {
   animation: beam-travel 2.2s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
 }
 
+
+/* Bluetooth beacon arc — marching dashes + pulsing endpoint */
+@keyframes ble-dash-kf {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+.ble-dash {
+  animation: ble-dash-kf 1.4s linear infinite;
+}
+
+@keyframes ble-ping-kf {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue) 50%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+.ble-ping {
+  animation: ble-ping-kf 2.2s cubic-bezier(0.2, 0, 0, 1) infinite;
+}
+
 /* Scroll reveal — hidden only when JS is available to reveal it */
 @media (scripting: enabled) {
   .reveal {
@@ -344,6 +370,8 @@ body {
   .dot-pulse,
   .float-y,
   .beam,
+  .ble-dash,
+  .ble-ping,
   .glow-cta::before {
     animation: none;
   }
@@ -367,6 +395,22 @@ body {
 }
 
 .dark {
+  color-scheme: dark;
+  --bg: #0b0d11;
+  --surface: #14171c;
+  --surface-2: #1c2026;
+  --surface-3: #262b33;
+  --surface-4: #333a45;
+  --badge: #454d5c;
+  --line: rgba(255, 255, 255, 0.08);
+  --fg: #f4f5f7;
+  --fg-2: #a8b0bc;
+  --fg-3: #737c8a;
+  --green: #4ade80;
+  --amber: #fbbf24;
+  --blue: #60a5fa;
+  --cyan: #22d3ee;
+  --shimmer-hi: #dbeafe;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);

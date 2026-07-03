@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { GITHUB_URL, RELEASES_URL } from "@/lib/links";
 import { DownloadIcon, GithubIcon } from "./icons";
+import { ThemeToggle } from "./theme-toggle";
 
 const LINKS = [
   { href: "/how-it-works", label: "How it works" },
@@ -63,6 +64,7 @@ export function Nav() {
         </ul>
 
         <div className="ml-auto flex items-center gap-2.5">
+          <ThemeToggle />
           <a
             href={GITHUB_URL}
             target="_blank"
@@ -76,7 +78,7 @@ export function Nav() {
             href={RELEASES_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden h-10 items-center gap-2 rounded-full bg-fg px-5 text-[14px] font-semibold text-bg transition-all duration-200 hover:bg-white active:scale-[0.98] sm:inline-flex"
+            className="hidden h-10 items-center gap-2 rounded-full bg-fg px-5 text-[14px] font-semibold text-bg transition-all duration-200 hover:bg-fg/90 active:scale-[0.98] sm:inline-flex"
           >
             <DownloadIcon className="size-4" />
             Download

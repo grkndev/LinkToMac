@@ -16,7 +16,7 @@ export function ButtonLink({
 }) {
   const styles =
     variant === "filled"
-      ? "bg-fg text-bg hover:bg-white active:scale-[0.98]"
+      ? "bg-fg text-bg hover:bg-fg/90 active:scale-[0.98]"
       : "bg-surface-3 text-fg hover:bg-surface-4 active:scale-[0.98]";
   const external = href.startsWith("http");
   return (

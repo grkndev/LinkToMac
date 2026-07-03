@@ -55,7 +55,7 @@ export default function About() {
           <SectionHeading
             eyebrow="About"
             title="Built because it didn't exist"
-            lead="Microsoft ships “Link to Windows”. Apple links iPhones to Macs. An Android phone next to a Mac gets nothing — this project fills that gap, without handing your clipboard to a cloud."
+            lead="Microsoft ships “Link to Windows®”. Apple® links iPhone® to Mac®. An Android phone next to a Mac gets nothing — this project fills that gap, without handing your clipboard to a cloud."
           />
         </div>
       </section>
@@ -127,7 +127,7 @@ export default function About() {
             <Reveal
               key={title}
               delay={i * 80}
-              className="group rounded-(--radius-card-lg) bg-surface-2 p-7 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/25"
+              className="group rounded-(--radius-card-lg) bg-surface-2 p-7 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10 dark:hover:shadow-black/25"
             >
               <IconBadge>{icon}</IconBadge>
               <h3 className="mt-5 text-[17px] font-bold tracking-tight">

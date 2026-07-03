@@ -18,7 +18,9 @@ import { HeroDevices } from "@/components/hero-devices";
 import { Reveal } from "@/components/reveal";
 import { ButtonLink, Chip, IconBadge, SectionHeading } from "@/components/ui";
 import { BorderBeam } from "@/components/ui/border-beam";
+import { MagicCard } from "@/components/ui/magic-card";
 import { GITHUB_URL, RELEASES_URL } from "@/lib/links";
+import { Highlighter } from "@/components/ui/highlighter";
 
 const FEATURES = [
   {
@@ -91,7 +93,10 @@ export default function Home() {
             </div>
             <h1 className="rise-2 mt-7 text-5xl font-extrabold tracking-tight text-balance sm:text-6xl md:text-7xl">
               Your phone and your Mac,{" "}
-              <span className="text-link-gradient">finally linked</span>.
+              <Highlighter action="underline" color="#FF9800" multiline strokeWidth={4}>
+                finally linked
+              </Highlighter>
+              .
             </h1>
             <p className="rise-3 mx-auto mt-6 max-w-xl text-lg leading-relaxed text-fg-2 text-pretty">
               Sync your clipboard both ways, lock your Mac from your phone, and
@@ -130,19 +135,24 @@ export default function Home() {
         </Reveal>
         <ul className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map(({ icon, title, text }, i) => (
-            <Reveal
-              as="li"
-              key={title}
-              delay={(i % 3) * 80}
-              className="group card-hairline relative rounded-(--radius-card-lg) bg-surface-2 p-7 transition-all duration-300 hover:-translate-y-1 hover:bg-surface-3 hover:shadow-xl hover:shadow-black/25"
-            >
-              <IconBadge>{icon}</IconBadge>
-              <h3 className="mt-5 text-[17px] font-bold tracking-tight">
-                {title}
-              </h3>
-              <p className="mt-2 text-[14.5px] leading-relaxed text-fg-2">
-                {text}
-              </p>
+            <Reveal as="li" key={title} delay={(i % 3) * 80}>
+              <MagicCard
+                gradientFrom="var(--blue)"
+                gradientTo="var(--cyan)"
+                gradientColor="var(--surface-3)"
+                gradientOpacity={0.55}
+                className="h-full rounded-(--radius-card-lg) [--color-background:var(--surface-2)] [--color-border:var(--line)] transition-[translate,box-shadow] duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10 dark:hover:shadow-black/25"
+              >
+                <div className="p-7">
+                  <IconBadge>{icon}</IconBadge>
+                  <h3 className="mt-5 text-[17px] font-bold tracking-tight">
+                    {title}
+                  </h3>
+                  <p className="mt-2 text-[14.5px] leading-relaxed text-fg-2">
+                    {text}
+                  </p>
+                </div>
+              </MagicCard>
             </Reveal>
           ))}
         </ul>
@@ -160,18 +170,24 @@ export default function Home() {
           </Reveal>
           <div className="mt-14 grid gap-4 md:grid-cols-3">
             {TRANSPORTS.map(({ icon, title, text }, i) => (
-              <Reveal
-                key={title}
-                delay={i * 80}
-                className="group card-hairline relative rounded-(--radius-card-lg) bg-surface-2 p-7 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/25"
-              >
-                <IconBadge tone="raised">{icon}</IconBadge>
-                <h3 className="mt-5 text-[17px] font-bold tracking-tight">
-                  {title}
-                </h3>
-                <p className="mt-2 text-[14.5px] leading-relaxed text-fg-2">
-                  {text}
-                </p>
+              <Reveal key={title} delay={i * 80}>
+                <MagicCard
+                  gradientFrom="var(--blue)"
+                  gradientTo="var(--cyan)"
+                  gradientColor="var(--surface-3)"
+                  gradientOpacity={0.55}
+                  className="h-full rounded-(--radius-card-lg) [--color-background:var(--surface-2)] [--color-border:var(--line)] transition-[translate,box-shadow] duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10 dark:hover:shadow-black/25"
+                >
+                  <div className="p-7">
+                    <IconBadge tone="raised">{icon}</IconBadge>
+                    <h3 className="mt-5 text-[17px] font-bold tracking-tight">
+                      {title}
+                    </h3>
+                    <p className="mt-2 text-[14.5px] leading-relaxed text-fg-2">
+                      {text}
+                    </p>
+                  </div>
+                </MagicCard>
               </Reveal>
             ))}
           </div>

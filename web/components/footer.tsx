@@ -103,7 +103,7 @@ export function Footer() {
 
       {/* Giant watermark wordmark, sinking off the bottom edge */}
       <div aria-hidden className="pointer-events-none select-none relative w-full overflow-hidden">
-        <p className="translate-y-[18%] text-center text-[11.5vw] leading-none font-extrabold tracking-tighter whitespace-nowrap text-surface-2">
+        <p className="translate-y-[18%] text-center text-[11.5vw] leading-none font-extrabold tracking-tighter whitespace-nowrap text-surface-3 dark:text-surface-2">
           Link to macOS
         </p>
       </div>
