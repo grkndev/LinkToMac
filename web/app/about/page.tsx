@@ -15,7 +15,7 @@ import { GITHUB_URL } from "@/lib/links";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "Why Link to macOS exists: a personal, self-hosted alternative to Link to Windows — what it does today, and what's on the roadmap.",
+    "Why Link to Mac exists: a personal, self-hosted alternative to Link to Windows — what it does today, and what's on the roadmap.",
 };
 
 const TODAY = [
@@ -63,7 +63,7 @@ export default function About() {
       <section className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
         <div className="rise-2 space-y-5 text-[15.5px] leading-relaxed text-fg-2">
           <p>
-            Link to macOS is a personal-use, open-source project by{" "}
+            Link to Mac is a personal-use, open-source project by{" "}
             <a
               href="https://github.com/grkndev"
               target="_blank"

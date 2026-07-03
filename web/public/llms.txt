@@ -1,4 +1,4 @@
-# Link to macOS
+# Link to Mac
 
 > A self-hosted link between an Android phone and a Mac: two-way clipboard sync, remote lock, proximity auto-lock over Bluetooth, live battery telemetry in both directions, and one-way notification & SMS mirroring. Works LAN-direct on the same Wi-Fi and falls back to a tiny WebSocket relay you host yourself — no third-party cloud, no account, no telemetry. In the spirit of Microsoft's "Link to Windows", but self-hosted.
 

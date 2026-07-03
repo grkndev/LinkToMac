@@ -20,16 +20,16 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Link to macOS — your phone and your Mac, linked",
-    template: "%s · Link to macOS",
+    default: "Link to Mac — your phone and your Mac, linked",
+    template: "%s · Link to Mac",
   },
   description:
     "Self-hosted phone↔Mac link: two-way clipboard sync, remote lock, proximity auto-lock, live battery, notification and SMS mirroring. Your Wi-Fi or your own relay — no third party.",
   abstract:
     "Self-hosted phone↔Mac link: two-way clipboard sync, remote lock, proximity auto-lock, live battery, notification and SMS mirroring. Your Wi-Fi or your own relay — no third party.",
-  applicationName: "Link to macOS",
-  authors: [{ name: "Link to macOS", url: "https://linktomac.com" }],
-  creator: "Link to macOS",
+  applicationName: "Link to Mac",
+  authors: [{ name: "Link to Mac", url: "https://linktomac.com" }],
+  creator: "Link to Mac",
   publisher: "grkndev",
   keywords: [
     "phone link",
@@ -48,11 +48,11 @@ export const metadata: Metadata = {
     "open source",
   ],
   openGraph: {
-    title: "Link to macOS — your phone and your Mac, linked",
+    title: "Link to Mac — your phone and your Mac, linked",
     description:
       "Self-hosted phone↔Mac link: two-way clipboard sync, remote lock, proximity auto-lock, live battery, notification and SMS mirroring. Your Wi-Fi or your own relay — no third party.",
     url: "https://linktomac.com",
-    siteName: "Link to macOS",
+    siteName: "Link to Mac",
     images: [
       {
         url: "/og.png",
@@ -65,7 +65,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Link to macOS — your phone and your Mac, linked",
+    title: "Link to Mac — your phone and your Mac, linked",
     description:
       "Self-hosted phone↔Mac link: two-way clipboard sync, remote lock, proximity auto-lock, live battery, notification and SMS mirroring. Your Wi-Fi or your own relay — no third party.",
     images: ["/og.png"],

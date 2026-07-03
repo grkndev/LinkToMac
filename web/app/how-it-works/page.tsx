@@ -18,7 +18,7 @@ import BeamsSection from "./BeamsSection";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "The architecture behind Link to macOS: LAN-direct and relay transports, the Bluetooth proximity beacon, end-to-end encryption, and the Android background trick.",
+    "The architecture behind Link to Mac: LAN-direct and relay transports, the Bluetooth proximity beacon, end-to-end encryption, and the Android background trick.",
 };
 
 const COMPONENTS = [
@@ -168,7 +168,7 @@ export default function HowItWorks() {
         <p className="mt-4 text-[15px] leading-relaxed text-fg-2">
           Modern Android doesn't let ordinary apps read the clipboard in the
           background — that would normally kill two-way sync the moment you
-          switch apps. Link to macOS gets around it honestly: the app pairs with
+          switch apps. Link to Mac gets around it honestly: the app pairs with
           the phone's <em>own</em> ADB over Wireless Debugging and starts a tiny
           privileged helper on the device itself. That helper has shell-level
           clipboard access and keeps running even after the app is swiped away.

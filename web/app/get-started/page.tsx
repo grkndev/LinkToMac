@@ -15,7 +15,7 @@ import { GITHUB_URL, RELEASES_URL } from "@/lib/links";
 export const metadata: Metadata = {
   title: "Get started",
   description:
-    "Set up Link to macOS: install the Mac menu-bar app and the Android app, pair with a QR code, and optionally host the relay for away-from-home sync.",
+    "Set up Link to Mac: install the Mac menu-bar app and the Android app, pair with a QR code, and optionally host the relay for away-from-home sync.",
 };
 
 function CodeBlock({ children }: { children: string }) {
@@ -88,7 +88,7 @@ export default function GetStarted() {
         <ol className="rise-3 space-y-5">
           <Step number={1} icon={<LaptopIcon />} title="Install the Mac app">
             <p>
-              Grab the DMG from the latest release, drag Link to macOS into
+              Grab the DMG from the latest release, drag Link to Mac into
               Applications and launch it — it lives in your menu bar. LAN-direct
               sync is on by default, so on the same Wi-Fi there is nothing to
               configure.

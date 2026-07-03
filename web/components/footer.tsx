@@ -28,7 +28,7 @@ export function Footer() {
               className="size-9"
             />
             <span className="text-2xl font-bold tracking-tight">
-              Link to macOS
+              Link to Mac
             </span>
           </div>
           <div className="mt-6 h-px w-40 bg-line" />
@@ -96,7 +96,7 @@ export function Footer() {
       {/* Legal row */}
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <div className="flex flex-col gap-2 border-t border-line py-6 text-[13px] text-fg-3 sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Link to macOS · built by <Link href={"https://grkn.dev"} target="_blank" rel="linktomac.com" className="text-fg-3 hover:text-fg">grkndev</Link></p>
+          <p>© 2026 Link to Mac · built by <Link href={"https://grkn.dev"} target="_blank" rel="linktomac.com" className="text-fg-3 hover:text-fg">grkndev</Link></p>
           <p>In the spirit of “Link to Windows” — but yours.</p>
         </div>
       </div>
@@ -104,7 +104,7 @@ export function Footer() {
       {/* Giant watermark wordmark, sinking off the bottom edge */}
       <div aria-hidden className="pointer-events-none select-none relative w-full overflow-hidden">
         <p className="translate-y-[18%] text-center text-[11.5vw] leading-none font-extrabold tracking-tighter whitespace-nowrap text-surface-3 dark:text-surface-2">
-          Link to macOS
+          Link to Mac
         </p>
       </div>
     </footer>

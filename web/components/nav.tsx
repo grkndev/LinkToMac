@@ -38,7 +38,7 @@ export function Nav() {
             priority
           />
           <span className="text-[15px] font-bold tracking-tight">
-            Link to macOS
+            Link to Mac
           </span>
         </Link>
 
