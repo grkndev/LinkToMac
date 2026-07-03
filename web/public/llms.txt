@@ -1,0 +1,31 @@
+# Link to macOS
+
+> A self-hosted link between an Android phone and a Mac: two-way clipboard sync, remote lock, proximity auto-lock over Bluetooth, live battery telemetry in both directions, and one-way notification & SMS mirroring. Works LAN-direct on the same Wi-Fi and falls back to a tiny WebSocket relay you host yourself — no third-party cloud, no account, no telemetry. In the spirit of Microsoft's "Link to Windows", but self-hosted.
+
+Important notes:
+
+- Personal-use, open-source project by grkndev; not distributed on the Play Store or App Store — you sideload the Android APK and install the Mac app from the GitHub releases page (or build both from source).
+- Everything that crosses a network is end-to-end encrypted with ChaCha20-Poly1305, keyed by a 32-byte secret shared once via a pairing QR code. Frames are type-bound with replay protection (freshness window + nonce cache). The relay only ever sees ciphertext.
+- Four components: an Expo/React Native Android app (with a Kotlin native module), a Swift 6 menu-bar agent for macOS with a dashboard window, a minimal Node.js WebSocket relay (Docker-ready, optional), and a privileged Android clipboard daemon started through the phone's own ADB over Wireless Debugging so clipboard sync survives the app being swiped away.
+- Proximity auto-lock is fully local: the phone broadcasts a BLE presence beacon and the Mac locks when the signal fades. Locking only — macOS has no auto-unlock API.
+- Current scope: one phone, one Mac, text clipboard (256 KB cap), read-only SMS. Roadmap: file transfer, replying to messages from the Mac, screen casting.
+
+## Pages
+
+- [Home](https://linktomac.com/): Product overview — features, transports (LAN-direct / self-hosted relay / Bluetooth), security model, and download links
+- [How it works](https://linktomac.com/how-it-works): Architecture — the phone↔relay↔Mac diagram, automatic transport fallback, end-to-end encryption details, the wireless-ADB "Android trick", and the four components
+- [Get started](https://linktomac.com/get-started): Setup guide — install the Mac app, sideload the Android app, pair with the QR code, and optionally host the relay
+- [About](https://linktomac.com/about): Why the project exists, what it does today, and the roadmap
+
+## Source & documentation
+
+- [GitHub repository](https://github.com/grkndev/LinkToMac): Full source code for all four components
+- [README](https://raw.githubusercontent.com/grkndev/LinkToMac/main/README.md): User-facing overview — features, how it works, getting started
+- [TECHNICAL.md](https://raw.githubusercontent.com/grkndev/LinkToMac/main/TECHNICAL.md): Authoritative internals doc — wire protocol, data paths, crypto envelope, echo suppression, the Android background trick
+- [Relay server README](https://raw.githubusercontent.com/grkndev/LinkToMac/main/server/README.md): Relay env vars, Docker usage, and reverse-proxy (wss/TLS) setup
+- [Latest release](https://github.com/grkndev/LinkToMac/releases/latest): Downloadable Mac DMG and Android APK
+
+## Optional
+
+- [Report an issue](https://github.com/grkndev/LinkToMac/issues): Bug reports and feature requests
+- [Author](https://grkn.dev): grkndev's personal site
