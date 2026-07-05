@@ -1,17 +1,27 @@
-import { MaterialIcons } from "@expo/vector-icons";
-import { Host, LinearProgressIndicator } from "@expo/ui/jetpack-compose";
-import { graphicsLayer } from "@expo/ui/jetpack-compose/modifiers";
 import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
+  Button,
+  Column,
+  Host,
+  LinearProgressIndicator,
+  ModalBottomSheet,
   Text,
-  useColorScheme,
-  View,
-} from "react-native";
+} from "@expo/ui/jetpack-compose";
+import type { ModalBottomSheetRef } from "@expo/ui/jetpack-compose";
+import {
+  background,
+  clip,
+  fillMaxWidth,
+  graphicsLayer,
+  height,
+  padding,
+  paddingAll,
+  Shapes,
+  verticalScroll,
+} from "@expo/ui/jetpack-compose/modifiers";
+import { useRef } from "react";
 
-import { SEED, useM3Colors } from "@/components/m3";
+import { useIcons } from "@/components/icons";
+import { IconCircle, tonal, useM3Colors } from "@/components/m3";
 import { Spacing } from "@/constants/theme";
 import { useAppUpdate } from "./use-app-update";
 
@@ -21,19 +31,22 @@ import { useAppUpdate } from "./use-app-update";
 const PROGRESS_SCALE_Y = 0.5;
 
 /**
- * The "new version available" dialog, shown over any screen when {@link useAppUpdate} has a
- * pending update. Built from React Native primitives (a transparent `Modal` + a themed card)
- * rather than an `@expo/ui` Compose `Host`: the host crashes when it's unmounted mid-measure on a
- * short-lived surface like a dialog, and a modal is exactly that. Colors still come from the shared
- * Material 3 palette so it reads as the same design language as the Compose screens.
+ * The "new version available" prompt, shown over any screen when {@link useAppUpdate} has a
+ * pending update — an M3 modal bottom sheet in the same language as the unpair ConfirmSheet
+ * (tonal icon badge, centered headline + consequence line, connected ButtonGroup). The anchoring
+ * Host is fixed-size (never `matchContents`): the sheet renders in its own window, and a
+ * matchContents Host can NPE if it unmounts mid-measure.
  *
  * Three shapes, one component:
  *  - **native** — a newer APK exists; the primary action opens the download (release notes shown).
  *  - **ota** — a JS update exists; the primary action fetches it and restarts the app in place.
- *  - **updating** — once the OTA fetch is in flight (`applyingOta`), the card switches to an
- *    "App is updating" state with an indeterminate native progress bar and a "Continue in
- *    background" escape hatch. The progress bar is the one Compose element here; it lives in a
- *    *fixed-size* Host (never `matchContents`) so it can't trip the unmount-mid-measure crash.
+ *  - **updating** — once the OTA fetch is in flight (`applyingOta`), the sheet switches to an
+ *    "App is updating" state with an indeterminate progress bar and a "Continue in background"
+ *    escape hatch; swipe/back/scrim dismissal is disabled so that hatch is the only way out.
+ *
+ * Every hook action ends in `setUpdate(null)`, which unmounts the sheet instantly — so each
+ * button animates `hide()` first, then fires the action. "Update & restart" is the exception:
+ * it keeps the sheet up and the content swaps to the updating state in place.
  */
 export function UpdateModal() {
   const {
@@ -45,249 +58,186 @@ export function UpdateModal() {
     dismiss,
   } = useAppUpdate();
   const colors = useM3Colors();
-  const scheme = useColorScheme();
+  const icons = useIcons();
+  const tone = tonal(colors, "secondary");
+  const sheetRef = useRef<ModalBottomSheetRef>(null);
 
   const native = update?.kind === "native" ? update : null;
 
+  const hideThen = async (action: () => void) => {
+    await sheetRef.current?.hide();
+    action();
+  };
+
   return (
-    <Modal
-      visible={
-        update != null
-      }
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      // While the OTA is downloading the back gesture can't dismiss the dialog;
-      // "Continue in background" is the only way out.
-      onRequestClose={() => {
-        if (!applyingOta) dismiss();
-      }}
-    >
-      <View
-        style={[
-          styles.scrim,
-          { backgroundColor: scheme === "dark" ? "#000000A6" : "#00000080" },
-        ]}
-      >
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: colors.surfaceContainerHigh },
-          ]}
+    <Host style={{ width: 1, height: 1 }}>
+      {update != null && (
+        <ModalBottomSheet
+          ref={sheetRef}
+          onDismissRequest={() => {
+            if (!applyingOta) dismiss();
+          }}
+          containerColor={colors.surfaceContainerLow}
+          sheetGesturesEnabled={!applyingOta}
+          properties={{
+            shouldDismissOnBackPress: !applyingOta,
+            shouldDismissOnClickOutside: !applyingOta,
+          }}
         >
-          <View
-            style={[
-              styles.iconCircle,
-              { backgroundColor: colors.secondaryContainer },
+          <Column
+            horizontalAlignment="center"
+            verticalArrangement={{ spacedBy: Spacing.three }}
+            modifiers={[
+              padding(Spacing.four, Spacing.two, Spacing.four, Spacing.five),
             ]}
           >
-            <MaterialIcons
-              name={native ? "system-update" : "cloud-download"}
-              size={26}
-              color={colors.onSecondaryContainer}
+            <IconCircle
+              source={icons.update}
+              container={tone.container}
+              on={tone.on}
+              diameter={56}
+              iconSize={28}
             />
-          </View>
 
-          {applyingOta ? (
-            //applyingOta
-            <>
-              <Text style={[styles.title, { color: colors.onSurface }]}>
-                App is updating
-              </Text>
-              <Text
-                style={[styles.message, { color: colors.onSurfaceVariant }]}
-              >
-                The app will restart automatically when it’s ready. You can continue using the app in the background.
-              </Text>
+            {applyingOta ? (
+              <>
+                <Column
+                  horizontalAlignment="center"
+                  verticalArrangement={{ spacedBy: Spacing.two }}
+                >
+                  <Text
+                    color={colors.onSurface}
+                    style={{
+                      typography: "headlineSmall",
+                      fontWeight: "bold",
+                      textAlign: "center",
+                    }}
+                  >
+                    App is updating
+                  </Text>
+                  <Text
+                    color={colors.onSurfaceVariant}
+                    style={{ typography: "bodyMedium", textAlign: "center" }}
+                  >
+                    The app will restart automatically when it’s ready. You can
+                    continue using the app in the background.
+                  </Text>
+                </Column>
 
-              <Host
-                style={styles.progressHost}
-                seedColor={SEED}
-                colorScheme={scheme}
-              >
                 <LinearProgressIndicator
                   color={colors.primary}
                   trackColor={colors.secondaryContainer}
                   modifiers={[
+                    fillMaxWidth(),
                     graphicsLayer({
                       scaleY: PROGRESS_SCALE_Y,
                       transformOriginY: 0.5,
                     }),
                   ]}
                 />
-              </Host>
 
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={continueInBackground}
-                  style={({ pressed }) => [
-                    styles.textButton,
-                    pressed && styles.pressed,
-                  ]}
+                <Button
+                  onClick={() => hideThen(continueInBackground)}
+                  colors={{
+                    containerColor: "transparent",
+                    contentColor: colors.primary,
+                  }}
+                  contentPadding={{ top: 14, bottom: 14 }}
                 >
-                  <Text
-                    style={[styles.textButtonLabel, { color: colors.primary }]}
-                  >
+                  <Text style={{ fontWeight: "600" }}>
                     Continue in background
                   </Text>
-                </Pressable>
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={[styles.title, { color: colors.onSurface }]}>
-                {native ? "New version available" : "Update available"}
-              </Text>
-              <Text
-                style={[styles.message, { color: colors.onSurfaceVariant }]}
-              >
-                {native
-                  ? `Version ${native.version} is ready. Download the new app to update — your settings and pairing are kept.`
-                  : "A new update is ready. Download it and restart the app to apply it."}
-              </Text>
-
-              {native?.notes ? (
-                <ScrollView
-                  style={[
-                    styles.notes,
-                    { backgroundColor: colors.surfaceContainer },
-                  ]}
-                  contentContainerStyle={styles.notesContent}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Column
+                  horizontalAlignment="center"
+                  verticalArrangement={{ spacedBy: Spacing.two }}
                 >
                   <Text
-                    style={[
-                      styles.notesText,
-                      { color: colors.onSurfaceVariant },
+                    color={colors.onSurface}
+                    style={{
+                      typography: "headlineSmall",
+                      fontWeight: "bold",
+                      textAlign: "center",
+                    }}
+                  >
+                    {native ? "New version available" : "Update available"}
+                  </Text>
+                  <Text
+                    color={colors.onSurfaceVariant}
+                    style={{ typography: "bodyMedium", textAlign: "center" }}
+                  >
+                    {native
+                      ? `Version ${native.version} is ready. Download the new app to update — your settings and pairing are kept.`
+                      : "A new update is ready. Download it and restart the app to apply it."}
+                  </Text>
+                </Column>
+
+                {native?.notes ? (
+                  <Column
+                    modifiers={[
+                      fillMaxWidth(),
+                      height(150),
+                      clip(Shapes.RoundedCorner(16)),
+                      background(colors.surfaceContainer),
+                      verticalScroll(),
                     ]}
                   >
-                    {native.notes}
-                  </Text>
-                </ScrollView>
-              ) : null}
+                    <Column modifiers={[paddingAll(Spacing.three)]}>
+                      <Text
+                        color={colors.onSurfaceVariant}
+                        style={{ typography: "bodySmall" }}
+                      >
+                        {native.notes}
+                      </Text>
+                    </Column>
+                  </Column>
+                ) : null}
 
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={dismiss}
-                  style={({ pressed }) => [
-                    styles.textButton,
-                    pressed && styles.pressed,
-                  ]}
+                {/* Stacked actions: full-width filled primary, then "Later" as a small text
+                    (label) button beneath. Sized with fillMaxWidth, NOT weight() — weight is
+                    ignored on Button inside the sheet. */}
+                <Column
+                  horizontalAlignment="center"
+                  verticalArrangement={{ spacedBy: 2 }}
+                  modifiers={[fillMaxWidth()]}
                 >
-                  <Text
-                    style={[styles.textButtonLabel, { color: colors.primary }]}
+                  <Button
+                    onClick={
+                      native ? () => hideThen(openDownload) : () => applyOta()
+                    }
+                    colors={{
+                      containerColor: colors.primary,
+                      contentColor: colors.onPrimary,
+                    }}
+                    contentPadding={{ top: 14, bottom: 14 }}
+                    modifiers={[fillMaxWidth(1)]}
                   >
-                    Later
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={native ? openDownload : applyOta}
-                  style={({ pressed }) => [
-                    styles.filledButton,
-                    { backgroundColor: colors.primary },
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.filledButtonLabel,
-                      { color: colors.onPrimary },
-                    ]}
+                    <Text style={{ fontWeight: "600" }}>
+                      {native ? "Download" : "Update & Restart"}
+                    </Text>
+                  </Button>
+
+                  <Button
+                    onClick={() => hideThen(dismiss)}
+                    colors={{
+                      containerColor: "transparent",
+                      contentColor: colors.primary,
+                    }}
+                    contentPadding={{ top: 14, bottom: 14 }}
                   >
-                    {native ? "Download" : "Update & restart"}
-                  </Text>
-                </Pressable>
-              </View>
-            </>
-          )}
-        </View>
-      </View>
-    </Modal>
+                    <Text style={{ fontWeight: "600", fontSize: 12 }}>
+                      Later
+                    </Text>
+                  </Button>
+                </Column>
+              </>
+            )}
+          </Column>
+        </ModalBottomSheet>
+      )}
+    </Host>
   );
 }
-
-const styles = StyleSheet.create({
-  scrim: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: Spacing.four,
-  },
-  card: {
-    width: "100%",
-    maxWidth: 360,
-    borderRadius: 28,
-    padding: Spacing.four,
-    alignItems: "center",
-    gap: Spacing.two,
-  },
-  iconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.one,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "600",
-    textAlign: "center",
-  },
-  message: {
-    fontSize: 14,
-    lineHeight: 18,
-    textAlign: "center",
-  },
-  // Fixed height (never matchContents) so the Compose Host can't NPE if it unmounts
-  // mid-measure when the app reloads or the dialog is backgrounded.
-  progressHost: {
-    alignSelf: "stretch",
-    height: 12,
-    marginTop: Spacing.two,
-    backgroundColor: "transparent",
-  },
-  notes: {
-    alignSelf: "stretch",
-    maxHeight: 160,
-    borderRadius: 16,
-    marginTop: Spacing.one,
-  },
-  notesContent: {
-    padding: Spacing.three,
-  },
-  notesText: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  actions: {
-    flexDirection: "row",
-    alignSelf: "stretch",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    gap: Spacing.two,
-    marginTop: Spacing.three,
-  },
-  textButton: {
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    borderRadius: 20,
-  },
-  textButtonLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  filledButton: {
-    paddingVertical: Spacing.two + 2,
-    paddingHorizontal: Spacing.four,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  filledButtonLabel: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-});

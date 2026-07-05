@@ -331,7 +331,10 @@ export default function HomeScreen() {
             value={clipValue}
             onClick={() => router.push("/clipboard-history")}
           />
+
+
         </Group>
+
       </Column>
     </Host>
   );

@@ -10,6 +10,7 @@ import { Alert, AppState, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useIcons } from "@/components/icons";
+import ConfirmSheet from "@/components/ModalBottomSheet";
 import { ActionRow, InfoRow, SwitchRow } from "@/components/settings-rows";
 import { Group, SEED, useM3Colors } from "@/components/m3";
 import { Spacing } from "@/constants/theme";
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
   const [smsAccess, setSmsAccess] = useState<boolean | null>(null);
   const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
   const [proximityOn, setProximityOn] = useState(false);
+  const [confirmingUnpair, setConfirmingUnpair] = useState(false);
   // True while a proximity toggle is mid-flight. The permission prompt below
   // backgrounds the app, so the AppState "active" re-check would otherwise read
   // a not-yet-started beacon and clobber the switch back OFF (issue #2).
@@ -137,18 +139,8 @@ export default function SettingsScreen() {
       });
   };
 
-  const confirmUnpair = () => {
-    Alert.alert(
-      "Remove Pairing",
-      "The pairing will be removed and the connection to the Mac will be disconnected. You will need to scan the QR code from your Mac to pair again.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Remove", style: "destructive", onPress: () => unpair() },
-      ],
-    );
-  };
-
   return (
+    <>
     <Host
       style={{ flex: 1, backgroundColor: colors.background }}
       seedColor={SEED}
@@ -286,7 +278,7 @@ export default function SettingsScreen() {
             label="Remove Pairing"
             hint="Disconnect and remove the pairing."
             destructive
-            onPress={confirmUnpair}
+            onPress={() => setConfirmingUnpair(true)}
           />
           <ActionRow
             colors={colors}
@@ -305,5 +297,14 @@ export default function SettingsScreen() {
         </Group>
       </Column>
     </Host>
+    <ConfirmSheet
+      visible={confirmingUnpair}
+      onDismiss={() => setConfirmingUnpair(false)}
+      onConfirm={() => unpair()}
+      title="Remove pairing?"
+      message="Your Mac will be disconnected and the pairing removed. To pair again, scan the QR code from your Mac."
+      confirmLabel="Remove"
+    />
+    </>
   );
 }
