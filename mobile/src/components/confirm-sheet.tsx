@@ -60,6 +60,8 @@ export default function ConfirmSheet({
           ref={sheetRef}
           onDismissRequest={onDismiss}
           containerColor={colors.surfaceContainerLow}
+          // One dynamic snap point at content height (house sheet behavior — see update-modal).
+          skipPartiallyExpanded
         >
           <Column
             horizontalAlignment="center"

@@ -77,6 +77,9 @@ export function UpdateModal() {
             if (!applyingOta) dismiss();
           }}
           containerColor={colors.surfaceContainerLow}
+          // One dynamic snap point at full content height — the default partial snap cut the
+          // release notes + Download button off mid-sheet.
+          skipPartiallyExpanded
           sheetGesturesEnabled={!applyingOta}
           properties={{
             shouldDismissOnBackPress: !applyingOta,
