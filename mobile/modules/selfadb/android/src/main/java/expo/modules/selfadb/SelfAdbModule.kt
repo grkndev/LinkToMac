@@ -38,8 +38,9 @@ class SelfAdbModule : Module() {
 
   private companion object {
     // Cap the daemon-log read so a single adb transfer never exceeds libadb's
-    // maxdata-sized read buffer (which would throw BufferOverflowException).
-    const val LOG_TAIL_BYTES = 65536
+    // maxdata-sized read buffer (which would throw BufferOverflowException). 64 KB still
+    // overflowed on One UI (observed 2026-07-06 on a spam-bloated clip.log) — 32 KB holds.
+    const val LOG_TAIL_BYTES = 32768
 
     // How long deploy() waits for the freshly launched daemon to bind its socket before
     // declaring the launch a failure (-> need-connect, instead of a false "ready"). launchDaemon
@@ -106,7 +107,14 @@ class SelfAdbModule : Module() {
       //    still hold the secret it was launched with — alive + no persisted secret means
       //    our data was cleared since its launch, the bridge could never authenticate, so
       //    fall through to the ADB path where deploy() restarts it under a fresh secret.
-      if (daemonAlive(clipPort) && ClipForegroundService.getDaemonSecret(appCtx) != null) {
+      //    A flapping bridge fails this gate too: holding *a* secret proves nothing when the
+      //    daemon keeps dropping us (it was launched by another install with a different
+      //    secret — dev/prod fighting over one port). Fall through so deploy() reclaims it.
+      if (
+        daemonAlive(clipPort) &&
+        ClipForegroundService.getDaemonSecret(appCtx) != null &&
+        !bridgeFlapping()
+      ) {
         log("daemon already alive on :$clipPort")
         ClipForegroundService.start(appCtx, clipPort)
         status("connected", "running")
@@ -235,9 +243,14 @@ class SelfAdbModule : Module() {
      * Uses [daemonAlive] (bridge-first), NOT a raw probe: the daemon's ServerSocket has
      * backlog 1 and only serves the bridge, so a competing probe would wrongly fail while the
      * daemon is healthy (and pile up in the accept queue).
+     *
+     * "Alive" means alive FOR US: a daemon that keeps dropping our bridge (owned by another
+     * install) reports false, so the JS heartbeat's miss counter trips a refresh -> autoStart
+     * falls past its fast path -> deploy() kills + relaunches the daemon under our secret.
+     * Without this the heartbeat sees an open port and the flap never self-heals.
      */
     AsyncFunction("isDaemonAlive") {
-      daemonAlive(ClipForegroundService.DEFAULT_PORT)
+      daemonAlive(ClipForegroundService.getClipPort(appCtx)) && !bridgeFlapping()
     }
 
     // ---- Relay (native WS to the Mac, runs in the foreground service) --------
@@ -495,7 +508,7 @@ class SelfAdbModule : Module() {
      * off. The detached daemon survives that toggle.
      */
     AsyncFunction("readDaemonLog") {
-      val socketUp = daemonAlive(ClipForegroundService.DEFAULT_PORT)
+      val socketUp = daemonAlive(ClipForegroundService.getClipPort(appCtx))
       val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
       try {
         val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
@@ -570,13 +583,14 @@ class SelfAdbModule : Module() {
     // one (a running daemon's expectation can't change); mint one only when absent.
     val hadSecret = ClipForegroundService.getDaemonSecret(appCtx) != null
     val secret = ClipForegroundService.getOrCreateDaemonSecret(appCtx)
-    if (daemonAlive(clipPort) && hadSecret) {
+    if (daemonAlive(clipPort) && hadSecret && !bridgeFlapping()) {
       log("daemon already alive on :$clipPort")
     } else {
       if (daemonAlive(clipPort)) {
-        // Alive but launched under a secret we no longer know (fresh install / cleared
-        // data) — it would reject our bridge forever. Restart it under the fresh secret.
-        log("daemon alive but its secret is unknown -> restarting it")
+        // Alive but not OURS: launched under a secret we don't hold (fresh install / cleared
+        // data), or it keeps dropping our bridge (another install owns it). Either way it
+        // would never serve us — restart it under our secret.
+        log("daemon alive but not serving us -> restarting it")
         log("kill: " + adb.killDaemon())
       }
       log("pushing clipboard-agent.dex -> /data/local/tmp")
@@ -625,6 +639,11 @@ class SelfAdbModule : Module() {
    */
   private fun daemonAlive(port: Int): Boolean =
     ClipForegroundService.instance?.isBridgeConnected() == true || probe(port)
+
+  /** The FGS bridge reports the daemon repeatedly accepts-then-drops it — the daemon is owned
+   *  by another install (wrong secret or eviction) and must be redeployed, not trusted. */
+  private fun bridgeFlapping(): Boolean =
+    ClipForegroundService.instance?.isBridgeFlapping() == true
 
   /** Poll until the daemon binds its socket (or the bridge reconnects) or [timeoutMs] elapses. */
   private fun waitForDaemon(port: Int, timeoutMs: Long): Boolean {

@@ -272,14 +272,23 @@ to *launch* (or relaunch) it — never for the steady-state data path.
 
 ### 3.4 The bridge + foreground service (`ClipBridge.kt`, `ClipForegroundService.kt`)
 
-- **`ClipBridge`** is the on-device localhost *client* to the daemon. It connects to
-  `127.0.0.1:53123`, retries with backoff until the daemon's `ServerSocket` is up, sends the
-  `auth` line first (the persisted daemon secret — see §3.3), then reads `clip` lines and
-  writes `write` commands. `stop()` closes the socket (an `interrupt()` can't unblock a parked
-  `readLine()`), and every exit path closes the per-iteration socket so an abnormal read error
-  can't leak the fd. The daemon serves connections on **per-connection handler threads with
-  newest-wins eviction**: a freshly authenticated bridge replaces (closes) the previous live
-  connection, so a wedged old connection can never lock a restarted bridge out.
+- **`ClipBridge`** is the on-device localhost *client* to the daemon. It connects to the
+  per-variant clip port (dev `53125` / prod `53123` — `app.config.ts extra.clipPort`, persisted
+  natively as `KEY_CLIP_PORT`), retries with backoff until the daemon's `ServerSocket` is up,
+  sends the `auth` line first (the persisted daemon secret — see §3.3), then reads `clip` lines
+  and writes `write` commands. `stop()` closes the socket (an `interrupt()` can't unblock a
+  parked `readLine()`), and every exit path closes the per-iteration socket so an abnormal read
+  error can't leak the fd. The daemon serves connections on **per-connection handler threads
+  with newest-wins eviction**: a freshly authenticated bridge replaces (closes) the previous
+  live connection, so a wedged old connection can never lock a restarted bridge out.
+- **Flap detection**: the backoff only resets after a connection *survives* ≥ 3 s — a daemon
+  that accepts-then-drops the bridge (wrong secret, or another install's client evicting ours;
+  both happen when two installs share a daemon) no longer produces a silent 500 ms
+  "bridge connected" spam loop. Three consecutive short-lived drops = **flapping**: the bridge
+  logs the reason once, backs off to 15 s, and `isDaemonAlive` starts reporting `false` so the
+  JS heartbeat triggers `autoStart`, whose fast path and `deploy()` both treat a flapping
+  bridge as "daemon not ours" and **kill + relaunch it under our secret** (self-heal, no
+  reboot needed).
 - **`ClipForegroundService`** owns the bridge, the relay WS client, and the BLE advertiser. It
   runs as a **`START_STICKY` foreground service** with type `specialUse|connectedDevice`
   (Android 14+ requires a declared type). Because it's `START_STICKY`, the system restarts it
@@ -311,8 +320,8 @@ One `autoStart(clipPort)` call drives the whole bring-up and returns a state str
 root layout gates a screen on:
 
 ```
-probe localhost:53123 ── alive + secret known ───────────────────► "ready"   (attach, no ADB)
-        │ dead (or alive with an unknown secret -> restart it via ADB below)
+probe localhost:<clipPort> ── alive + secret known + not flapping ─► "ready"  (attach, no ADB)
+        │ dead (or alive with an unknown secret / dropping our bridge -> restart it via ADB below)
    isPaired()? ── no ──────────────────────────────────────────► "need-pair"
         │ yes
    self-enable Wireless Debugging (if WRITE_SECURE_SETTINGS held)
@@ -849,10 +858,10 @@ mobile/native-src/clipboard-agent/
   build-dex.sh              javac → d8 → dex
 
 mobile/src/features/
-  selfadb/use-clip-boot.ts  boot state machine (JS gate)
-  relay/pairing-store.ts    SecureStore pairing + v2 QR parse (pairing + server config)
-  relay/server-config.ts    SecureStore relay endpoint (host/port/TLS/password)
-  relay/use-mac-battery.ts  Mac battery (stat) hook → Home-screen chip
+  selfadb/use-clip-boot.ts      boot state machine (JS gate)
+  pairing/pairing-store.ts      SecureStore pairing + v2 QR parse (pairing + server config)
+  connection/server-config.ts   SecureStore relay endpoint (host/port/TLS/password)
+  telemetry/use-mac-battery.ts  Mac battery (stat) hook → Home-screen chip
 mobile/src/app/
   server-config.tsx         Relay server settings screen
 ```

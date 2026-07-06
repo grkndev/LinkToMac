@@ -27,7 +27,7 @@ const BUNDLE_ID = IS_DEV ? 'com.grkndev.linktomac.dev' : 'com.grkndev.linktomac'
 // older one). For a 2nd+ build on the SAME day, bump the counter via the BUILD_NUMBER env
 // (BUILD_NUMBER=2 -> ...002). Stays under Android's signed 32-bit cap (2,147,483,647): the
 // max representable value is 991231999, i.e. it overflows only in the year 2100.
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const now = new Date();
 const DATE_PREFIX =
   (now.getFullYear() % 100) * 10_000 + (now.getMonth() + 1) * 100 + now.getDate();
@@ -102,6 +102,11 @@ export default (_: ConfigContext): ExpoConfig => ({
     eas: {
       projectId: '4fe65b6d-6718-4865-933a-badabf77c68c',
     },
+    // Per-variant daemon port: dev and prod installs coexist on one phone, and a shared port
+    // means whichever install deploys the daemon last owns it while the other's bridge flaps
+    // (rejected/evicted every retry). The native side persists whatever JS passes to
+    // autoStart, so this constant is the single source (see features/selfadb/client.ts).
+    clipPort: IS_DEV ? 53125 : 53123,
   },
   updates: {
     url: 'https://u.expo.dev/4fe65b6d-6718-4865-933a-badabf77c68c',

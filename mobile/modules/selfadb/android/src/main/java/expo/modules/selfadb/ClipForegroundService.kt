@@ -87,7 +87,11 @@ class ClipForegroundService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    val port = intent?.getIntExtra(EXTRA_PORT, DEFAULT_PORT) ?: DEFAULT_PORT
+    // Persist the explicit port so a null-intent START_STICKY restart (no JS) reuses it —
+    // the dev variant runs on its own port, and falling back to DEFAULT_PORT would silently
+    // bridge to the other install's daemon.
+    val port = intent?.getIntExtra(EXTRA_PORT, DEFAULT_PORT)?.also { setClipPort(this, it) }
+      ?: getClipPort(this)
     instance = this
     sendPaused = getClipSendPaused(this)
     val daemonSecret = getDaemonSecret(this)
@@ -132,6 +136,10 @@ class ClipForegroundService : Service() {
 
   /** Whether the localhost bridge currently holds a live connection to the daemon. */
   fun isBridgeConnected(): Boolean = bridge?.isConnected() == true
+
+  /** Whether the daemon keeps accepting-then-dropping the bridge (wrong secret / eviction —
+   *  i.e. the daemon is owned by another install). autoStart redeploys when this is set. */
+  fun isBridgeFlapping(): Boolean = bridge?.isFlapping() == true
 
   /**
    * Send a remote action to the Mac (e.g. "lock"). Independent of [sendPaused]: the pause
@@ -503,9 +511,23 @@ class ClipForegroundService : Service() {
     private const val KEY_SMS_FORWARDING = "smsForwarding"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     private const val KEY_DAEMON_SECRET = "daemonSecret"
+    private const val KEY_CLIP_PORT = "clipPort"
     /** How long a write stamp lives before it can no longer suppress an echo. */
     private const val ECHO_WINDOW_MS = 10_000L
     const val DEFAULT_PORT = 53123
+
+    /** The daemon port this install actually runs on (per-variant; JS passes it to autoStart).
+     *  Persisted in PREFS_UI so START_STICKY restarts and adb-free liveness checks agree with
+     *  the JS-chosen port instead of assuming [DEFAULT_PORT]. */
+    fun getClipPort(ctx: Context): Int =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getInt(KEY_CLIP_PORT, DEFAULT_PORT)
+
+    private fun setClipPort(ctx: Context, port: Int) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putInt(KEY_CLIP_PORT, port)
+        .apply()
+    }
 
     /** The bridge-auth secret the daemon was launched with (null = never launched an
      *  auth-aware daemon). Lives in PREFS_UI, NOT PREFS: an unpair wipes PREFS but must not

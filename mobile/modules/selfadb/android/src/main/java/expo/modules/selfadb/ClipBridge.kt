@@ -26,6 +26,10 @@ class ClipBridge(
   @Volatile private var running = false
   @Volatile private var out: OutputStream? = null
   @Volatile private var sock: Socket? = null
+  /** Consecutive connections the daemon dropped young (< SHORT_LIVED_MS). A streak means the
+   *  daemon is closing us on purpose — auth reject (wrong secret) or newest-wins eviction, i.e.
+   *  the daemon is owned by another install. Reset by one connection that survives. */
+  @Volatile private var shortStreak = 0
   private var thread: Thread? = null
 
   fun start() {
@@ -37,8 +41,10 @@ class ClipBridge(
     var attempt = 0
     while (running) {
       val s = Socket()
+      var connectedAt = 0L
       try {
         s.connect(InetSocketAddress("127.0.0.1", port), 2000)
+        connectedAt = System.currentTimeMillis()
         sock = s // published so stop() can close it out from under a blocked readLine()
         val o = s.getOutputStream()
         // Authenticate FIRST: the daemon serves nothing (not even the initial clip sync)
@@ -49,7 +55,6 @@ class ClipBridge(
           o.flush()
         }
         out = o
-        attempt = 0
         onLog("bridge connected :$port")
         val r = BufferedReader(InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8))
         var line: String? = r.readLine()
@@ -58,7 +63,7 @@ class ClipBridge(
           line = r.readLine()
         }
       } catch (e: Exception) {
-        if (running) onLog("bridge retry (${e.message})")
+        if (running && connectedAt == 0L) onLog("bridge retry (${e.message})")
       } finally {
         // Every exit path (clean EOF, IOException, stop()) drops the fd — the old code
         // leaked the socket on an abnormal read error.
@@ -67,9 +72,31 @@ class ClipBridge(
         try { s.close() } catch (_: Exception) {}
       }
       if (!running) break
+      // Score the connection that just ended. Only a connection that SURVIVED resets the
+      // backoff — a bare TCP connect must not (a daemon that accepts then instantly drops us
+      // used to reset `attempt` every cycle, spamming "bridge connected" every 500 ms forever).
+      if (connectedAt > 0L) {
+        val lived = System.currentTimeMillis() - connectedAt
+        if (lived >= SHORT_LIVED_MS) {
+          attempt = 0
+          shortStreak = 0
+        } else {
+          shortStreak++
+          if (running) onLog("bridge dropped by daemon after ${lived}ms (auth reject or eviction)")
+          if (shortStreak == FLAP_THRESHOLD && running) {
+            onLog(
+              "bridge: daemon keeps dropping us — it was likely launched by another install " +
+                "(dev/prod both use :$port). Backing off; next autoStart will redeploy it."
+            )
+          }
+        }
+      }
       attempt++
       try {
-        Thread.sleep(minOf(500L * attempt, 3000L))
+        // A confirmed drop-streak backs WAY off: the daemon is actively refusing us, so a
+        // tight retry only burns battery and floods clip.log until a redeploy fixes ownership.
+        val delay = if (shortStreak >= FLAP_THRESHOLD) FLAP_BACKOFF_MS else minOf(500L * attempt, 3000L)
+        Thread.sleep(delay)
       } catch (e: InterruptedException) {
         break
       }
@@ -106,6 +133,10 @@ class ClipBridge(
   /** Whether we currently hold a live connection to the daemon (vs. retrying). */
   fun isConnected(): Boolean = running && out != null
 
+  /** The daemon keeps accepting then dropping us — wrong secret or another install's client is
+   *  evicting ours. autoStart uses this to redeploy the daemon instead of trusting it. */
+  fun isFlapping(): Boolean = running && shortStreak >= FLAP_THRESHOLD
+
   fun stop() {
     running = false
     // close() is what actually unblocks a readLine() parked on the socket — interrupt() alone
@@ -113,5 +144,15 @@ class ClipBridge(
     // so a restarted bridge could never be accept()ed again.
     try { sock?.close() } catch (_: Exception) {}
     thread?.interrupt()
+  }
+
+  private companion object {
+    /** A connection that dies younger than this was dropped on purpose (auth reject is
+     *  instant; duel evictions cycle sub-second). Genuine idle connections live forever. */
+    const val SHORT_LIVED_MS = 3_000L
+    /** Consecutive short-lived drops before we call it a flap and back off. */
+    const val FLAP_THRESHOLD = 3
+    /** Retry interval once flapping is confirmed (vs. the normal 3 s cap). */
+    const val FLAP_BACKOFF_MS = 15_000L
   }
 }
