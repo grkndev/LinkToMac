@@ -63,8 +63,16 @@ export function UpdateModal() {
   const tone = tonal(colors, "secondary");
   const sheetRef = useRef<ModalBottomSheetRef>(null);
 
+  // Animate the sheet away, then fire the action (which unmounts it). The hide() is raced
+  // against a timeout because Compose's sheetState.hide() SUSPENDS FOREVER while
+  // sheetGesturesEnabled is false (the applyingOta state) — an un-raced await left
+  // "Continue in background" dead and the sheet inescapable. Unmounting is what actually
+  // removes the window, so timing out just skips the animation, never the action.
   const hideThen = async (action: () => void) => {
-    await sheetRef.current?.hide();
+    await Promise.race([
+      sheetRef.current?.hide() ?? Promise.resolve(),
+      new Promise((resolve) => setTimeout(resolve, 600)),
+    ]);
     action();
   };
 
