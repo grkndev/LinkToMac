@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
+import { TimeoutError, withTimeout } from '@/lib/async';
 import SelfAdb, { CLIP_PORT } from './client';
+import { useDaemonHeartbeat } from './use-daemon-heartbeat';
 
 /**
  * Hard ceiling for a single autoStart(). The native call has bounded timeouts on
@@ -11,20 +13,6 @@ import SelfAdb, { CLIP_PORT } from './client';
  * the boot state never leaves 'booting' and the app hangs on the spinner.
  */
 const AUTOSTART_TIMEOUT_MS = 20_000;
-
-/** How often we re-probe the on-device daemon while we believe we're connected. */
-const DAEMON_POLL_MS = 5_000;
-
-/** Distinguishes "native call stalled" from a real native error in the catch. */
-class TimeoutError extends Error {}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError(`${label} ${ms} ms içinde yanıt vermedi`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
 
 export type BootState =
   | 'booting' // first autoStart in flight
@@ -130,46 +118,8 @@ export function useClipBoot(): ClipBoot {
     return () => sub.remove();
   }, [refresh]);
 
-  // While we believe we're connected, make sure the on-device daemon is actually alive. It
-  // doesn't survive a reboot, and a launch can silently fail (a false "ready"), leaving the
-  // bridge looping ECONNREFUSED with no signal. Probe it; after two confirmed misses, re-run
-  // autoStart -> it self-heals (re-enable wireless debugging + redeploy -> back to 'ready')
-  // or surfaces the reconnect/pair screen via 'need-connect'/'need-pair'.
-  useEffect(() => {
-    if (state !== 'ready') return;
-    let misses = 0;
-    let cancelled = false;
-
-    const check = async () => {
-      if (cancelled || busy.current) return; // a refresh is already in flight
-      if (AppState.currentState !== 'active') return; // the foreground service owns background recovery
-      let alive = false;
-      try {
-        alive = await SelfAdb.isDaemonAlive();
-      } catch {
-        alive = false;
-      }
-      if (cancelled) return;
-      if (alive) {
-        misses = 0;
-        return;
-      }
-      if (++misses >= 2) {
-        misses = 0;
-        refresh(); // autoStart -> 'ready' (silent heal) | 'need-connect' | 'need-pair'
-      }
-    };
-
-    const interval = setInterval(check, DAEMON_POLL_MS);
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') check();
-    });
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      sub.remove();
-    };
-  }, [state, refresh]);
+  // Skip a probe while a refresh is already in flight (busy) — see use-daemon-heartbeat.
+  useDaemonHeartbeat(state === 'ready', refresh, () => busy.current);
 
   return { state, error, refresh, pair };
 }

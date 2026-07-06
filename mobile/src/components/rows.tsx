@@ -14,7 +14,7 @@ import {
   weight,
 } from "@expo/ui/jetpack-compose/modifiers";
 import type { ReactNode } from "react";
-import { Alert } from "react-native";
+import { Alert } from "@/components/AlertDialog";
 
 import { type IconSource } from "@/components/icons";
 import {
@@ -300,8 +300,8 @@ export function ActionTile({
   const handleClick = active
     ? onPress
     : onPress != null
-      ? () => Alert.alert("Not connected", "Connect to your Mac first.")
-      : () => Alert.alert("Soon", "This feature is not available yet.");
+      ? () => Alert.show("Not connected", "Connect to your Mac first.", "OK")
+      : () => Alert.show("Soon", "This feature is not available yet.", "OK");
   return (
     <Surface
       color={colors.surfaceContainerHigh}

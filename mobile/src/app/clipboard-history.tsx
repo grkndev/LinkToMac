@@ -1,15 +1,9 @@
 import {
   Box,
   Column,
-  Host,
-  Icon,
-  ListItem,
   LoadingIndicator,
-  Surface,
   Text,
-  type MaterialColors,
 } from "@expo/ui/jetpack-compose";
-import * as Haptics from "expo-haptics";
 import {
   fillMaxSize,
   fillMaxWidth,
@@ -18,37 +12,24 @@ import {
 } from "@expo/ui/jetpack-compose/modifiers";
 import { useNavigation } from "expo-router";
 import { useLayoutEffect } from "react";
-import {
-  Alert,
-  Pressable,
-  Text as RNText,
-  ToastAndroid,
-  useColorScheme,
-} from "react-native";
+import { Alert, ToastAndroid } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useIcons, type IconSource } from "@/components/icons";
-import {
-  Group,
-  IconCircle,
-  SEED,
-  groupShape,
-  tonal,
-  useM3Colors,
-  type RowShape,
-} from "@/components/m3";
+import { HeaderTextButton } from "@/components/header-button";
+import { useIcons } from "@/components/icons";
+import { Group, IconCircle, useM3Colors } from "@/components/m3";
+import { M3Host } from "@/components/m3-screen";
+import { ClipRow } from "@/components/rows";
 import { Spacing } from "@/constants/theme";
-import {
-  useClipHistory,
-  type ClipItem,
-} from "@/features/clip-history/use-clip-history";
+import { useClipHistory } from "@/features/clip-history/use-clip-history";
 import SelfAdb from "@/features/selfadb/client";
+import { haptic } from "@/lib/haptics";
+import { formatRelative, preview } from "@/lib/text";
 
 /** Clipboard items received from the paired Mac — newest first, tap any to copy it back. */
 export default function ClipboardHistoryScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const colors = useM3Colors();
   const icons = useIcons();
   const { items, clear } = useClipHistory();
@@ -60,8 +41,9 @@ export default function ClipboardHistoryScreen() {
     navigation.setOptions({
       headerRight: hasItems
         ? () => (
-            <Pressable
-              hitSlop={8}
+            <HeaderTextButton
+              label="Clear"
+              color={colors.primary}
               onPress={() =>
                 Alert.alert(
                   "Clear history",
@@ -72,17 +54,7 @@ export default function ClipboardHistoryScreen() {
                   ],
                 )
               }
-            >
-              <RNText
-                style={{
-                  color: colors.primary,
-                  fontSize: 16,
-                  fontWeight: "600",
-                }}
-              >
-                Clear
-              </RNText>
-            </Pressable>
+            />
           )
         : undefined,
     });
@@ -90,9 +62,7 @@ export default function ClipboardHistoryScreen() {
 
   const copyBack = (text: string) => {
     SelfAdb.writeClipboard(text)
-      .then(() =>
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}),
-      )
+      .then(haptic)
       .catch(() =>
         ToastAndroid.show(
           "Couldn't copy — connection not ready",
@@ -102,11 +72,7 @@ export default function ClipboardHistoryScreen() {
   };
 
   return (
-    <Host
-      style={{ flex: 1, backgroundColor: colors.background }}
-      seedColor={SEED}
-      colorScheme={scheme}
-    >
+    <M3Host>
       {items === null ? (
         <Centered>
           <LoadingIndicator color={colors.primary} />
@@ -157,15 +123,17 @@ export default function ClipboardHistoryScreen() {
               <ClipRow
                 key={`${item.ts}-${i}`}
                 colors={colors}
-                icon={icons}
-                item={item}
+                icon={icons.clipboard}
+                trailingIcon={icons.contentCopy}
+                text={preview(item.text, 100)}
+                time={formatRelative(item.ts)}
                 onPress={() => copyBack(item.text)}
               />
             ))}
           </Group>
         </Column>
       )}
-    </Host>
+    </M3Host>
   );
 }
 
@@ -187,85 +155,4 @@ function Centered({ children }: { children: React.ReactNode }) {
       </Column>
     </Box>
   );
-}
-
-/** Tonal grouped row: clipboard icon, the text, a relative timestamp, and a copy hint. */
-function ClipRow({
-  colors,
-  icon,
-  item,
-  onPress,
-  shape = groupShape(true, true),
-}: {
-  colors: MaterialColors;
-  icon: { clipboard: IconSource; contentCopy: IconSource };
-  item: ClipItem;
-  onPress: () => void;
-  shape?: RowShape;
-}) {
-  const t = tonal(colors, "secondary");
-  return (
-    <Surface
-      color={colors.surfaceContainerHigh}
-      shape={shape}
-      modifiers={[fillMaxWidth()]}
-      onClick={onPress}
-    >
-      <ListItem
-        colors={{ containerColor: "transparent" }}
-        modifiers={[fillMaxWidth()]}
-      >
-        <ListItem.LeadingContent>
-          <IconCircle
-            source={icon.clipboard}
-            container={t.container}
-            on={t.on}
-          />
-        </ListItem.LeadingContent>
-        <ListItem.HeadlineContent>
-          <Text
-            color={colors.onSurface}
-            style={{ typography: "bodyLarge", fontWeight: "500" }}
-          >
-            {preview(item.text)}
-          </Text>
-        </ListItem.HeadlineContent>
-        <ListItem.SupportingContent>
-          <Text
-            color={colors.onSurfaceVariant}
-            style={{ typography: "bodyMedium" }}
-          >
-            {formatRelative(item.ts)}
-          </Text>
-        </ListItem.SupportingContent>
-        <ListItem.TrailingContent>
-          <Icon
-            source={icon.contentCopy}
-            size={20}
-            tint={colors.onSurfaceVariant}
-          />
-        </ListItem.TrailingContent>
-      </ListItem>
-    </Surface>
-  );
-}
-
-/** Collapse whitespace and cap length so rows stay tidy. */
-function preview(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > 100 ? `${oneLine.slice(0, 100)}…` : oneLine;
-}
-
-/** "now" / "5m" / "2h" / "3d", else a short date. */
-function formatRelative(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 0) return "now";
-  const min = Math.floor(diff / 60_000);
-  if (min < 1) return "now";
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d`;
-  return new Date(ts).toLocaleDateString();
 }

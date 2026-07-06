@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import SelfAdb from '@/features/selfadb/client';
-import type { ClipEvent } from '../../../modules/selfadb/src/SelfAdb.types';
+import SelfAdb, { type ClipEvent } from '@/features/selfadb/client';
 
 export type ClipItem = ClipEvent;
 

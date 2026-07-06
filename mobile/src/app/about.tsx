@@ -1,17 +1,13 @@
-import { Column, Host, Text } from "@expo/ui/jetpack-compose";
-import {
-  fillMaxWidth,
-  padding,
-  verticalScroll,
-} from "@expo/ui/jetpack-compose/modifiers";
+import { Column, Text } from "@expo/ui/jetpack-compose";
+import { fillMaxWidth } from "@expo/ui/jetpack-compose/modifiers";
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
-import { Image, Linking, useColorScheme } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Image, Linking } from "react-native";
 
 import { useIcons } from "@/components/icons";
-import { Group, SEED, useM3Colors } from "@/components/m3";
-import { ActionRow, InfoRow } from "@/components/settings-rows";
+import { Group, useM3Colors } from "@/components/m3";
+import { M3Screen } from "@/components/m3-screen";
+import { ActionRow, InfoRow } from "@/components/rows";
 import { Spacing } from "@/constants/theme";
 import { useAppUpdate } from "@/features/updates/use-app-update";
 
@@ -26,8 +22,6 @@ const open = (url: string) => {
 
 /** About: app identity + version, developer, contact, and release notes. */
 export default function AboutScreen() {
-  const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const colors = useM3Colors();
   const icons = useIcons();
 
@@ -45,24 +39,7 @@ export default function AboutScreen() {
   const { checking, checkNow } = useAppUpdate();
 
   return (
-    <Host
-      style={{ flex: 1, backgroundColor: colors.background }}
-      seedColor={SEED}
-      colorScheme={scheme}
-    >
-      <Column
-        modifiers={[
-          fillMaxWidth(),
-          verticalScroll(),
-          padding(
-            Spacing.three,
-            Spacing.two,
-            Spacing.three,
-            insets.bottom + Spacing.five,
-          ),
-        ]}
-        verticalArrangement={{ spacedBy: Spacing.five }}
-      >
+    <M3Screen spacing={Spacing.five}>
         {/* Hero: app mark + name. */}
         <Column
           modifiers={[fillMaxWidth()]}
@@ -161,7 +138,6 @@ export default function AboutScreen() {
             onPress={() => open(`mailto:${CONTACT_EMAIL}`)}
           />
         </Group>
-      </Column>
-    </Host>
+    </M3Screen>
   );
 }

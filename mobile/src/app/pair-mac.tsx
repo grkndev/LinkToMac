@@ -2,7 +2,6 @@ import {
   Box,
   Button,
   Column,
-  Host,
   Row,
   Text,
   type MaterialColors,
@@ -19,21 +18,20 @@ import {
   weight,
 } from '@expo/ui/jetpack-compose/modifiers';
 import { useRouter } from 'expo-router';
-import { useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { SEED, useM3Colors } from '@/components/m3';
+import { useM3Colors } from '@/components/m3';
+import { M3Host } from '@/components/m3-screen';
 import { Spacing } from '@/constants/theme';
 
 /** Mac pairing entry: shown when ADB is ready but no Mac has been paired yet. */
 export default function PairMacScreen() {
   const router = useRouter();
-  const scheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const colors = useM3Colors();
 
   return (
-    <Host style={{ flex: 1, backgroundColor: colors.background }} seedColor={SEED} colorScheme={scheme}>
+    <M3Host>
       {/* Outer column fills the screen and centers the content group vertically. */}
       <Column
         modifiers={[
@@ -79,7 +77,7 @@ export default function PairMacScreen() {
           </Button>
         </Column>
       </Column>
-    </Host>
+    </M3Host>
   );
 }
 

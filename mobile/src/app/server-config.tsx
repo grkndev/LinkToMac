@@ -1,15 +1,26 @@
 import { Host, Switch } from "@expo/ui/jetpack-compose";
-import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, TextInput, useColorScheme, View } from "react-native";
+import {
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  useColorScheme,
+  View,
+  type TextInputProps,
+} from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SEED, useM3Colors } from "@/components/m3";
 import { Spacing } from "@/constants/theme";
-import { usePairing } from "@/features/relay/pairing-context";
-import { blankServerConfig } from "@/features/relay/server-config";
+import { usePairing } from "@/features/pairing/pairing-context";
+import { blankServerConfig } from "@/features/connection/server-config";
+import { haptic } from "@/lib/haptics";
+
+type M3Colors = ReturnType<typeof useM3Colors>;
 
 /**
  * Manual relay server configuration: host / port / password / TLS. Seeds from the saved
@@ -21,7 +32,6 @@ import { blankServerConfig } from "@/features/relay/server-config";
 export default function ServerConfigScreen() {
   const router = useRouter();
   const colors = useM3Colors();
-  const scheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const { server, setServer } = usePairing();
 
@@ -34,18 +44,6 @@ export default function ServerConfigScreen() {
   const [lanPort, setLanPort] = useState(String(initial.lanPort ?? 53124));
   const [lanHost, setLanHost] = useState(initial.lanHost ?? "");
   const [saving, setSaving] = useState(false);
-
-  // Tapping anywhere on the row (or the switch) sets the same target value + haptic, matching
-  // the Settings rows. Both call this with the new value, so a stray double-fire is idempotent.
-  const onSecureChange = (next: boolean) => {
-    setSecure(next);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-  };
-
-  const onLanChange = (next: boolean) => {
-    setLanEnabled(next);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-  };
 
   const onSave = async () => {
     const trimmedHost = host.trim();
@@ -102,105 +100,78 @@ export default function ServerConfigScreen() {
           password must match the server's password; use TLS (wss://) over the internet.
         </Text>
 
-        <Field label="Server address" hint="Domain (for TLS) or IP — optional if LAN-direct is on" colors={colors}>
-          <TextInput
-            value={host}
-            onChangeText={setHost}
-            placeholder="relay.example.com"
-            placeholderTextColor={colors.onSurfaceVariant}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            style={[styles.input, { backgroundColor: colors.surfaceContainerHigh, color: colors.onSurface }]}
-          />
-        </Field>
+        <TextField
+          colors={colors}
+          label="Server address"
+          hint="Domain (for TLS) or IP — optional if LAN-direct is on"
+          value={host}
+          onChangeText={setHost}
+          placeholder="relay.example.com"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+        />
 
-        <Field label="Port" colors={colors}>
-          <TextInput
-            value={port}
-            onChangeText={setPort}
-            placeholder="8080"
-            placeholderTextColor={colors.onSurfaceVariant}
-            keyboardType="number-pad"
-            style={[styles.input, { backgroundColor: colors.surfaceContainerHigh, color: colors.onSurface }]}
-          />
-        </Field>
+        <TextField
+          colors={colors}
+          label="Port"
+          value={port}
+          onChangeText={setPort}
+          placeholder="8080"
+          keyboardType="number-pad"
+        />
 
-        <Field label="Password" hint="The server's password" colors={colors}>
-          <TextInput
-            value={token}
-            onChangeText={setToken}
-            placeholder="shared relay password"
-            placeholderTextColor={colors.onSurfaceVariant}
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry
-            style={[styles.input, { backgroundColor: colors.surfaceContainerHigh, color: colors.onSurface }]}
-          />
-        </Field>
+        <TextField
+          colors={colors}
+          label="Password"
+          hint="The server's password"
+          value={token}
+          onChangeText={setToken}
+          placeholder="shared relay password"
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+        />
 
-        <Pressable
-          onPress={() => onSecureChange(!secure)}
-          style={({ pressed }) => [
-            styles.switchRow,
-            { backgroundColor: colors.surfaceContainerHigh, opacity: pressed ? 0.9 : 1 },
-          ]}
-        >
-          <View style={styles.switchText}>
-            <Text style={[styles.switchLabel, { color: colors.onSurface }]}>Use TLS (wss://)</Text>
-            <Text style={[styles.hint, { color: colors.onSurfaceVariant }]}>
-              Encrypts the connection. Required over the internet; turn off only on a trusted LAN.
-            </Text>
-          </View>
-          <Host style={styles.switchHost} seedColor={SEED} colorScheme={scheme}>
-            <Switch value={secure} onCheckedChange={onSecureChange} />
-          </Host>
-        </Pressable>
+        <SwitchCard
+          colors={colors}
+          label="Use TLS (wss://)"
+          hint="Encrypts the connection. Required over the internet; turn off only on a trusted LAN."
+          value={secure}
+          onChange={setSecure}
+        />
 
-        <Pressable
-          onPress={() => onLanChange(!lanEnabled)}
-          style={({ pressed }) => [
-            styles.switchRow,
-            { backgroundColor: colors.surfaceContainerHigh, opacity: pressed ? 0.9 : 1 },
-          ]}
-        >
-          <View style={styles.switchText}>
-            <Text style={[styles.switchLabel, { color: colors.onSurface }]}>LAN-direct</Text>
-            <Text style={[styles.hint, { color: colors.onSurfaceVariant }]}>
-              Connect straight to the Mac on the same network (preferred over the relay). The Mac is
-              found automatically; set a Mac IP below only if discovery is blocked.
-            </Text>
-          </View>
-          <Host style={styles.switchHost} seedColor={SEED} colorScheme={scheme}>
-            <Switch value={lanEnabled} onCheckedChange={onLanChange} />
-          </Host>
-        </Pressable>
+        <SwitchCard
+          colors={colors}
+          label="LAN-direct"
+          hint="Connect straight to the Mac on the same network (preferred over the relay). The Mac is found automatically; set a Mac IP below only if discovery is blocked."
+          value={lanEnabled}
+          onChange={setLanEnabled}
+        />
 
         {lanEnabled ? (
           <>
-            <Field label="LAN port" hint="Must match the Mac's LAN port (default 53124)" colors={colors}>
-              <TextInput
-                value={lanPort}
-                onChangeText={setLanPort}
-                placeholder="53124"
-                placeholderTextColor={colors.onSurfaceVariant}
-                keyboardType="number-pad"
-                style={[styles.input, { backgroundColor: colors.surfaceContainerHigh, color: colors.onSurface }]}
-              />
-            </Field>
+            <TextField
+              colors={colors}
+              label="LAN port"
+              hint="Must match the Mac's LAN port (default 53124)"
+              value={lanPort}
+              onChangeText={setLanPort}
+              placeholder="53124"
+              keyboardType="number-pad"
+            />
 
-            <Field label="Mac IP (optional)" hint="Leave blank to auto-discover over the network" colors={colors}>
-              <TextInput
-                value={lanHost}
-                onChangeText={setLanHost}
-                placeholder="192.168.1.42"
-                placeholderTextColor={colors.onSurfaceVariant}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="numbers-and-punctuation"
-                style={[styles.input, { backgroundColor: colors.surfaceContainerHigh, color: colors.onSurface }]}
-              />
-            </Field>
+            <TextField
+              colors={colors}
+              label="Mac IP (optional)"
+              hint="Leave blank to auto-discover over the network"
+              value={lanHost}
+              onChangeText={setLanHost}
+              placeholder="192.168.1.42"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="numbers-and-punctuation"
+            />
           </>
         ) : null}
 
@@ -215,23 +186,69 @@ export default function ServerConfigScreen() {
   );
 }
 
-function Field({
+/** Labeled form input in the house style (tonal rounded field, optional hint below). */
+function TextField({
   label,
   hint,
   colors,
-  children,
+  ...input
 }: {
   label: string;
   hint?: string;
-  colors: ReturnType<typeof useM3Colors>;
-  children: React.ReactNode;
-}) {
+  colors: M3Colors;
+} & TextInputProps) {
   return (
     <View style={{ gap: Spacing.two }}>
       <Text style={[styles.label, { color: colors.onSurface }]}>{label}</Text>
-      {children}
+      <TextInput
+        placeholderTextColor={colors.onSurfaceVariant}
+        {...input}
+        style={[styles.input, { backgroundColor: colors.surfaceContainerHigh, color: colors.onSurface }]}
+      />
       {hint ? <Text style={[styles.hint, { color: colors.onSurfaceVariant }]}>{hint}</Text> : null}
     </View>
+  );
+}
+
+/**
+ * Rounded card with a label/hint block and a native Compose Switch. Tapping anywhere on the
+ * row (or the switch) sets the same target value + haptic, matching the Settings rows. Both
+ * paths call the same handler with the new value, so a stray double-fire is idempotent.
+ */
+function SwitchCard({
+  label,
+  hint,
+  value,
+  onChange,
+  colors,
+}: {
+  label: string;
+  hint: string;
+  value: boolean;
+  onChange: (next: boolean) => void;
+  colors: M3Colors;
+}) {
+  const scheme = useColorScheme();
+  const change = (next: boolean) => {
+    onChange(next);
+    haptic();
+  };
+  return (
+    <Pressable
+      onPress={() => change(!value)}
+      style={({ pressed }) => [
+        styles.switchRow,
+        { backgroundColor: colors.surfaceContainerHigh, opacity: pressed ? 0.9 : 1 },
+      ]}
+    >
+      <View style={styles.switchText}>
+        <Text style={[styles.switchLabel, { color: colors.onSurface }]}>{label}</Text>
+        <Text style={[styles.hint, { color: colors.onSurfaceVariant }]}>{hint}</Text>
+      </View>
+      <Host style={styles.switchHost} seedColor={SEED} colorScheme={scheme}>
+        <Switch value={value} onCheckedChange={change} />
+      </Host>
+    </Pressable>
   );
 }
 

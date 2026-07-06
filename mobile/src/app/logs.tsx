@@ -4,6 +4,7 @@ import { ActivityIndicator, FlatList, Pressable, ScrollView, Share, Text, View }
 
 import SelfAdb from '@/features/selfadb/client';
 import { useTheme } from '@/hooks/use-theme';
+import { preview } from '@/lib/text';
 
 const MAX_LINES = 500;
 
@@ -11,11 +12,6 @@ type LogLine = { id: number; text: string };
 
 function clock(): string {
   return new Date().toTimeString().slice(0, 8); // HH:mm:ss — matches the native buffer format
-}
-
-function preview(text: string): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim();
-  return oneLine.length > 50 ? `${oneLine.slice(0, 50)}…` : oneLine;
 }
 
 /**
@@ -61,7 +57,7 @@ export default function LogsScreen() {
       ),
     );
     const clip = SelfAdb.addListener('onClip', (e) =>
-      append(`${clock()}  clip ⬆ "${preview(e.text)}"`),
+      append(`${clock()}  clip ⬆ "${preview(e.text, 50)}"`),
     );
     return () => {
       log.remove();

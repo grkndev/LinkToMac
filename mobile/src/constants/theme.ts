@@ -56,6 +56,19 @@ export const Fonts = Platform.select({
   },
 });
 
+/**
+ * Semantic status colors shared across screens (M3 has no green/amber role, so these stay
+ * literals). Also hardcoded in logs.tsx's uniwind classes — keep in sync when editing.
+ */
+export const StatusColors = {
+  /** connected / success green (Home status dot, log highlights) */
+  online: '#2ECC71',
+  /** transient connecting/reconnecting amber */
+  warn: '#F39C12',
+  /** failure red (log lines, pair errors, destructive toolbar) */
+  error: '#e5484d',
+} as const;
+
 export const Spacing = {
   half: 2,
   one: 4,

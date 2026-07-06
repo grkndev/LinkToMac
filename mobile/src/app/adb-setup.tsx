@@ -1,4 +1,4 @@
-import { PairScreen } from '@/components/PairScreen';
+import { PairScreen } from '@/features/selfadb/pair-screen';
 import { useClipBootContext } from '@/features/selfadb/clip-boot-context';
 
 /**

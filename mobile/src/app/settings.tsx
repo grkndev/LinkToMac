@@ -1,167 +1,44 @@
-import { Column, Host } from "@expo/ui/jetpack-compose";
-import {
-  fillMaxWidth,
-  padding,
-  verticalScroll,
-} from "@expo/ui/jetpack-compose/modifiers";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
-import { Alert, AppState, useColorScheme } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useState } from "react";
 
 import { useIcons } from "@/components/icons";
-import ConfirmSheet from "@/components/ModalBottomSheet";
-import { ActionRow, InfoRow, SwitchRow } from "@/components/settings-rows";
-import { Group, SEED, useM3Colors } from "@/components/m3";
+import ConfirmSheet from "@/components/confirm-sheet";
+import { ActionRow, InfoRow, SwitchRow } from "@/components/rows";
+import { Group, useM3Colors } from "@/components/m3";
+import { M3Screen } from "@/components/m3-screen";
 import { Spacing } from "@/constants/theme";
-import { usePairing } from "@/features/relay/pairing-context";
+import { usePairing } from "@/features/pairing/pairing-context";
 import SelfAdb from "@/features/selfadb/client";
+import { usePermissionSettings } from "@/features/selfadb/use-permission-settings";
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { paused, setPaused, unpair } = usePairing();
-  const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
   const colors = useM3Colors();
   const icons = useIcons();
-
-  const [notifIconVisible, setNotifIconVisible] = useState(true);
-  const [notifGranted, setNotifGranted] = useState<boolean | null>(null);
-  const [notifMirrorOn, setNotifMirrorOn] = useState(true);
-  const [notifAccess, setNotifAccess] = useState<boolean | null>(null);
-  const [smsMirrorOn, setSmsMirrorOn] = useState(true);
-  const [smsAccess, setSmsAccess] = useState<boolean | null>(null);
-  const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
-  const [proximityOn, setProximityOn] = useState(false);
   const [confirmingUnpair, setConfirmingUnpair] = useState(false);
-  // True while a proximity toggle is mid-flight. The permission prompt below
-  // backgrounds the app, so the AppState "active" re-check would otherwise read
-  // a not-yet-started beacon and clobber the switch back OFF (issue #2).
-  const togglingProximity = useRef(false);
-
-  useEffect(() => {
-    SelfAdb.getStatusNotificationVisible()
-      .then(setNotifIconVisible)
-      .catch(() => {});
-    SelfAdb.hasPostNotifications()
-      .then(setNotifGranted)
-      .catch(() => setNotifGranted(null));
-    SelfAdb.getNotificationForwarding()
-      .then(setNotifMirrorOn)
-      .catch(() => {});
-    SelfAdb.hasNotificationAccess()
-      .then(setNotifAccess)
-      .catch(() => setNotifAccess(null));
-    SelfAdb.getSmsForwarding()
-      .then(setSmsMirrorOn)
-      .catch(() => {});
-    SelfAdb.hasSmsAccess()
-      .then(setSmsAccess)
-      .catch(() => setSmsAccess(null));
-    SelfAdb.hasIgnoreBatteryOptimizations()
-      .then(setBatteryOk)
-      .catch(() => setBatteryOk(null));
-    SelfAdb.getProximityAdvertise()
-      .then(setProximityOn)
-      .catch(() => {});
-
-    // The battery exemption is granted in a system dialog/settings screen; re-check on return.
-    const sub = AppState.addEventListener("change", (next) => {
-      if (next !== "active") return;
-      SelfAdb.hasIgnoreBatteryOptimizations()
-        .then(setBatteryOk)
-        .catch(() => {});
-      SelfAdb.hasPostNotifications()
-        .then(setNotifGranted)
-        .catch(() => {});
-      // "Notification access" is granted in a system settings screen -> re-check on return.
-      SelfAdb.hasNotificationAccess()
-        .then(setNotifAccess)
-        .catch(() => {});
-      // The READ_SMS/READ_CONTACTS runtime prompt backgrounds us -> re-check the grant on return.
-      SelfAdb.hasSmsAccess()
-        .then(setSmsAccess)
-        .catch(() => {});
-      // The OS may have revoked Nearby Devices behind our back -> reflect the real
-      // beacon state. Skip while a toggle is in flight so we don't read the beacon
-      // before it has started and snap the switch back OFF (issue #2).
-      if (!togglingProximity.current) {
-        SelfAdb.getProximityAdvertise()
-          .then(setProximityOn)
-          .catch(() => {});
-      }
-    });
-    return () => sub.remove();
-  }, []);
-
-  const toggleNotifIcon = (visible: boolean) => {
-    setNotifIconVisible(visible);
-    SelfAdb.setStatusNotificationVisible(visible).catch(() => {});
-  };
-
-  const toggleNotifMirror = (on: boolean) => {
-    setNotifMirrorOn(on);
-    SelfAdb.setNotificationForwarding(on).catch(() => {});
-  };
-
-  const toggleSmsMirror = (on: boolean) => {
-    setSmsMirrorOn(on);
-    SelfAdb.setSmsForwarding(on).catch(() => {});
-  };
-
-  // Auto-lock needs Nearby Devices to advertise the BLE beacon; ask before enabling.
-  const toggleProximity = (on: boolean) => {
-    if (!on) {
-      setProximityOn(false);
-      SelfAdb.setProximityAdvertise(false).catch(() => {});
-      return;
-    }
-    // Reflect the user's intent immediately, then hold the AppState re-check off
-    // (togglingProximity) until the beacon has actually started, so the first tap
-    // sticks even though the permission prompt backgrounds us (issue #2).
-    togglingProximity.current = true;
-    setProximityOn(true);
-    SelfAdb.requestNearbyDevicesPermission()
-      .then((granted) => {
-        if (!granted) {
-          setProximityOn(false);
-          Alert.alert(
-            "Permission needed",
-            "Allow “Nearby devices” so your Mac can tell when this phone leaves.",
-          );
-          return;
-        }
-        return SelfAdb.setProximityAdvertise(true);
-      })
-      .catch(() => setProximityOn(false))
-      .finally(() => {
-        togglingProximity.current = false;
-      });
-  };
+  const {
+    notifIconVisible,
+    toggleNotifIcon,
+    notifGranted,
+    requestNotifPermission,
+    notifMirrorOn,
+    toggleNotifMirror,
+    notifAccess,
+    smsMirrorOn,
+    toggleSmsMirror,
+    smsAccess,
+    requestSmsPermission,
+    batteryOk,
+    proximityOn,
+    toggleProximity,
+  } = usePermissionSettings();
 
   return (
     <>
-    <Host
-      style={{ flex: 1, backgroundColor: colors.background }}
-      seedColor={SEED}
-      colorScheme={scheme}
-    >
       {/* One continuous Google-style grouped list — every row is a segment of a single rounded
-          block (no section labels, no dividers). A plain Column (not LazyColumn) is required:
-          it lives inside the outer verticalScroll() Column, which passes infinite height
-          constraints that crash a LazyColumn. */}
-      <Column
-        modifiers={[
-          fillMaxWidth(),
-          verticalScroll(),
-          padding(
-            Spacing.three,
-            Spacing.three,
-            Spacing.three,
-            insets.bottom + Spacing.five,
-          ),
-        ]}
-      >
+        block (no section labels, no dividers). */}
+      <M3Screen paddingTop={Spacing.three}>
         <Group>
           <SwitchRow
             colors={colors}
@@ -177,11 +54,7 @@ export default function SettingsScreen() {
               icon={icons.notificationsActive}
               label="Grant notification permission"
               hint="Without permission, connection status notifications cannot be displayed."
-              onPress={() => {
-                SelfAdb.requestPostNotifications()
-                  .then(setNotifGranted)
-                  .catch(() => {});
-              }}
+              onPress={requestNotifPermission}
             />
           ) : null}
           <SwitchRow
@@ -217,11 +90,7 @@ export default function SettingsScreen() {
               icon={icons.chat}
               label="Grant SMS access"
               hint="Allow Link to macOS to read your messages and contacts so they can be shown on your Mac."
-              onPress={() => {
-                SelfAdb.requestSmsAccess()
-                  .then(setSmsAccess)
-                  .catch(() => {});
-              }}
+              onPress={requestSmsPermission}
             />
           ) : null}
           <SwitchRow
@@ -295,16 +164,15 @@ export default function SettingsScreen() {
             onPress={() => router.push("/about")}
           />
         </Group>
-      </Column>
-    </Host>
-    <ConfirmSheet
-      visible={confirmingUnpair}
-      onDismiss={() => setConfirmingUnpair(false)}
-      onConfirm={() => unpair()}
-      title="Remove pairing?"
-      message="Your Mac will be disconnected and the pairing removed. To pair again, scan the QR code from your Mac."
-      confirmLabel="Remove"
-    />
+      </M3Screen>
+      <ConfirmSheet
+        visible={confirmingUnpair}
+        onDismiss={() => setConfirmingUnpair(false)}
+        onConfirm={() => unpair()}
+        title="Remove pairing?"
+        message="Your Mac will be disconnected and the pairing removed. To pair again, scan the QR code from your Mac."
+        confirmLabel="Remove"
+      />
     </>
   );
 }

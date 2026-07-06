@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 
-import { PairScanner } from '@/features/relay/pair-scanner';
-import { usePairing } from '@/features/relay/pairing-context';
+import { PairScanner } from '@/features/pairing/pair-scanner';
+import { usePairing } from '@/features/pairing/pairing-context';
 
 /**
  * Camera QR scanner route. Serves both the first pairing (from pair-mac) and

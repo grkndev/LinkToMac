@@ -1,31 +1,22 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
-import { useEffect, useMemo } from "react";
-import { StyleSheet, useColorScheme } from "react-native";
+import { useEffect, useMemo, type ComponentProps } from "react";
+import { useColorScheme } from "react-native";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import * as SystemUI from "expo-system-ui";
-import {
-  Host,
-  LoadingIndicator,
-  Box,
-  Surface,
-  Shape,
-} from "@expo/ui/jetpack-compose";
+import { StatusBar } from "expo-status-bar";
 
+import { GlobalAlertDialog, alertRef } from '@/components/AlertDialog';
+import { Booting } from "@/components/booting";
 import { IconsProvider } from "@/components/icons";
-import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
-import { Spacing } from "@/constants/theme";
-import { PairingProvider, usePairing } from "@/features/relay/pairing-context";
-import { useRelayAutostart } from "@/features/relay/use-relay-autostart";
+import { useM3Colors } from "@/components/m3";
+import { PairingProvider, usePairing } from "@/features/pairing/pairing-context";
+import { useRelayAutostart } from "@/features/connection/use-relay-autostart";
 import {
   ClipBootProvider,
   useClipBootContext,
 } from "@/features/selfadb/clip-boot-context";
 import { AppUpdateProvider } from "@/features/updates/use-app-update";
-import { UpdateModal } from "@/features/updates/UpdateModal";
-import { StatusBar } from "expo-status-bar";
-import { SEED, useM3Colors } from "@/components/m3";
-import { fillMaxSize, size } from "@expo/ui/jetpack-compose/modifiers";
+import { UpdateModal } from "@/features/updates/update-modal";
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -58,6 +49,7 @@ export default function RootLayout() {
                 <StatusBar style="auto" />
                 <RootNavigator background={m3.background} onSurface={m3.onSurface} />
                 <UpdateModal />
+                <GlobalAlertDialog ref={alertRef} />
               </AppUpdateProvider>
             </IconsProvider>
           </PairingProvider>
@@ -87,6 +79,17 @@ function RootNavigator({
 
   useRelayAutostart();
 
+  // The shared native-header recipe: flat, painted with the M3 background.
+  type ScreenOptions = ComponentProps<typeof Stack.Screen>["options"];
+  const header = (title: string, extras?: ScreenOptions): ScreenOptions => ({
+    headerShown: true,
+    headerTitle: title,
+    headerShadowVisible: false,
+    headerStyle: { backgroundColor: background },
+    headerTintColor: onSurface,
+    ...extras,
+  });
+
   // Hold the Stack until boot + SecureStore settle so the guards don't flicker.
   if (boot.state === "booting" || pairing === undefined)
     return <Booting />;
@@ -97,7 +100,7 @@ function RootNavigator({
   return (
     <Stack
       screenOptions={{
-        animation:"fade",
+        animation: "fade",
         headerShown: false,
         contentStyle: { backgroundColor: background },
       }}
@@ -111,103 +114,18 @@ function RootNavigator({
         </Stack.Protected>
         <Stack.Protected guard={macPaired}>
           <Stack.Screen name="index" />
-          <Stack.Screen
-            name="settings"
-            options={{
-              headerShown: true,
-              headerTitle: "Settings",
-              headerShadowVisible: false,
-              headerStyle: { backgroundColor: background },
-              headerTintColor: onSurface,
-            }}
-          />
-          <Stack.Screen
-            name="server-config"
-            options={{
-              headerShown: true,
-              headerTitle: "Relay server",
-              headerShadowVisible: false,
-              headerStyle: { backgroundColor: background },
-              headerTintColor: onSurface,
-            }}
-          />
+          <Stack.Screen name="settings" options={header("Settings")} />
+          <Stack.Screen name="server-config" options={header("Relay server")} />
+          {/* Logs never hid the header shadow — keep the platform default. */}
           <Stack.Screen
             name="logs"
-            options={{
-              headerShown: true,
-              title: "Logs",
-              headerStyle: { backgroundColor: background },
-              headerTintColor: onSurface,
-            }}
+            options={header("Logs", { headerShadowVisible: undefined })}
           />
-          <Stack.Screen
-            name="clipboard-history"
-            options={{
-              headerShown: true,
-              title: "Clipboard",
-              headerShadowVisible: false,
-              headerStyle: { backgroundColor: background },
-              headerTintColor: onSurface,
-            }}
-          />
-          <Stack.Screen
-            name="about"
-            options={{
-              headerShown: true,
-              headerTitle: "About",
-              headerShadowVisible: false,
-              headerStyle: { backgroundColor: background },
-              headerTintColor: onSurface,
-            }}
-          />
+          <Stack.Screen name="clipboard-history" options={header("Clipboard")} />
+          <Stack.Screen name="about" options={header("About")} />
         </Stack.Protected>
         <Stack.Screen name="qr-scan" options={{ presentation: "modal" }} />
       </Stack.Protected>
     </Stack>
   );
 }
-
-function Booting() {
-  const colors = useM3Colors();
-  const scheme = useColorScheme();
-  return (
-    <ThemedView
-      style={[styles.booting, { backgroundColor: colors.background }]}
-    >
-      <Host
-        style={{ width: 64, height: 64, backgroundColor: "transparent" }}
-        seedColor={SEED}
-        colorScheme={scheme}
-      >
-        <Surface
-          color={colors.secondaryContainer}
-          modifiers={[size(64, 64)]}
-          shape={Shape.RoundedCorner({
-            cornerRadii: {
-              bottomEnd: 32,
-              topStart: 32, 
-              bottomStart: 32,
-              topEnd: 32,
-            },
-          })}
-        >
-          <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
-            <LoadingIndicator color={colors.primary} />
-          </Box>
-        </Surface>
-      </Host>
-      <ThemedText type="default" themeColor="textSecondary">
-        Connecting to Mac...
-      </ThemedText>
-    </ThemedView>
-  );
-}
-
-const styles = StyleSheet.create({
-  booting: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.three,
-  },
-});

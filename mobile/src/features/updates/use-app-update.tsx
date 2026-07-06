@@ -12,7 +12,7 @@ import { Alert, Linking } from 'react-native';
 
 import { checkForAppUpdate, type AppUpdate } from './check';
 
-type PendingUpdate = Exclude<AppUpdate, { kind: 'none' } | { kind: 'failed' }>;
+export type PendingUpdate = Exclude<AppUpdate, { kind: 'none' } | { kind: 'failed' }>;
 
 type UpdateState = {
   /** The pending update to surface in the modal, or null when nothing is pending / dismissed. */
