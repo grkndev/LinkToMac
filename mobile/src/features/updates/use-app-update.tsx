@@ -106,6 +106,12 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       // If the user chose "Continue in background" mid-download, the fetched bundle is
       // already staged and expo-updates loads it on the next launch — don't force a restart.
       if (background.current) return;
+      // Unmount the sheet BEFORE reloading: it renders in its own native window, and
+      // reloadAsync() tears down the JS runtime without unmounting views — the dialog
+      // would survive the restart, frozen on "App is updating", covering the new app.
+      setApplyingOta(false);
+      setUpdate(null);
+      await new Promise((resolve) => setTimeout(resolve, 400)); // let the window dismiss
       await Updates.reloadAsync(); // restarts the app — nothing below runs on success
     } catch {
       // A background failure stays silent (it'll be re-offered on the next check); only
