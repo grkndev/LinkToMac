@@ -33,6 +33,8 @@ final class LanServer: @unchecked Sendable {
     var onRemoteNote: (@Sendable (String) -> Void)?
     /// Called (off the main actor) with a decrypted mirrored-SMS batch/delta JSON payload.
     var onRemoteSms: (@Sendable (String) -> Void)?
+    /// Called (off the main actor) with a decrypted `file` plaintext (a phone clipboard image).
+    var onRemoteFile: (@Sendable (Data) -> Void)?
     /// Called when the authenticated peer connects/disconnects (for UI/status aggregation).
     var onPeerChange: (@Sendable (Bool) -> Void)?
 
@@ -105,6 +107,9 @@ final class LanServer: @unchecked Sendable {
         let params = NWParameters.tcp
         let ws = NWProtocolWebSocket.Options(.version13)
         ws.autoReplyPing = true // answer the phone's keepalive pings at the protocol layer
+        // A clipboard image `file` frame is ~1 MB (vs a few bytes for text); the default message
+        // size caps it and the frame is silently dropped. Allow the full relay payload + headroom.
+        ws.maximumMessageSize = 4 * 1024 * 1024
         params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
 
         guard let nwPort = NWEndpoint.Port(rawValue: port),
@@ -272,6 +277,11 @@ final class LanServer: @unchecked Sendable {
                   let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
                   let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: key, type: "sms") else { return }
             onRemoteSms?(json)
+        case "file":
+            guard let key = pairingProvider()?.key,
+                  let nonce = obj["nonce"] as? String, let ct = obj["ct"] as? String,
+                  let payload = ClipCodec.decodeData(nonce: nonce, ct: ct, keyBase64: key, type: "file") else { return }
+            onRemoteFile?(payload)
         case "ping":
             send(["t": "pong"], on: conn)
         default:
@@ -324,6 +334,17 @@ final class LanServer: @unchecked Sendable {
                   let key = pairingProvider()?.key,
                   let (nonce, ct) = ClipCodec.encode(payload, keyBase64: key, type: "stat") else { return }
             send(["t": "stat", "nonce": nonce, "ct": ct], on: conn)
+        }
+    }
+
+    /// Encrypt + send an assembled `file` plaintext (header + image bytes) to the
+    /// authenticated phone. Mirrors `sendClip`; no-op if no peer / bad key.
+    func sendFile(_ payload: Data) {
+        queue.async { [self] in
+            guard let conn = connection, !payload.isEmpty,
+                  let key = pairingProvider()?.key,
+                  let (nonce, ct) = ClipCodec.encodeData(payload, keyBase64: key, type: "file") else { return }
+            send(["t": "file", "nonce": nonce, "ct": ct], on: conn)
         }
     }
 

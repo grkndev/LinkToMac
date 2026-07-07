@@ -44,7 +44,7 @@ All via env vars (see `.env.example`):
 | `RELAY_AUTH_TOKEN` | — | **required in production**; clients pass it as `?token=` or `Authorization: Bearer`. Generate: `openssl rand -hex 32` |
 | `ALLOW_NO_AUTH` | `false` | set `true` to run without a token (local dev only) |
 | `MAX_PEERS_PER_ROOM` | `2` | per-room connection cap |
-| `MAX_PAYLOAD_BYTES` | `262144` | 256 KB frame cap |
+| `MAX_PAYLOAD_BYTES` | `1048576` | 1 MiB frame cap (fits an E2E-encrypted clipboard image ~700 KB raw after base64) |
 | `PING_INTERVAL_MS` | `50000` | ws-level heartbeat; keep < front-proxy WS read timeout (nginx default 60s). Higher = fewer mobile radio wakeups |
 | `JOIN_TIMEOUT_MS` | `10000` | close if no `join` arrives |
 | `RATE_LIMIT_MSGS` / `RATE_LIMIT_WINDOW_MS` | `120` / `10000` | per-connection sliding window |
@@ -61,20 +61,26 @@ First message must be `join`.
 { "t": "clip", "nonce": "<base64>", "ct": "<base64>" }   // opaque, forwarded verbatim
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // remote action (e.g. lock), opaque
 { "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (e.g. Mac battery), opaque
+{ "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), opaque
+{ "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // mirrored SMS batch/delta (phone → Mac), opaque
+{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // clipboard image (bidirectional), opaque
 { "t": "ping" }
 
 // relay → client
 { "t": "joined", "peers": ["mac"] }
 { "t": "peer", "state": "online" | "offline", "device": "mac" }
-{ "t": "clip", "nonce": "...", "ct": "..." }   // the peer's clip/cmd/stat, relayed verbatim
+{ "t": "clip", "nonce": "...", "ct": "..." }   // the peer's clip/cmd/stat/note/sms/file, relayed verbatim
 { "t": "cmd",  "nonce": "...", "ct": "..." }
 { "t": "stat", "nonce": "...", "ct": "..." }
+{ "t": "note", "nonce": "...", "ct": "..." }
+{ "t": "sms",  "nonce": "...", "ct": "..." }
+{ "t": "file", "nonce": "...", "ct": "..." }
 { "t": "error", "code": "room-full" | "bad-join" | "not-joined" | "rate-limit" | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
 ```
 
-`clip`, `cmd`, and `stat` are forwarded to the *other* peer only — the sender never receives its
-own echo.
+`clip`, `cmd`, `stat`, `note`, `sms`, and `file` are forwarded to the *other* peer only — the
+sender never receives its own echo.
 
 ## Docker
 
@@ -143,5 +149,5 @@ location /ws {
   **relay password** — a second gate so strangers can't open sockets against your VPS. The
   clients no longer bake it in: the Mac reads it from `Secrets.xcconfig` and ships it to the
   phone in the pairing QR (and it's editable in the app), so each operator sets their own.
-- Per-room cap (2), per-connection rate limit, 256 KB payload cap, ws-level heartbeat
+- Per-room cap (2), per-connection rate limit, 1 MiB payload cap, ws-level heartbeat
   with dead-connection cleanup, and slow-consumer backpressure handling.

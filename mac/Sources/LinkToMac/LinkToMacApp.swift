@@ -54,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.onLocalClip = { [weak self] text in self?.lan?.sendClip(text) }
         // Battery + proximity telemetry fans out to the LAN server too, mirroring clips.
         client.onLocalStat = { [weak self] payload in self?.lan?.sendStat(payload) }
+        // An image copy (assembled `file` plaintext) fans out to the LAN server too.
+        client.onLocalFile = { [weak self] payload in self?.lan?.sendFile(payload) }
         // Forward the BLE proximity this Mac measures to the phone (over whichever transport is up),
         // so the phone can show the Mac's distance — it can't measure that itself, it only advertises.
         proximity.onReading = { [weak self] reading in self?.client.updateProximity(reading) }
@@ -93,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server.onRemoteStat = { json in Task { @MainActor in client.writeRemoteStat(json) } }
         server.onRemoteNote = { json in Task { @MainActor in client.writeRemoteNote(json) } }
         server.onRemoteSms = { json in Task { @MainActor in client.writeRemoteSms(json) } }
+        server.onRemoteFile = { payload in Task { @MainActor in client.writeRemoteImage(payload) } }
         // `weak server` so the callback doesn't retain the server it's installed on. On connect,
         // push the current battery immediately so the phone shows it without waiting for the poll.
         server.onPeerChange = { [weak server] connected in

@@ -1,5 +1,6 @@
 package expo.modules.selfadb
 
+import android.util.Base64
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -13,6 +14,7 @@ import java.nio.charset.StandardCharsets
  *
  *   app -> jar : {"cmd":"auth","secret":"..."}   (first line; daemon serves nothing until it matches)
  *   jar -> app : {"type":"clip","text":"...","ts":1234}
+ *   jar -> app : {"type":"image","mime":"image/png","data":"<base64>","ts":1234}
  *   app -> jar : {"cmd":"write","text":"..."}
  *
  * Retries until the jar's ServerSocket is up (it binds shortly after launch).
@@ -21,11 +23,16 @@ class ClipBridge(
   private val port: Int,
   private val secret: String?,
   private val onClip: (text: String, ts: Double) -> Unit,
+  /** A captured clipboard image from the daemon (Mac-bound). Bytes are the raw file, pre-fit. */
+  private val onImage: (mime: String, bytes: ByteArray, ts: Double) -> Unit,
   private val onLog: (String) -> Unit,
 ) {
   @Volatile private var running = false
   @Volatile private var out: OutputStream? = null
   @Volatile private var sock: Socket? = null
+  /** Set by the reader thread when a {"type":"log"} reply arrives; [requestLog] waits on it. */
+  private val logLock = Object()
+  @Volatile private var pendingLog: String? = null
   /** Consecutive connections the daemon dropped young (< SHORT_LIVED_MS). A streak means the
    *  daemon is closing us on purpose — auth reject (wrong secret) or newest-wins eviction, i.e.
    *  the daemon is owned by another install. Reset by one connection that survives. */
@@ -106,8 +113,13 @@ class ClipBridge(
   private fun handle(line: String) {
     try {
       val o = JSONObject(line)
-      if (o.optString("type") == "clip") {
-        onClip(o.optString("text"), o.optLong("ts").toDouble())
+      when (o.optString("type")) {
+        "clip" -> onClip(o.optString("text"), o.optLong("ts").toDouble())
+        "image" -> {
+          val bytes = Base64.decode(o.optString("data"), Base64.NO_WRAP)
+          onImage(o.optString("mime", "image/png"), bytes, o.optLong("ts").toDouble())
+        }
+        "log" -> synchronized(logLock) { pendingLog = o.optString("text"); logLock.notifyAll() }
       }
     } catch (e: Exception) {
       onLog("bridge parse err: ${e.message}")
@@ -127,6 +139,33 @@ class ClipBridge(
       // propagate. Drop the stream; the reader loop notices the dead socket and reconnects.
       out = null
       onLog("bridge write failed (${e.message})")
+    }
+  }
+
+  /** Ask the daemon for its in-memory log (its own diagnostics) over the bridge — no adb, so it
+   *  can't hit libadb's `BufferOverflowException`. Sends `{"cmd":"log"}` and blocks (off the main
+   *  thread) for the `{"type":"log"}` reply. Returns null if the bridge isn't connected or the
+   *  daemon doesn't answer in time. */
+  fun requestLog(timeoutMs: Long = 3000): String? {
+    val o = out ?: return null
+    synchronized(logLock) { pendingLog = null }
+    try {
+      synchronized(o) {
+        o.write((JSONObject().put("cmd", "log").toString() + "\n").toByteArray(StandardCharsets.UTF_8))
+        o.flush()
+      }
+    } catch (e: Exception) {
+      onLog("bridge log request failed (${e.message})")
+      return null
+    }
+    synchronized(logLock) {
+      val deadline = System.currentTimeMillis() + timeoutMs
+      while (pendingLog == null) {
+        val wait = deadline - System.currentTimeMillis()
+        if (wait <= 0) break
+        try { logLock.wait(wait) } catch (e: InterruptedException) { break }
+      }
+      return pendingLog
     }
   }
 

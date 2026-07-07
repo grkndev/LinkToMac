@@ -1,6 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, ScrollView, Share, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Share, Text, View } from 'react-native';
 
 import SelfAdb from '@/features/selfadb/client';
 import { useTheme } from '@/hooks/use-theme';
@@ -15,17 +16,15 @@ function clock(): string {
 }
 
 /**
- * Debug console for the clipboard pipeline. Seeds from the native log ring buffer
- * (retained across the JS-runtime gap) and then appends live onLog/onStatus/onRelay/onClip
- * events. "Cihaz günlüğünü getir" pulls the privileged daemon's own on-device log over adb —
- * the ground truth for whether the agent is alive and the clip-changed listener is firing.
+ * Debug console for the clipboard pipeline (the JS/native app side). Seeds from the native log
+ * ring buffer (retained across the JS-runtime gap) and then appends live
+ * onLog/onStatus/onRelay/onClip events. The privileged daemon's OWN on-device log — plus the
+ * Restart-daemon action — lives on the separate "Daemon Log" screen (`daemon-logs.tsx`).
  */
 export default function LogsScreen() {
   // Newest-first: index 0 is the latest line, so the list reads top-down with no per-render
   // reverse and no forced scroll — maintainVisibleContentPosition keeps the reader in place.
   const [lines, setLines] = useState<LogLine[]>([]);
-  const [daemonLog, setDaemonLog] = useState<string | null>(null);
-  const [fetching, setFetching] = useState(false);
   const idRef = useRef(0); // monotonic, so every line gets a stable unique key
 
   const append = useCallback((text: string) => {
@@ -67,49 +66,27 @@ export default function LogsScreen() {
     };
   }, [append]);
 
-  const fetchDaemonLog = useCallback(() => {
-    setFetching(true);
-    setDaemonLog(null);
-    SelfAdb.readDaemonLog()
-      .then(setDaemonLog)
-      .catch((e: any) => setDaemonLog(`Error: ${e?.message ?? String(e)}`))
-      .finally(() => setFetching(false));
-  }, []);
-
   const shareAll = useCallback(() => {
-    const body = [
-      '=== Application Logs ===',
-      ...[...lines].reverse().map((l) => l.text), // chronological for sharing
-      ...(daemonLog ? ['', '=== Device (daemon) Log ===', daemonLog] : []),
-    ].join('\n');
+    const body = ['=== Application Logs ===', ...[...lines].reverse().map((l) => l.text)].join('\n');
     Share.share({ message: body }).catch(() => {});
-  }, [lines, daemonLog]);
+  }, [lines]);
 
   const clear = useCallback(() => {
     SelfAdb.clearLogs().catch(() => {});
     setLines([]);
-    setDaemonLog(null);
   }, []);
 
   return (
     <View className="flex-1 gap-4 bg-background p-4">
       <View className="flex-row gap-2">
-        <ToolbarButton icon="phonelink" label="Device Log" onPress={fetchDaemonLog} busy={fetching} />
+        <ToolbarButton
+          icon="phonelink"
+          label="Daemon Log"
+          onPress={() => router.push('/daemon-logs')}
+        />
+        <ToolbarButton icon="share" label="Share" onPress={shareAll} />
         <ToolbarButton icon="delete-outline" label="Clear" onPress={clear} destructive />
       </View>
-
-      {daemonLog != null ? (
-        <View className="gap-2 rounded-2xl bg-background-element p-4">
-          <Text className="text-sm font-bold tracking-[0.5px] text-foreground-secondary">
-            DEVICE (DAEMON) LOG
-          </Text>
-          <ScrollView className="max-h-55">
-            <Text className="font-[monospace] text-[11px] font-medium leading-4 text-foreground">
-              {daemonLog}
-            </Text>
-          </ScrollView>
-        </View>
-      ) : null}
 
       <FlatList
         data={lines}

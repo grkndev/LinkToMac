@@ -49,6 +49,14 @@ export interface SmsMsg {
   ct: string;
 }
 
+// A transferred file (Mac → phone clipboard image for now). E2E-encrypted (`nonce`/`ct`) exactly
+// like a `clip`, so the relay forwards it verbatim and never sees the contents — opaque, just like clips.
+export interface FileMsg {
+  t: 'file';
+  nonce: string;
+  ct: string;
+}
+
 export interface PingMsg {
   t: 'ping';
 }
@@ -64,6 +72,7 @@ export type ClientMessage =
   | StatMsg
   | NoteMsg
   | SmsMsg
+  | FileMsg
   | PingMsg
   | PongMsg;
 
@@ -142,6 +151,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
       if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
       return { t: 'sms', nonce: obj.nonce, ct: obj.ct };
+    case 'file':
+      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
+      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      return { t: 'file', nonce: obj.nonce, ct: obj.ct };
     case 'ping':
       return { t: 'ping' };
     case 'pong':

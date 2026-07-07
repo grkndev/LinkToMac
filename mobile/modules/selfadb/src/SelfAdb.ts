@@ -82,6 +82,10 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   getNotificationForwarding(): Promise<boolean>;
   /** pause/resume mirroring notifications to the Mac without revoking the system access grant. */
   setNotificationForwarding(enabled: boolean): Promise<void>;
+  /** whether copied images are sent to the Mac's clipboard (persisted, default true). */
+  getSendImages(): Promise<boolean>;
+  /** enable/disable sending copied images to the Mac (independent of text clipboard sync). */
+  setSendImages(enabled: boolean): Promise<void>;
   /** whether we hold both READ_SMS and READ_CONTACTS (read texts + resolve sender names). */
   hasSmsAccess(): Promise<boolean>;
   /** request READ_SMS + READ_CONTACTS; resolves whether SMS reading is granted. Syncs on grant. */
@@ -116,6 +120,12 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   readDaemonLog(): Promise<string>;
   /** kill the detached daemon (requires adb connected). */
   killDaemon(): Promise<string>;
+  /**
+   * kill + redeploy the daemon so a rebuilt `clipboard-agent.dex` is actually loaded (a live
+   * daemon survives app reinstall, so autoStart would otherwise reuse the old code). Returns a
+   * human-readable status string. Needs wireless debugging (self-enabled if permitted).
+   */
+  restartDaemon(clipPort: number): Promise<string>;
   /** detach the bridge but LEAVE the daemon running (survives app death). */
   stop(): Promise<void>;
 }

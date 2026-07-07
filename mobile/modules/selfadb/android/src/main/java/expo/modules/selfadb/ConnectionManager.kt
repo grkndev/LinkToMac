@@ -38,6 +38,8 @@ class ConnectionManager(
   private val onClipReceived: (String) -> Unit,
   /** Decrypted telemetry JSON received from the Mac (e.g. battery), from whichever link is active. */
   private val onStatReceived: (String) -> Unit,
+  /** Decrypted `file` plaintext (clipboard image) from the Mac, from whichever link is active. */
+  private val onFileReceived: (ByteArray) -> Unit,
   /** transport is "lan" or "relay"; status/peerOnline/error/attempt mirror the child client. */
   private val onStatus: (transport: String, status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
   private val log: (String) -> Unit,
@@ -99,6 +101,8 @@ class ConnectionManager(
   }
 
   fun sendClip(text: String) = post { activeLink()?.let { if (it === lan) lan?.sendClip(text) else relay?.sendClip(text) } }
+
+  fun sendFile(payload: ByteArray) = post { activeLink()?.let { if (it === lan) lan?.sendFile(payload) else relay?.sendFile(payload) } }
 
   fun sendCmd(action: String) = post { if (lanUp) lan?.sendCmd(action) else relay?.sendCmd(action) }
 
@@ -201,6 +205,7 @@ class ConnectionManager(
       key = key,
       onClipReceived = onClipReceived,
       onStatReceived = onStatReceived,
+      onFileReceived = onFileReceived,
       onStatus = { status, peerOnline, error, attempt -> post { onLanStatus(status, peerOnline, error, attempt) } },
       log = log,
     ).also { it.start() }
@@ -245,6 +250,7 @@ class ConnectionManager(
       key = key,
       onClipReceived = onClipReceived,
       onStatReceived = onStatReceived,
+      onFileReceived = onFileReceived,
       onStatus = { status, peerOnline, error, attempt -> post { onRelayStatus(status, peerOnline, error, attempt) } },
       log = log,
     ).also { it.start() }

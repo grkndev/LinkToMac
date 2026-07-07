@@ -26,6 +26,7 @@ const MODULES = {
   notificationsActive: require('../../assets/icons/notifications_active.xml'),
   chat: require('../../assets/icons/chat.xml'),
   contentCopy: require('../../assets/icons/content_copy.xml'),
+  image: require('../../assets/icons/image.xml'),
   battery: require('../../assets/icons/battery_charging_full.xml'),
   qr: require('../../assets/icons/qr_code_scanner.xml'),
   linkOff: require('../../assets/icons/link_off.xml'),

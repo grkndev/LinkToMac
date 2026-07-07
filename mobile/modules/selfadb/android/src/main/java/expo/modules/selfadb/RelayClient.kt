@@ -31,6 +31,8 @@ class RelayClient(
   private val onClipReceived: (String) -> Unit,
   /** Decrypted telemetry JSON received from the Mac (e.g. battery `{"level":85,"charging":true}`). */
   private val onStatReceived: (String) -> Unit,
+  /** Decrypted `file` plaintext from the Mac (u16 header-len ‖ header JSON ‖ raw bytes). */
+  private val onFileReceived: (ByteArray) -> Unit,
   private val onStatus: (status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
   private val log: (String) -> Unit,
 ) {
@@ -104,6 +106,19 @@ class RelayClient(
       return
     }
     val msg = JSONObject().put("t", "clip").put("nonce", enc.first).put("ct", enc.second)
+    ws?.send(msg.toString())
+  }
+
+  /** Send an assembled `file` plaintext (header + image bytes) to the Mac, E2E-encrypted like a
+   *  clip. Same fail-closed AEAD; no-op if the socket isn't open or the pairing key is malformed. */
+  fun sendFile(payload: ByteArray) {
+    if (payload.isEmpty()) return
+    val enc = ClipCodec.encodeBytes(payload, key, "file")
+    if (enc == null) {
+      log("encrypt failed (bad pairing key); not sending file")
+      return
+    }
+    val msg = JSONObject().put("t", "file").put("nonce", enc.first).put("ct", enc.second)
     ws?.send(msg.toString())
   }
 
@@ -224,6 +239,10 @@ class RelayClient(
       "stat" -> {
         val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key, "stat")
         if (decoded != null) onStatReceived(decoded) else log("stat decrypt failed (key mismatch or corrupt)")
+      }
+      "file" -> {
+        val decoded = ClipCodec.decodeBytes(o.optString("nonce"), o.optString("ct"), key, "file")
+        if (decoded != null) onFileReceived(decoded) else log("file decrypt failed (key mismatch or corrupt)")
       }
       "pong" -> {}
     }

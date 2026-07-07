@@ -47,4 +47,8 @@ dependencies {
   // WebSocket client for the relay (runs in the foreground service). React Native already
   // bundles OkHttp 4.12 on the classpath; pin the same version to avoid conflicts.
   implementation "com.squareup.okhttp3:okhttp:4.12.0"
+  // androidx.core.content.FileProvider for the clipboard-image content URIs (declared in the
+  // module manifest). Every RN app already ships androidx.core; this just makes the compile
+  // dependency explicit.
+  implementation "androidx.core:core:1.13.1"
 }

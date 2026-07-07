@@ -102,6 +102,16 @@ async function main(): Promise<void> {
   await sleep(300);
   assert(!android.inbox().some((m) => m.t === 'sms'), 'sms sender received no echo');
 
+  // File transfer (Mac -> phone clipboard image): opaque `file` frame, same fan-out.
+  // Use a ~900 KB ct to prove the 1 MiB maxPayload accepts image-sized frames.
+  const bigCt = 'QUJDRA=='.repeat(115_000);
+  mac.send({ t: 'file', nonce: 'ZmlsZW5vbmNl', ct: bigCt });
+  const file = await android.waitFor((m) => m.t === 'file', 'android receives file');
+  assert(file.nonce === 'ZmlsZW5vbmNl' && file.ct === bigCt, 'file payload intact');
+
+  await sleep(300);
+  assert(!mac.inbox().some((m) => m.t === 'file'), 'file sender received no echo');
+
   mac.close();
   await android.waitFor(
     (m) => m.t === 'peer' && m.state === 'offline' && m.device === 'mac',

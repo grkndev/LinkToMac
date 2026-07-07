@@ -416,6 +416,16 @@ class SelfAdbModule : Module() {
       ClipForegroundService.setNotificationForwarding(appCtx, enabled)
     }
 
+    // ---- Image sending (phone clipboard image -> Mac) ------------------------
+
+    AsyncFunction("getSendImages") {
+      ClipForegroundService.getSendImages(appCtx)
+    }
+
+    AsyncFunction("setSendImages") { enabled: Boolean ->
+      ClipForegroundService.setSendImages(appCtx, enabled)
+    }
+
     // ---- Messages mirroring (SMS store -> Mac) -------------------------------
 
     /** Whether we hold BOTH READ_SMS and READ_CONTACTS (needed to read texts + resolve names). */
@@ -509,6 +519,13 @@ class SelfAdbModule : Module() {
      */
     AsyncFunction("readDaemonLog") {
       val socketUp = daemonAlive(ClipForegroundService.getClipPort(appCtx))
+      // Preferred path: ask the daemon for its log over the already-open bridge. No adb → no
+      // libadb `BufferOverflowException` (which the `tail clip.log` fallback below can hit when a
+      // WRTE payload exceeds the device's negotiated maxdata). Only fall back to adb when the
+      // bridge isn't connected (daemon reachable but our client isn't attached).
+      ClipForegroundService.instance?.requestDaemonLog()?.let { bridgeLog ->
+        return@AsyncFunction "bridge socket: açık (köprüden okundu)\n\n$bridgeLog"
+      }
       val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
       try {
         val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
@@ -540,6 +557,31 @@ class SelfAdbModule : Module() {
       ClipForegroundService.stop(appCtx)
       status("connected", "stopped")
       r
+    }
+
+    /**
+     * Kill the running daemon and redeploy the bundled dex. The whole point is to load a **rebuilt**
+     * `clipboard-agent.dex` after `bun run android`: a live daemon survives app reinstall, and
+     * `autoStart` just attaches to it, so new daemon code never runs until it's force-restarted.
+     * Needs adb (to push + relaunch), so it (re)connects over mDNS, self-enabling wireless debugging
+     * if we hold WRITE_SECURE_SETTINGS, then turns it back off — same dance as `readDaemonLog`.
+     */
+    AsyncFunction("restartDaemon") { clipPort: Int ->
+      val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
+      try {
+        val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
+          ?: return@AsyncFunction "Yeniden başlatılamadı: kablosuz hata ayıklama yayında değil. " +
+            "Geliştirici Seçenekleri > Kablosuz hata ayıklama'yı açıp tekrar dene."
+        adb.connect(ep.first.hostAddress ?: "127.0.0.1", ep.second)
+        ClipForegroundService.stop(appCtx)  // drop our bridge so it reconnects to the fresh daemon
+        deploy(clipPort, force = true)      // kill the old daemon + push/launch the rebuilt dex
+        status("connected", "restarted")
+        "Daemon yeniden başlatıldı — yeni dex yüklendi."
+      } catch (e: Exception) {
+        "Yeniden başlatılamadı: ${e.message ?: e.javaClass.simpleName}"
+      } finally {
+        if (toggled) setWifiDebug(false)
+      }
     }
 
     // Stop the foreground service (ends clipboard sync). The daemon keeps running.
@@ -577,13 +619,15 @@ class SelfAdbModule : Module() {
     null
   }
 
-  /** Push (if needed) + launch the detached daemon, then own the bridge in the FGS. */
-  private fun deploy(clipPort: Int) {
+  /** Push (if needed) + launch the detached daemon, then own the bridge in the FGS.
+   *  `force` skips the "already alive" fast path — used by `restartDaemon` to guarantee a rebuilt
+   *  dex is actually reloaded (a live daemon survives app reinstall and would otherwise be reused). */
+  private fun deploy(clipPort: Int, force: Boolean = false) {
     // The daemon requires its launch secret as the bridge's first line. Reuse the persisted
     // one (a running daemon's expectation can't change); mint one only when absent.
     val hadSecret = ClipForegroundService.getDaemonSecret(appCtx) != null
     val secret = ClipForegroundService.getOrCreateDaemonSecret(appCtx)
-    if (daemonAlive(clipPort) && hadSecret && !bridgeFlapping()) {
+    if (!force && daemonAlive(clipPort) && hadSecret && !bridgeFlapping()) {
       log("daemon already alive on :$clipPort")
     } else {
       if (daemonAlive(clipPort)) {

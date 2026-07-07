@@ -96,8 +96,8 @@ between them. It never stores anything and never inspects clipboard content.
 
 ### Forwarding rules (`server/src/relay.ts`)
 
-- `clip`, `cmd`, `stat`, and `note` frames are `JSON.stringify`'d and sent **verbatim to the
-  *other* peer only** — the sender never receives its own echo.
+- `clip`, `cmd`, `stat`, `note`, `sms`, and `file` frames are `JSON.stringify`'d and sent **verbatim
+  to the *other* peer only** — the sender never receives its own echo.
 - `cmd` is **fully opaque**: the action plaintext is E2E-encrypted into `nonce`/`ct` (same AEAD
   as `clip`), so the relay can't tell one command from another and forwards it verbatim — new
   remote commands never require a server change, and a malicious relay/room can't forge one.
@@ -108,6 +108,13 @@ between them. It never stores anything and never inspects clipboard content.
 - `note` carries an **opaque mirrored notification** (phone → Mac), E2E-encrypted the same way;
   the relay forwards it verbatim. Like `stat`, the message type was an additive,
   backward-compatible protocol change (the relay just learned a new type to fan out).
+- `sms` carries an **opaque mirrored SMS batch/delta** (phone → Mac); same additive, opaque fan-out.
+- `file` carries an **opaque clipboard image** and is **bidirectional** (Mac↔phone); same additive,
+  opaque fan-out. Its plaintext is `u16 BE header-len ‖ header JSON (`{"mime":…}`) ‖ raw image bytes`
+  (raw bytes inside the AEAD envelope, so only the outer `ct` is base64 — no double-encoding). The
+  sender downscales / JPEG-re-encodes an oversize image to ~700 KB raw first (`ImagePrep.swift` on
+  the Mac, `ClipForegroundService.fitImage` on the phone) so the sealed + base64'd frame stays under
+  the 1 MiB `maxPayload`.
 - **Backpressure:** if a peer's `ws.bufferedAmount` exceeds `maxPayloadBytes * 8`, it is
   declared a slow consumer and dropped (close code `4003`) instead of buffering unbounded.
 - Logs are privacy-preserving: the `roomId` is redacted to a 6-char prefix, and only
@@ -117,7 +124,8 @@ between them. It never stores anything and never inspects clipboard content.
 
 - Per-connection **sliding-window rate limit** (`RATE_LIMIT_MSGS` / `RATE_LIMIT_WINDOW_MS`,
   default 120 / 10 s; `server/src/ratelimit.ts`).
-- `maxPayload` of 256 KB enforced at the `ws` layer; binary frames rejected.
+- `maxPayload` of 1 MiB enforced at the `ws` layer (fits an E2E-encrypted clipboard image ~700 KB
+  raw after base64); binary frames rejected.
 - ws-level **ping/pong heartbeat** (`PING_INTERVAL_MS`, default 50 s — under the front-proxy's
   60 s WS read timeout, and tuned to minimise mobile radio wakeups) with dead-connection reaping
   (`server/src/heartbeat.ts`).
@@ -300,6 +308,24 @@ to *launch* (or relaunch) it — never for the steady-state data path.
   resulting `onClip` from the daemon is recognized and swallowed.
 - A `sendPaused` flag gates **outbound** (Mac-bound) forwarding only — inbound clips from the
   Mac still arrive while paused. This backs the *"pause sending from the phone"* setting.
+- **Clipboard images (`file`, bidirectional):**
+  - *Mac → phone (inbound):* `applyFile` decodes the frame's `u16 header-len ‖ header JSON ‖ raw
+    bytes` plaintext, writes the image to `cacheDir/clips`, and puts it on the system clipboard as a
+    `${applicationId}.selfadb.fileprovider` **content URI** via `ClipboardManager.setPrimaryClip` —
+    **directly, not through the shell daemon** (a background clipboard *write* is permitted; the
+    daemon holds no read grant to our provider).
+  - *phone → Mac (outbound):* a copied image is a `content://` URI on the clipboard, not text. The
+    shell daemon can't resolve it without a `ContentResolver`, so it lazily builds a **system
+    Context** — a bare `ActivityThread` instance + `getSystemContext()` (deliberately *not*
+    `systemMain()`, which would re-prepare the main Looper the daemon already owns) — and reads the
+    bytes via `openInputStream`; the clipboard read-grant follows the shell `getPrimaryClip` caller.
+    It emits `{"type":"image",…}` over the bridge; `captureImage` fits the bytes under the frame
+    budget (`fitImage`) and sends a `file` frame via `conn.sendFile`. Fails soft: if the Context
+    can't be built on some OEM build, text sync is unaffected and images are simply skipped.
+  - *Echo:* the Mac→phone write lands on the clipboard, the daemon re-reads it, and would bounce it
+    back — so `applyFile` stamps the raw bytes' **SHA-256** in `recentImageWrites` and `captureImage`
+    drops the matching re-capture (the image analogue of the text `recentWrites` map). The outbound
+    path also honors `sendPaused`.
 
 ### 3.5 Relay client + BLE beacon (Android)
 
@@ -379,11 +405,12 @@ roadmap-placeholder feature tiles.
 
 | File | Role |
 |---|---|
-| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note`/`sms` decode, clip-history ring, notification ring, and message store (`conversations`) |
-| `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; `onRemoteStat`/`onRemoteNote`/`onRemoteSms` for the relay-less path |
-| `PasteboardWatcher.swift` | Polls `NSPasteboard.changeCount`; echo suppression |
+| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note`/`sms` decode + inbound `file` (`writeRemoteImage` → pasteboard image), clip-history ring, notification ring, and message store (`conversations`); sends outbound `clip`/`stat`/**`file`** (Mac→phone clipboard images, gated by `syncImages`) |
+| `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; `onRemoteStat`/`onRemoteNote`/`onRemoteSms`/`onRemoteFile` for the relay-less path; outbound `sendClip`/`sendStat`/`sendFile` |
+| `PasteboardWatcher.swift` | Polls `NSPasteboard.changeCount`; reports new text + image-only copies (outbound); `write`/`writeImage` apply inbound clips/images; echo suppression via `lastChangeCount` |
 | `BatteryMonitor.swift` | IOKit power-source poll → outbound `stat` (the Mac's own battery) |
-| `ClipCodec.swift` | E2E payload encryption — ChaCha20-Poly1305 (CryptoKit) |
+| `ClipCodec.swift` | E2E payload encryption — ChaCha20-Poly1305 (CryptoKit); String + raw-`Data` (`encodeData`/`decodeData`) variants |
+| `ImagePrep.swift` | Fits a copied image under the relay frame cap (pass-through small PNG, else downscale + JPEG) for the `file` frame |
 | `MacNotifier.swift` | Raises native banners for mirrored notifications (`UNUserNotificationCenter`; icon as a best-effort attachment with a text-only fallback) |
 | `ProximityMonitor.swift` | CoreBluetooth central; RSSI → lock decision |
 | `ScreenLock.swift` | Locks the screen |
@@ -435,7 +462,7 @@ If the symbol can't be resolved on a future macOS, it falls back to
 
 ## 5. Wire protocol (relay)
 
-JSON text frames over WebSocket. The relay reads control frames but treats `clip`/`cmd`/`stat`/`note`
+JSON text frames over WebSocket. The relay reads control frames but treats `clip`/`cmd`/`stat`/`note`/`sms`/`file`
 payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProtocol.swift`
 (Mac) and inline `JSONObject` building in `RelayClient.kt` (Android).
 
@@ -447,6 +474,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name; Mac also ± BLE prox/rssi), bidirectional, E2E-encrypted, forwarded verbatim
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
 { "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // mirrored SMS batch/delta (phone → Mac), E2E-encrypted, forwarded verbatim
+{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // clipboard image (bidirectional): plaintext = u16 header-len ‖ header JSON ‖ raw bytes, E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
 // relay → client
@@ -457,6 +485,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name; Mac also ± BLE prox/rssi), relayed
 { "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
 { "t": "sms",    "nonce": "...", "ct": "..." }            // the peer's mirrored SMS batch/delta, relayed
+{ "t": "file",   "nonce": "...", "ct": "..." }            // the peer's clipboard image, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
@@ -471,7 +500,7 @@ On the same network the phone can skip the relay entirely and talk **straight to
 roles invert: the **Mac becomes the WebSocket server** (`LanServer.swift`, `Network.framework`
 `NWListener` + `NWProtocolWebSocket` — all system frameworks, no third-party deps) and the phone
 is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on the LAN), but
-`clip`/`cmd`/`stat`/`note` stay E2E-encrypted, so a sniffer sees only opaque ciphertext.
+`clip`/`cmd`/`stat`/`note`/`sms`/`file` stay E2E-encrypted, so a sniffer sees only opaque ciphertext.
 
 - **Discovery (hybrid).** The Mac advertises Bonjour `_linktomac._tcp` on its LAN port (default
   **53124**) with TXT `rid = base64url(SHA256(room))[:16]` + `name`. The phone recomputes the same
@@ -700,7 +729,7 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   12-byte nonce per message; the relay sees only `nonce` + ciphertext. **Fails closed:** a
   tampered or wrong-key frame fails the Poly1305 tag and is dropped, never written to a clipboard.
 - **Replay protection + type binding (v2 envelope).** Every frame binds its wire type as AEAD
-  **AAD** (`utf8("clip"|"cmd"|"stat"|"note"|"sms")`) — a captured ciphertext can't be relabeled
+  **AAD** (`utf8("clip"|"cmd"|"stat"|"note"|"sms"|"file")`) — a captured ciphertext can't be relabeled
   to another frame type — and the plaintext is prefixed with an **8-byte big-endian
   epoch-milliseconds timestamp**. Receivers reject frames outside a **±120 s freshness window**
   and keep a **seen-nonce cache** within the window, so a captured frame (e.g. a `cmd:lock`)
@@ -791,16 +820,19 @@ Android's *Pair device with pairing code* dialog and enter the 6-digit code once
 
 ## 13. Scope & roadmap
 
-v1 links **one phone and one Mac** and syncs **text only** (images/files out of scope; the
-256 KB payload cap reflects that — mirrored app icons are small base64 PNGs). Implemented: two-way
-clipboard (end-to-end encrypted with ChaCha20-Poly1305), remote lock, proximity auto-lock,
+v1 links **one phone and one Mac** and syncs **text + Mac→phone clipboard images** (the 1 MiB
+payload cap fits an image ~700 KB raw after base64; mirrored app icons are small base64 PNGs).
+Implemented: two-way text clipboard (end-to-end encrypted with ChaCha20-Poly1305), **bidirectional
+clipboard images** (`file`; §5, auto-fitted under the cap, Mac→phone applied to the Android
+clipboard as a FileProvider content URI, phone→Mac read by the shell daemon via a system Context
+and applied to `NSPasteboard`), remote lock, proximity auto-lock,
 **relay-less LAN-direct** mode (§5.1 — phone ↔ Mac over the local network with no relay,
 auto-preferred over the relay on the same Wi-Fi), **bidirectional battery/identity telemetry**
 (`stat`, Mac↔phone), **one-way notification mirroring** (`note`, phone → Mac; §5.2, surfaced
 as a native banner + the dashboard's Notifications tab), and **one-way message (SMS) mirroring**
 (`sms`, phone → Mac; §5.3, read-only conversation threads in the dashboard's Messages tab). On the
-roadmap (`RoadMap.md`): screen mirroring, file transfer, replying to messages, and read-only access
-to gallery/calls from the Mac.
+roadmap (`RoadMap.md`): screen mirroring, arbitrary (non-image) file transfer, replying to
+messages, and read-only access to gallery/calls from the Mac.
 
 ---
 
@@ -809,7 +841,7 @@ to gallery/calls from the Mac.
 ```
 server/src/
   index.ts        HTTP+WS bootstrap, auth, per-conn wiring, shutdown
-  relay.ts        room map, join/clip/cmd/stat/note forwarding, backpressure
+  relay.ts        room map, join/clip/cmd/stat/note/sms/file forwarding, backpressure
   protocol.ts     frame types + validation
   ratelimit.ts    sliding-window limiter
   heartbeat.ts    ws ping/pong reaper
@@ -819,9 +851,10 @@ mac/Sources/LinkToMac/
   LinkToMacApp.swift     MenuBarExtra + dashboard scene + AppDelegate
   RelayClient.swift      WS client, reconnect, cmd dispatch; owns the pasteboard + battery monitor, clip-history + notification rings + message store
   LanServer.swift        LAN-direct WS server (NWListener) + Bonjour + HMAC handshake (onRemoteStat/onRemoteNote/onRemoteSms)
-  PasteboardWatcher.swift changeCount poll + echo stamp
+  PasteboardWatcher.swift changeCount poll (text + image copies) + echo stamp
   BatteryMonitor.swift   IOKit power-source poll → outbound stat (Mac's own battery)
-  ClipCodec.swift        E2E payload encryption (ChaCha20-Poly1305 / CryptoKit)
+  ClipCodec.swift        E2E payload encryption (ChaCha20-Poly1305 / CryptoKit; String + Data variants)
+  ImagePrep.swift        fit a copied image under the relay cap for the file frame
   MacNotifier.swift      native banner for mirrored notes (UNUserNotificationCenter + icon attachment)
   ProximityMonitor.swift BLE central, RSSI → lock
   ProximityConfig.swift  UUID derivation + tunables
@@ -840,8 +873,8 @@ mac/Sources/LinkToMac/
 mobile/modules/selfadb/android/.../selfadb/
   SelfAdbModule.kt          Expo module: autoStart/pair/relay/proximity APIs
   AdbManager.kt             libadb wrapper: pair/connect/discover/push/launch
-  ClipboardAgent (java)     → built to assets/clipboard-agent.dex
-  ClipForegroundService.kt  START_STICKY host for bridge+connection+BLE
+  ClipboardAgent (java)     → built to assets/clipboard-agent.dex (captures text + images; system Context for content:// URIs)
+  ClipForegroundService.kt  START_STICKY host for bridge+connection+BLE; applyFile (inbound image → clipboard URI) + captureImage (outbound image → file frame)
   ClipBridge.kt             localhost NDJSON client to the daemon
   ConnectionManager.kt      LAN-preferred / relay-fallback link arbiter
   RelayClient.kt            OkHttp WS to the relay (sendClip/sendCmd/sendStat/sendNote)
@@ -851,7 +884,7 @@ mobile/modules/selfadb/android/.../selfadb/
   SmsMirror.kt              FGS-owned SMS reader → sms frames (backfill + ContentObserver deltas, name resolve)
   BleAdvertiser.kt          BLE presence beacon
   ClipBus.kt                service ↔ module bridge + ring buffers
-  ClipCodec.kt              E2E payload encryption (ChaCha20-Poly1305 / javax.crypto)
+  ClipCodec.kt              E2E payload encryption (ChaCha20-Poly1305 / javax.crypto; String + ByteArray variants)
 
 mobile/native-src/clipboard-agent/
   ClipboardAgent.java       the privileged daemon source

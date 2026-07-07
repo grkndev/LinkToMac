@@ -29,6 +29,8 @@ export default function SettingsScreen() {
     toggleSmsMirror,
     smsAccess,
     requestSmsPermission,
+    sendImagesOn,
+    toggleSendImages,
     batteryOk,
     proximityOn,
     toggleProximity,
@@ -100,6 +102,14 @@ export default function SettingsScreen() {
             hint="Copies on this phone are sent to your Mac. You'll still receive the Mac's copies when off."
             value={!paused}
             onValueChange={(on) => setPaused(!on)}
+          />
+          <SwitchRow
+            colors={colors}
+            icon={icons.image}
+            label="Send images"
+            hint="Copied images are sent to your Mac's clipboard. You'll still receive the Mac's images when off."
+            value={sendImagesOn}
+            onValueChange={toggleSendImages}
           />
           <SwitchRow
             colors={colors}

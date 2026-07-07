@@ -55,9 +55,11 @@ struct ClipHistoryScreen: View {
             }
             VStack(spacing: 3) {
                 ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
-                    ClipRow(text: entry.text, time: Self.relative(entry.date),
+                    ClipRow(text: entry.text, time: Self.relative(entry.date), isImage: entry.isImage,
                             position: groupPosition(index, count: group.entries.count)) {
-                        client.recopy(entry.text)
+                        // We don't retain image bytes, so re-copying an image row would clobber the
+                        // clipboard with the literal "[Image]" string — only re-copy real text.
+                        if !entry.isImage { client.recopy(entry.text) }
                     }
                 }
             }
@@ -96,7 +98,7 @@ struct ClipHistoryScreen: View {
 /// The kind of a clip, inferred from its text — drives the row's badge icon, subtitle label, and
 /// whether it renders monospaced.
 private enum ClipKind {
-    case url, command, phone, text
+    case url, command, phone, text, image
 
     var icon: String {
         switch self {
@@ -104,6 +106,7 @@ private enum ClipKind {
         case .command: return "terminal.fill"
         case .phone: return "phone.fill"
         case .text: return "text.alignleft"
+        case .image: return "photo"
         }
     }
     var label: String {
@@ -112,6 +115,7 @@ private enum ClipKind {
         case .command: return "Command"
         case .phone: return "Phone number"
         case .text: return "Text"
+        case .image: return "Image"
         }
     }
     /// Links and commands read better monospaced.
@@ -134,12 +138,13 @@ private enum ClipKind {
 private struct ClipRow: View {
     let text: String
     let time: String
+    var isImage: Bool = false
     var position: M3GroupPosition = .single
     let onCopy: () -> Void
     @State private var hovering = false
     @State private var copied = false
 
-    private var kind: ClipKind { ClipKind.infer(from: text) }
+    private var kind: ClipKind { isImage ? .image : ClipKind.infer(from: text) }
     private var shape: UnevenRoundedRectangle { position.shape(axis: .vertical) }
     private var titleFont: Font {
         kind.monospaced ? .system(size: 15, weight: .medium, design: .monospaced) : M3.titleMedium
@@ -161,10 +166,13 @@ private struct ClipRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(copied ? M3.success : (hovering ? M3.onSurface : M3.onSurfaceVariant))
-                    .contentTransition(.symbolEffect(.replace))
+                // No re-copy glyph for images — we don't keep the bytes, so the row is display-only.
+                if !isImage {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(copied ? M3.success : (hovering ? M3.onSurface : M3.onSurfaceVariant))
+                        .contentTransition(.symbolEffect(.replace))
+                }
             }
             .padding(.horizontal, 16)
             .frame(height: 64)
@@ -178,6 +186,7 @@ private struct ClipRow: View {
 
     /// Re-copy, then flash a checkmark + "Copied" for a moment so the tap clearly registers.
     private func copy() {
+        guard !isImage else { return } // image rows are display-only (no retained bytes to re-copy)
         onCopy()
         withAnimation(.snappy) { copied = true }
         Task {

@@ -14,7 +14,7 @@ import kotlin.math.abs
  *   nonce = base64(12-byte random nonce),  ct = base64(ciphertext || 16-byte Poly1305 tag).
  *
  * **v2 envelope (replay protection + type binding):**
- *   AAD       = utf8(frame type: "clip" | "cmd" | "stat" | "note" | "sms")
+ *   AAD       = utf8(frame type: "clip" | "cmd" | "stat" | "note" | "sms" | "file")
  *   plaintext = 8-byte big-endian epoch-milliseconds || utf8(payload)
  * The AAD stops a captured ciphertext from being relabeled to another frame type; the
  * timestamp (±2 min window) plus a seen-nonce cache stops replays — the relay is an
@@ -42,14 +42,18 @@ object ClipCodec {
   private val seenNonces = HashMap<String, Long>()
 
   /** Encrypt [text] as a [type] frame. @return (nonce, ct) both base64, or null on a bad key. */
-  fun encode(text: String, keyBase64: String, type: String): Pair<String, String>? {
+  fun encode(text: String, keyBase64: String, type: String): Pair<String, String>? =
+    encodeBytes(text.toByteArray(Charsets.UTF_8), keyBase64, type)
+
+  /** Encrypt a raw byte payload (e.g. `file` image bytes) as a [type] frame — same v2
+   *  envelope as text, just no UTF-8 step. */
+  fun encodeBytes(payload: ByteArray, keyBase64: String, type: String): Pair<String, String>? {
     val key = secretKey(keyBase64) ?: return null
     return try {
       val nonce = ByteArray(NONCE_LEN).also { rng.nextBytes(it) }
       val cipher = Cipher.getInstance(TRANSFORM)
       cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(nonce))
       cipher.updateAAD(type.toByteArray(Charsets.UTF_8))
-      val payload = text.toByteArray(Charsets.UTF_8)
       val plain = ByteBuffer.allocate(TS_LEN + payload.size)
         .putLong(System.currentTimeMillis())
         .put(payload)
@@ -66,7 +70,12 @@ object ClipCodec {
 
   /** Decrypt a [type] frame to its payload, or null on auth failure / relabeled type /
    *  stale timestamp / replayed nonce / malformed input / wrong key. */
-  fun decode(nonce: String, ct: String, keyBase64: String, type: String): String? {
+  fun decode(nonce: String, ct: String, keyBase64: String, type: String): String? =
+    decodeBytes(nonce, ct, keyBase64, type)?.toString(Charsets.UTF_8)
+
+  /** Decrypt a [type] frame to its raw byte payload (e.g. `file` image bytes) — same checks
+   *  as the text variant. */
+  fun decodeBytes(nonce: String, ct: String, keyBase64: String, type: String): ByteArray? {
     val key = secretKey(keyBase64) ?: return null
     return try {
       val nonceBytes = Base64.decode(nonce, Base64.DEFAULT)
@@ -87,7 +96,7 @@ object ClipCodec {
     key: SecretKeySpec,
     type: String,
     nonceB64: String,
-  ): String? = try {
+  ): ByteArray? = try {
     val cipher = Cipher.getInstance(TRANSFORM)
     cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(nonceBytes))
     cipher.updateAAD(type.toByteArray(Charsets.UTF_8))
@@ -100,7 +109,7 @@ object ClipCodec {
       when {
         abs(now - ts) > FRESHNESS_WINDOW_MS -> null // stale or far-future -> replay/skew
         !rememberNonce(nonceB64, ts, now) -> null // duplicate nonce -> replay
-        else -> String(plain, TS_LEN, plain.size - TS_LEN, Charsets.UTF_8)
+        else -> plain.copyOfRange(TS_LEN, plain.size)
       }
     }
   } catch (e: Exception) {
@@ -113,10 +122,10 @@ object ClipCodec {
     ctBytes: ByteArray,
     key: SecretKeySpec,
     type: String,
-  ): String? = try {
+  ): ByteArray? = try {
     val cipher = Cipher.getInstance(TRANSFORM)
     cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(nonceBytes))
-    val plain = String(cipher.doFinal(ctBytes), Charsets.UTF_8)
+    val plain = cipher.doFinal(ctBytes)
     ClipBus.log("codec: legacy v1 frame accepted ($type) — update the peer")
     plain
   } catch (e: Exception) {

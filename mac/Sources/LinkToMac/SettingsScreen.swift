@@ -23,7 +23,14 @@ struct SettingsScreen: View {
                     M3ToggleRow(
                         icon: "arrow.up.arrow.down", title: "Send copies to Android",
                         subtitle: "Mirror this Mac's clipboard to the phone",
-                        isOn: Binding(get: { client.sendToAndroid }, set: { client.sendToAndroid = $0 })
+                        isOn: Binding(get: { client.sendToAndroid }, set: { client.sendToAndroid = $0 }),
+                        position: .first
+                    )
+                    M3ToggleRow(
+                        icon: "photo", title: "Sync images",
+                        subtitle: "Send copied images to the phone's clipboard",
+                        isOn: Binding(get: { client.syncImages }, set: { client.syncImages = $0 }),
+                        position: .last
                     )
                 }
 

@@ -6,19 +6,27 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
+import androidx.core.content.FileProvider
 import expo.modules.selfadb.R
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
@@ -69,6 +77,31 @@ class ClipForegroundService : Service() {
     recentWrites.entries.removeAll { it.value < cutoff }
   }
 
+  /** Content hashes of images we recently wrote to the clipboard (Mac→phone), so the daemon's
+   *  re-capture of that same image isn't bounced back to the Mac. Keyed by SHA-256 of the raw
+   *  received bytes — the daemon reads back the exact file we wrote, so the hashes match. Mirrors
+   *  [recentWrites] for text; a separate map because the key space (byte hash) is different. */
+  private val recentImageWrites = LinkedHashMap<String, Long>()
+
+  private fun stampImageWrite(hash: String) {
+    synchronized(recentImageWrites) {
+      val cutoff = SystemClock.elapsedRealtime() - ECHO_WINDOW_MS
+      recentImageWrites.entries.removeAll { it.value < cutoff }
+      recentImageWrites[hash] = SystemClock.elapsedRealtime()
+    }
+  }
+
+  private fun consumeImageEcho(hash: String): Boolean {
+    synchronized(recentImageWrites) {
+      val cutoff = SystemClock.elapsedRealtime() - ECHO_WINDOW_MS
+      recentImageWrites.entries.removeAll { it.value < cutoff }
+      return recentImageWrites.remove(hash) != null
+    }
+  }
+
+  private fun sha256(bytes: ByteArray): String =
+    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
   /** Outbound gate: when true, captured clips are NOT forwarded to the Mac (inbound still
    *  works). Seeded from PREFS_UI in onStartCommand so a START_STICKY restart with no JS
    *  keeps honoring the user's choice. */
@@ -117,6 +150,7 @@ class ClipForegroundService : Service() {
             if (!sendPaused) conn?.sendClip(text)
           }
         },
+        onImage = { mime, bytes, _ -> captureImage(mime, bytes) },
         onLog = { ClipBus.log(it) }
       ).also { it.start() }
     }
@@ -136,6 +170,9 @@ class ClipForegroundService : Service() {
 
   /** Whether the localhost bridge currently holds a live connection to the daemon. */
   fun isBridgeConnected(): Boolean = bridge?.isConnected() == true
+
+  /** The daemon's own log over the bridge (no adb). Null if the bridge isn't connected. */
+  fun requestDaemonLog(): String? = bridge?.requestLog()
 
   /** Whether the daemon keeps accepting-then-dropping the bridge (wrong secret / eviction —
    *  i.e. the daemon is owned by another install). autoStart redeploys when this is set. */
@@ -251,6 +288,7 @@ class ClipForegroundService : Service() {
         ClipBus.log("clip -> clipboard (${text.length})")
       },
       onStatReceived = { json -> ClipBus.macStat(json) },
+      onFileReceived = { bytes -> applyFile(bytes) },
       onStatus = { transport, status, peerOnline, error, attempt ->
         ClipBus.relay(status, peerOnline, error, transport, attempt)
         updateNotification(peerOnline)
@@ -265,6 +303,101 @@ class ClipForegroundService : Service() {
       },
       log = { ClipBus.log(it) },
     ).also { it.start() }
+  }
+
+  // ---- File transfer (Mac -> phone clipboard image) -------------------------
+  // Plaintext layout (byte-exact contract with the Mac's `FileFrame.payload`):
+  //   u16 BE header-len ‖ header JSON utf8 ‖ raw image bytes.   Header v1: {"mime":"image/…"}.
+
+  /** Write a received image to cache and put it on the system clipboard as a FileProvider URI.
+   *  Goes through [ClipboardManager] directly (background clipboard *writes* are allowed; only
+   *  reads are focus-gated) — NOT through the shell daemon, which is text-only and holds no
+   *  grant to our provider. The daemon's clip-changed listener reads no text off a URI clip,
+   *  so nothing echoes back to the Mac ([recentWrites] stays untouched). */
+  private fun applyFile(bytes: ByteArray) {
+    try {
+      if (bytes.size < 2) { ClipBus.log("file: frame too short"); return }
+      val headerLen = ((bytes[0].toInt() and 0xFF) shl 8) or (bytes[1].toInt() and 0xFF)
+      if (bytes.size <= 2 + headerLen) { ClipBus.log("file: bad header length"); return }
+      val header = JSONObject(String(bytes, 2, headerLen, Charsets.UTF_8))
+      val mime = header.optString("mime", "image/png")
+      val ext = if (mime == "image/jpeg") "jpg" else "png"
+
+      val dir = File(cacheDir, "clips").apply { mkdirs() }
+      dir.listFiles()?.forEach { it.delete() } // one live clip at a time; drop stale files
+      // Fresh timestamped name so a paste target never serves a cached read of an old URI.
+      val file = File(dir, "clip-${System.currentTimeMillis()}.$ext")
+      file.outputStream().use { it.write(bytes, 2 + headerLen, bytes.size - 2 - headerLen) }
+
+      // Stamp the raw image bytes' hash BEFORE putting them on the clipboard: the daemon's
+      // clip-changed listener will re-read this exact file and try to forward it back to the Mac;
+      // [captureImage] consumes this stamp and drops that echo.
+      val imageBytes = bytes.copyOfRange(2 + headerLen, bytes.size)
+      stampImageWrite(sha256(imageBytes))
+
+      val uri = FileProvider.getUriForFile(this, "$packageName.selfadb.fileprovider", file)
+      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+      clipboard.setPrimaryClip(ClipData.newUri(contentResolver, "Image", uri))
+      ClipBus.macClip("[Image]", System.currentTimeMillis().toDouble())
+      ClipBus.log("file -> clipboard image ($mime, ${file.length()} B)")
+    } catch (e: Exception) {
+      ClipBus.log("file apply failed: ${e.message}")
+    }
+  }
+
+  /** A clipboard image the daemon captured on the phone → forward to the Mac. Drops the echo of
+   *  our own Mac→phone write, respects the outbound pause, and fits the image under the relay
+   *  frame cap (the same ~700 KB budget the Mac uses) before sealing it into a `file` frame. */
+  private fun captureImage(mime: String, bytes: ByteArray) {
+    try {
+      if (consumeImageEcho(sha256(bytes))) return // echo of our own recent write -> swallow
+      // Visible skip reasons so the Logs screen shows exactly why an image wasn't forwarded.
+      if (sendPaused) { ClipBus.log("image not sent (clipboard sending is paused)"); return }
+      if (!getSendImages(this)) { ClipBus.log("image not sent (Send images is off)"); return }
+      val fit = fitImage(bytes, mime)
+      if (fit == null) { ClipBus.log("image capture skipped (can't fit under the frame budget)"); return }
+      ClipBus.log("image -> Mac (${fit.second}, ${fit.first.size} B)")
+      conn?.sendFile(buildFilePayload(fit.second, fit.first))
+    } catch (e: Exception) {
+      ClipBus.log("image capture failed: ${e.message}")
+    }
+  }
+
+  /** Fit a raw image under [RAW_IMAGE_BUDGET]: a small PNG passes through; anything bigger is
+   *  downscaled + JPEG-compressed down a (scale, quality) ladder until it fits. Returns
+   *  (bytes, mime) or null when even the smallest step won't fit (or the image won't decode). */
+  private fun fitImage(bytes: ByteArray, mime: String): Pair<ByteArray, String>? {
+    // Already under budget and a format the receiver handles (png/jpeg) → send as-is, no re-encode.
+    if (bytes.size <= RAW_IMAGE_BUDGET && (mime == "image/png" || mime == "image/jpeg")) return bytes to mime
+    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    for ((scale, quality) in IMAGE_FIT_STEPS) {
+      val scaled = if (scale < 1f) {
+        Bitmap.createScaledBitmap(
+          bmp,
+          (bmp.width * scale).toInt().coerceAtLeast(1),
+          (bmp.height * scale).toInt().coerceAtLeast(1),
+          true,
+        )
+      } else {
+        bmp
+      }
+      val out = ByteArrayOutputStream()
+      scaled.compress(Bitmap.CompressFormat.JPEG, (quality * 100).toInt(), out)
+      if (out.size() <= RAW_IMAGE_BUDGET) return out.toByteArray() to "image/jpeg"
+    }
+    return null
+  }
+
+  /** Assemble the `file` frame plaintext (byte-exact contract with the Mac's `FileFrame`):
+   *  u16 BE header-len ‖ header JSON utf8 ‖ raw image bytes. */
+  private fun buildFilePayload(mime: String, bytes: ByteArray): ByteArray {
+    val header = "{\"mime\":\"$mime\"}".toByteArray(Charsets.UTF_8)
+    val out = ByteArrayOutputStream(2 + header.size + bytes.size)
+    out.write((header.size shr 8) and 0xFF)
+    out.write(header.size and 0xFF)
+    out.write(header)
+    out.write(bytes)
+    return out.toByteArray()
   }
 
   // ---- Telemetry (battery + name -> Mac) -----------------------------------
@@ -509,11 +642,17 @@ class ClipForegroundService : Service() {
     private const val KEY_CLIP_SEND_PAUSED = "clipSendPaused"
     private const val KEY_NOTIFICATION_FORWARDING = "notificationForwarding"
     private const val KEY_SMS_FORWARDING = "smsForwarding"
+    private const val KEY_SEND_IMAGES = "sendImages"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     private const val KEY_DAEMON_SECRET = "daemonSecret"
     private const val KEY_CLIP_PORT = "clipPort"
     /** How long a write stamp lives before it can no longer suppress an echo. */
     private const val ECHO_WINDOW_MS = 10_000L
+    /** Raw image budget before sealing: ~700 KB → ~960 KB frame after base64, under the relay's
+     *  1 MiB cap. Same budget as the Mac's `ImagePrep`; bump both with `MAX_PAYLOAD_BYTES`. */
+    private const val RAW_IMAGE_BUDGET = 700 * 1024
+    /** (scale, JPEG quality) ladder for fitting an oversize image; first output under budget wins. */
+    private val IMAGE_FIT_STEPS = listOf(1.0f to 0.8f, 0.7f to 0.7f, 0.5f to 0.5f)
     const val DEFAULT_PORT = 53123
 
     /** The daemon port this install actually runs on (per-variant; JS passes it to autoStart).
@@ -593,6 +732,19 @@ class ClipForegroundService : Service() {
     fun setSmsForwarding(ctx: Context, enabled: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_SMS_FORWARDING, enabled)
+        .apply()
+    }
+
+    /** Whether copied images are sent to the Mac (default true). A screenshot/photo copy can be
+     *  ~1 MB over the link, so it gets its own switch on top of the clipboard `sendPaused` gate.
+     *  Persisted in PREFS_UI (survives unpair) + read live by [captureImage]. */
+    fun getSendImages(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getBoolean(KEY_SEND_IMAGES, true)
+
+    fun setSendImages(ctx: Context, enabled: Boolean) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_SEND_IMAGES, enabled)
         .apply()
     }
 

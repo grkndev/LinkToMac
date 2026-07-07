@@ -37,6 +37,7 @@ final class RelayClient {
         let id = UUID()
         let text: String
         let date: Date
+        var isImage = false
     }
 
     /// Mac-local history of clips received from the phone (newest first, capped). Feeds the
@@ -140,6 +141,12 @@ final class RelayClient {
         didSet { UserDefaults.standard.set(sendToAndroid, forKey: "sendCopiesToAndroid") }
     }
 
+    /// Outbound gate for image copies specifically (a screenshot copy can be ~700 KB over the
+    /// relay, so it gets its own kill switch under the `sendToAndroid` master). Defaults on.
+    var syncImages: Bool = UserDefaults.standard.object(forKey: "syncImagesToAndroid") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(syncImages, forKey: "syncImagesToAndroid") }
+    }
+
     /// Whether the user wants to be connected; drives reconnect behaviour.
     private var shouldStay = false
 
@@ -173,6 +180,10 @@ final class RelayClient {
     /// Fan-out hook for telemetry (battery) onto the LAN-direct server, mirroring `onLocalClip`.
     var onLocalStat: ((String) -> Void)?
 
+    /// Fan-out hook for an image copy onto the LAN-direct server, mirroring `onLocalClip`.
+    /// Carries the assembled `file` plaintext (header + raw bytes); each transport seals it.
+    var onLocalFile: ((Data) -> Void)?
+
     /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
     /// re-advertise under the new pairing id and invalidate any stale authenticated socket.
     var onPairingChanged: (() -> Void)?
@@ -199,6 +210,16 @@ final class RelayClient {
                 guard let self, self.sendToAndroid else { return }
                 self.sendClip(text)
                 self.onLocalClip?(text) // fan out to the LAN-direct transport too
+            } onImage: { [weak self] data in
+                guard let self, self.sendToAndroid, self.syncImages else { return }
+                guard let (bytes, mime) = ImagePrep.prepare(data) else {
+                    self.log("image copy skipped (can't fit under the frame budget)")
+                    MacNotifier.post(title: "Image not synced", body: "The copied image couldn't be compressed under the transfer limit.")
+                    return
+                }
+                let payload = FileFrame.payload(mime: mime, bytes: bytes)
+                self.sendFile(payload)
+                self.onLocalFile?(payload) // fan out to the LAN-direct transport too
             }
         }
         pasteboard?.start()
@@ -234,6 +255,17 @@ final class RelayClient {
             return
         }
         Task { [weak self] in try? await self?.send(.clip(nonce: nonce, ct: ct)) }
+    }
+
+    /// Encrypt + send an assembled `file` plaintext (header + image bytes) to the peer. Same
+    /// fail-closed AEAD as `sendClip`.
+    func sendFile(_ payload: Data) {
+        guard !payload.isEmpty else { return }
+        guard let (nonce, ct) = ClipCodec.encodeData(payload, keyBase64: pairing.key, type: "file") else {
+            log("encrypt failed (bad pairing key); not sending file")
+            return
+        }
+        Task { [weak self] in try? await self?.send(.file(nonce: nonce, ct: ct)) }
     }
 
     /// Encrypt + send a telemetry payload (e.g. battery) to the peer. Same fail-closed AEAD as
@@ -293,6 +325,19 @@ final class RelayClient {
         log("lan clip received (\(text.count) chars)")
     }
 
+    /// Write a clipboard image that arrived from the phone (relay or LAN — both call here).
+    /// Parses the `file` plaintext, puts the image on the pasteboard through the echo-suppressed
+    /// writer (so it isn't re-sent to the phone), and records a placeholder in clip history.
+    func writeRemoteImage(_ payload: Data) {
+        guard let (mime, bytes) = FileFrame.parse(payload) else {
+            log("file frame malformed")
+            return
+        }
+        pasteboard?.writeImage(bytes, mime: mime)
+        recordClip("[Image]", isImage: true)
+        log("image received (\(mime), \(bytes.count) bytes)")
+    }
+
     /// Run a remote action that arrived over the LAN-direct transport (e.g. "lock").
     func runRemoteCommand(_ action: String) {
         handleCommand(action)
@@ -331,9 +376,12 @@ final class RelayClient {
     }
 
     /// Append a received clip to the in-memory history (newest first, capped, skip consecutive dupes).
-    private func recordClip(_ text: String) {
-        guard !text.isEmpty, clipHistory.first?.text != text else { return }
-        clipHistory.insert(ClipEntry(text: text, date: Date()), at: 0)
+    private func recordClip(_ text: String, isImage: Bool = false) {
+        // The consecutive-duplicate guard stops an echo/re-copy from double-recording. Images are
+        // all recorded as the placeholder "[Image]", so without the isImage bypass every image
+        // after the first would look like a duplicate and be dropped.
+        guard !text.isEmpty, isImage || clipHistory.first?.text != text else { return }
+        clipHistory.insert(ClipEntry(text: text, date: Date(), isImage: isImage), at: 0)
         if clipHistory.count > Self.clipHistoryCap {
             clipHistory.removeLast(clipHistory.count - Self.clipHistoryCap)
         }
@@ -545,6 +593,9 @@ final class RelayClient {
         configuration.timeoutIntervalForRequest = 30
         let session = URLSession(configuration: configuration)
         let task = session.webSocketTask(with: request)
+        // Default is 1 MiB, which a clipboard image `file` frame can bump against; raise it so a
+        // near-cap frame isn't rejected (the relay itself enforces the real MAX_PAYLOAD_BYTES).
+        task.maximumMessageSize = 4 * 1024 * 1024
         lastLiveness = Date() // fresh socket starts with a clean liveness clock
         self.session = session
         self.task = task
@@ -700,6 +751,13 @@ final class RelayClient {
                 applySms(json)
             } else {
                 log("sms decrypt failed (key mismatch or corrupt)")
+            }
+        case let .file(nonce, ct):
+            // A clipboard image from the phone. Same AEAD as clips; drop anything unauthenticated.
+            if let payload = ClipCodec.decodeData(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "file") {
+                writeRemoteImage(payload)
+            } else {
+                log("file decrypt failed (key mismatch or corrupt)")
             }
         case .pong:
             break
