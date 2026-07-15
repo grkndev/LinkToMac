@@ -508,6 +508,11 @@ public class ClipboardAgent {
 
     /** Constant-time check that a first line is a {"cmd":"auth"} carrying the launch secret. */
     static boolean authOk(String line, String secret) {
+        // Callers only reach here with a secret set (legacy open mode skips auth entirely),
+        // but an auth check must never NPE the daemon if that ever changes.
+        if (secret == null) {
+            return false;
+        }
         try {
             JSONObject o = new JSONObject(line);
             if (!"auth".equals(o.optString("cmd"))) {

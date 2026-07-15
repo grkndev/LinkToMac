@@ -205,7 +205,30 @@ class AdbManager(private val context: Context) {
       }
     }
     log("on device: $info")
+
+    // Byte-count check: a session drop mid-write leaves a truncated file that would otherwise
+    // only surface 3 s later as a generic DaemonNotStartedException. `ls -l` above is
+    // human-readable metadata; this is the machine check.
+    val sizeStream = manager.openStream("exec:wc -c < $devicePath")
+    val onDevice = try {
+      sizeStream.openInputStream().bufferedReader().readText().trim().toLongOrNull()
+    } finally {
+      try {
+        sizeStream.close()
+      } catch (_: Exception) {
+      }
+    }
+    if (onDevice != bytes.size.toLong()) {
+      throw AssetTruncatedException(
+        "$devicePath is ${onDevice ?: "unreadable"} bytes on device, expected ${bytes.size} - push truncated, retry"
+      )
+    }
+    log("size verified: $onDevice bytes")
   }
+
+  /** The pushed asset didn't land intact (connection drop mid-write). Distinct from a generic
+   *  daemon-start failure so callers/logs can say exactly what went wrong. */
+  class AssetTruncatedException(message: String) : Exception(message)
 
   fun close() {
     try {
