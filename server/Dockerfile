@@ -18,6 +18,5 @@ COPY --from=builder /app/dist ./dist
 COPY package.json ./
 USER node
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT:-8080}/health" >/dev/null 2>&1 || exit 1
+# Healthcheck lives in docker-compose.yml (deployment-level), not here — one definition only.
 CMD ["node", "dist/index.js"]

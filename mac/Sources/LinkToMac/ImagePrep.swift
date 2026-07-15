@@ -13,8 +13,10 @@ enum ImagePrep {
 
     /// nil = the image can't be brought under budget (or isn't decodable) — caller skips it.
     static func prepare(_ data: Data) -> (bytes: Data, mime: String)? {
-        if data.count <= rawBudgetBytes, isPNG(data) {
-            return (data, "image/png")
+        if data.count <= rawBudgetBytes {
+            if isPNG(data) { return (data, "image/png") }
+            // An already-fitting JPEG must not take a second lossy trip through the ladder.
+            if isJPEG(data) { return (data, "image/jpeg") }
         }
         guard let rep = NSBitmapImageRep(data: data) else { return nil }
         for step in steps {
@@ -29,6 +31,10 @@ enum ImagePrep {
 
     private static func isPNG(_ data: Data) -> Bool {
         data.count > 8 && data.prefix(4) == Data([0x89, 0x50, 0x4E, 0x47])
+    }
+
+    private static func isJPEG(_ data: Data) -> Bool {
+        data.count > 3 && data.prefix(3) == Data([0xFF, 0xD8, 0xFF])
     }
 
     private static func resample(_ rep: NSBitmapImageRep, scale: CGFloat) -> NSBitmapImageRep? {

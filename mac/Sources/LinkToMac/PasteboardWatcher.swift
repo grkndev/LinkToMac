@@ -1,10 +1,9 @@
 import AppKit
 
 /// Polls `NSPasteboard.changeCount` (there is no change notification) and reports new text
-/// or image copies. Remote clips are written through `write(_:)`, which stamps
-/// `lastChangeCount` so the poll never re-broadcasts our own write back to the peer (echo
-/// suppression). Images are outbound-only in v1 (no remote image write), so text `write`
-/// stamping is the only suppression needed.
+/// or image copies. Remote clips are written through `write(_:)` and remote images through
+/// `writeImage(_:mime:)`; both stamp `lastChangeCount` so the poll never re-broadcasts our
+/// own write back to the peer (echo suppression in both directions).
 @MainActor
 final class PasteboardWatcher {
     private let pasteboard = NSPasteboard.general

@@ -32,6 +32,9 @@ class ClipBridge(
   @Volatile private var sock: Socket? = null
   /** Set by the reader thread when a {"type":"log"} reply arrives; [requestLog] waits on it. */
   private val logLock = Object()
+  /** Serializes [requestLog] callers: two concurrent requests would share the single
+   *  [pendingLog] slot, the second's reply landing in the first's. */
+  private val requestLogLock = Any()
   @Volatile private var pendingLog: String? = null
   /** Consecutive connections the daemon dropped young (< SHORT_LIVED_MS). A streak means the
    *  daemon is closing us on purpose — auth reject (wrong secret) or newest-wins eviction, i.e.
@@ -147,6 +150,12 @@ class ClipBridge(
    *  thread) for the `{"type":"log"}` reply. Returns null if the bridge isn't connected or the
    *  daemon doesn't answer in time. */
   fun requestLog(timeoutMs: Long = 3000): String? {
+    synchronized(requestLogLock) {
+      return requestLogLocked(timeoutMs)
+    }
+  }
+
+  private fun requestLogLocked(timeoutMs: Long): String? {
     val o = out ?: return null
     synchronized(logLock) { pendingLog = null }
     try {
