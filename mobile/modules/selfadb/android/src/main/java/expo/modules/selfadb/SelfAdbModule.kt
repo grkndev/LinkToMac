@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -16,6 +17,8 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import io.github.muntashirakon.adb.AdbPairingRequiredException
 import io.github.muntashirakon.adb.android.AdbMdns
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -48,6 +51,10 @@ class SelfAdbModule : Module() {
     // the cold-starting daemon — see AdbManager.launchDaemon), so this is just a fast bridge/probe
     // confirmation and is effectively instant on success. Keep it short to bound the failure path.
     const val DAEMON_START_TIMEOUT_MS = 3000L
+
+    // App-picker icon raster size: 40dp row icons at ~2.5x density. PNGs live in
+    // cacheDir/appicons and are served to the UI as file:// URIs.
+    const val APP_ICON_PX = 96
   }
 
   override fun definition() = ModuleDefinition {
@@ -414,6 +421,60 @@ class SelfAdbModule : Module() {
 
     AsyncFunction("setNotificationForwarding") { enabled: Boolean ->
       ClipForegroundService.setNotificationForwarding(appCtx, enabled)
+    }
+
+    /**
+     * Launcher apps for the per-app mirroring picker: [{pkg, label, icon}] sorted by label.
+     * Icons are rasterized once to cacheDir/appicons/<pkg>.png and returned as file:// URIs
+     * (the @expo/ui Icon loader reads file bitmaps but not data: URIs); re-rasterized when
+     * the app updates. Runs on the module's background dispatcher — ~100 icons is real work.
+     */
+    AsyncFunction("getInstalledApps") {
+      val pm = appCtx.packageManager
+      val launchables = pm.queryIntentActivities(
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+      )
+      val iconDir = File(appCtx.cacheDir, "appicons").apply { mkdirs() }
+      launchables
+        .distinctBy { it.activityInfo.packageName }
+        .filter { it.activityInfo.packageName != appCtx.packageName } // we never mirror our own
+        .map { ri ->
+          val pkg = ri.activityInfo.packageName
+          val iconFile = File(iconDir, "$pkg.png")
+          val stale = try {
+            iconFile.lastModified() < pm.getPackageInfo(pkg, 0).lastUpdateTime
+          } catch (e: Exception) {
+            false
+          }
+          if (!iconFile.exists() || stale) {
+            try {
+              val bmp = drawableToBitmap(ri.loadIcon(pm), APP_ICON_PX)
+              FileOutputStream(iconFile).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            } catch (e: Exception) {
+              iconFile.delete() // half-written icon is worse than none
+            }
+          }
+          mapOf(
+            "pkg" to pkg,
+            "label" to ri.loadLabel(pm).toString(),
+            "icon" to if (iconFile.exists()) "file://${iconFile.absolutePath}" else null,
+          )
+        }
+        .sortedBy { (it["label"] as String).lowercase() }
+    }
+
+    /** The per-app mirroring filter: mode + both package sets (each mode keeps its own set so
+     *  flipping modes doesn't lose the other's selection). */
+    AsyncFunction("getNotifAppFilter") {
+      mapOf(
+        "mode" to ClipForegroundService.getNotifFilterMode(appCtx),
+        "include" to ClipForegroundService.getNotifIncludePkgs(appCtx).toList(),
+        "exclude" to ClipForegroundService.getNotifExcludePkgs(appCtx).toList(),
+      )
+    }
+
+    AsyncFunction("setNotifAppFilter") { mode: String, include: List<String>, exclude: List<String> ->
+      ClipForegroundService.setNotifAppFilter(appCtx, mode, include, exclude)
     }
 
     // ---- Image sending (phone clipboard image -> Mac) ------------------------

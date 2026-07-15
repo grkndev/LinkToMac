@@ -54,6 +54,18 @@
     tools:ignore="ProtectedPermissions" />
 
   <!--
+    Per-app notification-mirroring filter: enumerate launcher apps for the "Select apps" picker
+    (Settings ▸ Notifications). Android 11+ package visibility hides other apps unless declared;
+    this intent query merges into the app manifest and exposes exactly the launcher set.
+  -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.MAIN" />
+      <category android:name="android.intent.category.LAUNCHER" />
+    </intent>
+  </queries>
+
+  <!--
     LAN-direct mode talks plain ws:// to the Mac on the local network (no TLS on the LAN), and
     the relay can also be configured as ws://. Content is still E2E-encrypted (ChaCha20-Poly1305),
     so the cleartext transport carries only opaque ciphertext. API 28+ blocks cleartext by default;

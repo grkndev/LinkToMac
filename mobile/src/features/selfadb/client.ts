@@ -16,7 +16,10 @@ export type { AutoStartState };
 // modules/selfadb with deep relative paths.
 export type {
   ClipEvent,
+  InstalledApp,
   LogEvent,
+  NotifAppFilter,
+  NotifFilterMode,
   RelayEvent,
   StatEvent,
   StatusEvent,

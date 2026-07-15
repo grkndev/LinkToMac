@@ -18,13 +18,6 @@ export default function SettingsScreen() {
   const icons = useIcons();
   const [confirmingUnpair, setConfirmingUnpair] = useState(false);
   const {
-    notifIconVisible,
-    toggleNotifIcon,
-    notifGranted,
-    requestNotifPermission,
-    notifMirrorOn,
-    toggleNotifMirror,
-    notifAccess,
     smsMirrorOn,
     toggleSmsMirror,
     smsAccess,
@@ -42,42 +35,13 @@ export default function SettingsScreen() {
         block (no section labels, no dividers). */}
       <M3Screen paddingTop={Spacing.three}>
         <Group>
-          <SwitchRow
+          <ActionRow
             colors={colors}
             icon={icons.notifications}
-            label="Show notification icon"
-            hint="A notification icon will be displayed in the status bar."
-            value={notifIconVisible}
-            onValueChange={toggleNotifIcon}
+            label="Notifications"
+            hint="Status-bar icon, mirroring to your Mac, and which apps are mirrored."
+            onPress={() => router.push("/notifications")}
           />
-          {notifGranted === false ? (
-            <ActionRow
-              colors={colors}
-              icon={icons.notificationsActive}
-              label="Grant notification permission"
-              hint="Without permission, connection status notifications cannot be displayed."
-              onPress={requestNotifPermission}
-            />
-          ) : null}
-          <SwitchRow
-            colors={colors}
-            icon={icons.notificationsActive}
-            label="Mirror notifications"
-            hint="Forward this phone's notifications to your Mac. Requires notification access."
-            value={notifMirrorOn}
-            onValueChange={toggleNotifMirror}
-          />
-          {notifMirrorOn && notifAccess === false ? (
-            <ActionRow
-              colors={colors}
-              icon={icons.notifications}
-              label="Grant notification access"
-              hint="Allow Link to macOS to read notifications so they can be mirrored to your Mac."
-              onPress={() => {
-                SelfAdb.openNotificationAccessSettings().catch(() => {});
-              }}
-            />
-          ) : null}
           <SwitchRow
             colors={colors}
             icon={icons.chat}

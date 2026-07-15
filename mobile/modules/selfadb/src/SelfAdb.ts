@@ -1,6 +1,14 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import type { ClipEvent, RelayEvent, SelfAdbModuleEvents, StatEvent } from './SelfAdb.types';
+import type {
+  ClipEvent,
+  InstalledApp,
+  NotifAppFilter,
+  NotifFilterMode,
+  RelayEvent,
+  SelfAdbModuleEvents,
+  StatEvent,
+} from './SelfAdb.types';
 
 /** Boot state returned by autoStart(): drives the JS gate. */
 export type AutoStartState = 'ready' | 'need-pair' | 'need-connect';
@@ -82,6 +90,13 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   getNotificationForwarding(): Promise<boolean>;
   /** pause/resume mirroring notifications to the Mac without revoking the system access grant. */
   setNotificationForwarding(enabled: boolean): Promise<void>;
+  /** launcher apps for the per-app mirroring picker, sorted by label. Icons are cached
+   *  file:// PNG URIs (null if an icon couldn't be rasterized). */
+  getInstalledApps(): Promise<InstalledApp[]>;
+  /** the per-app mirroring filter: mode + both package sets (persisted, survives unpair). */
+  getNotifAppFilter(): Promise<NotifAppFilter>;
+  /** persist the per-app mirroring filter; the notification listener reads it live per post. */
+  setNotifAppFilter(mode: NotifFilterMode, include: string[], exclude: string[]): Promise<void>;
   /** whether copied images are sent to the Mac's clipboard (persisted, default true). */
   getSendImages(): Promise<boolean>;
   /** enable/disable sending copied images to the Mac (independent of text clipboard sync). */

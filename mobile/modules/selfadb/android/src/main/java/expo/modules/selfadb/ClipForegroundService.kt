@@ -641,6 +641,9 @@ class ClipForegroundService : Service() {
     private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"
     private const val KEY_CLIP_SEND_PAUSED = "clipSendPaused"
     private const val KEY_NOTIFICATION_FORWARDING = "notificationForwarding"
+    private const val KEY_NOTIF_FILTER_MODE = "notifFilterMode"
+    private const val KEY_NOTIF_INCLUDE_PKGS = "notifIncludePkgs"
+    private const val KEY_NOTIF_EXCLUDE_PKGS = "notifExcludePkgs"
     private const val KEY_SMS_FORWARDING = "smsForwarding"
     private const val KEY_SEND_IMAGES = "sendImages"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
@@ -720,6 +723,41 @@ class ClipForegroundService : Service() {
     fun setNotificationForwarding(ctx: Context, enabled: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_NOTIFICATION_FORWARDING, enabled)
+        .apply()
+    }
+
+    /** Per-app notification-mirroring filter mode: "exclude" (default — mirror every app except
+     *  [getNotifExcludePkgs]) or "include" (mirror ONLY [getNotifIncludePkgs]). Each mode keeps
+     *  its own package set so flipping modes doesn't lose the other's selection. Read live by
+     *  [NotificationListener] on every post; persisted in PREFS_UI (survives unpair). */
+    fun getNotifFilterMode(ctx: Context): String =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getString(KEY_NOTIF_FILTER_MODE, "exclude") ?: "exclude"
+
+    fun setNotifFilterMode(ctx: Context, mode: String) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putString(KEY_NOTIF_FILTER_MODE, if (mode == "include") "include" else "exclude")
+        .apply()
+    }
+
+    /** Packages mirrored when the filter mode is "include" (empty = mirror nothing). */
+    fun getNotifIncludePkgs(ctx: Context): Set<String> =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getStringSet(KEY_NOTIF_INCLUDE_PKGS, emptySet())?.toSet() ?: emptySet()
+
+    /** Packages NOT mirrored when the filter mode is "exclude" (empty = mirror everything —
+     *  the pre-filter behavior, so existing installs are unaffected). */
+    fun getNotifExcludePkgs(ctx: Context): Set<String> =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getStringSet(KEY_NOTIF_EXCLUDE_PKGS, emptySet())?.toSet() ?: emptySet()
+
+    // Fresh HashSet copies on write: SharedPreferences treats a getStringSet() result as its own
+    // consistent-state object — persisting a mutated or reused instance is undefined behavior.
+    fun setNotifAppFilter(ctx: Context, mode: String, include: Collection<String>, exclude: Collection<String>) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putString(KEY_NOTIF_FILTER_MODE, if (mode == "include") "include" else "exclude")
+        .putStringSet(KEY_NOTIF_INCLUDE_PKGS, HashSet(include))
+        .putStringSet(KEY_NOTIF_EXCLUDE_PKGS, HashSet(exclude))
         .apply()
     }
 

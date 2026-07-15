@@ -22,8 +22,10 @@ const MODULES = {
   clipboard: require('../../assets/icons/content_paste.xml'),
   sensors: require('../../assets/icons/sensors.xml'),
   // Settings
+  search: require('../../assets/icons/search.xml'),
   notifications: require('../../assets/icons/notifications.xml'),
   notificationsActive: require('../../assets/icons/notifications_active.xml'),
+  apps: require('../../assets/icons/apps.xml'),
   chat: require('../../assets/icons/chat.xml'),
   contentCopy: require('../../assets/icons/content_copy.xml'),
   image: require('../../assets/icons/image.xml'),

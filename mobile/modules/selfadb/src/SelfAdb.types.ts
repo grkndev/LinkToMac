@@ -21,6 +21,27 @@ export type StatEvent = {
   rssi?: number;
 };
 
+/** A launchable app for the per-app notification-mirroring picker. */
+export type InstalledApp = {
+  /** Android package name (the filter key). */
+  pkg: string;
+  /** human-readable app name */
+  label: string;
+  /** file:// URI of the cached launcher-icon PNG, or null if it couldn't be rasterized */
+  icon: string | null;
+};
+
+/** "exclude" mirrors every app except the exclude set (default); "include" mirrors only the include set. */
+export type NotifFilterMode = 'include' | 'exclude';
+
+/** The per-app mirroring filter. Each mode keeps its own package set so flipping modes
+ *  doesn't lose the other's selection; only the active mode's set is enforced. */
+export type NotifAppFilter = {
+  mode: NotifFilterMode;
+  include: string[];
+  exclude: string[];
+};
+
 export type StatusEvent = {
   /** adb connection: "idle" | "connecting" | "connected" | "failed" */
   adb: string;

@@ -39,7 +39,10 @@ export function useM3Colors(): MaterialColors {
  * hairline GROUP_GAP between them. The group's outer corners are large (R_OUTER); the corners
  * that touch a neighbour are small (R_INNER). A lone row keeps large corners all the way round.
  */
-const GROUP_GAP = 3;
+/** Exported for lists that lay grouped rows out manually (memoized rows with stable,
+ *  precomputed shapes — {@link Group}'s cloneElement would re-mint every row's `shape`
+ *  object each render and defeat React.memo on long lists). */
+export const GROUP_GAP = 3;
 const R_OUTER = 24;
 const R_INNER = 6;
 

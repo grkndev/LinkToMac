@@ -70,6 +70,15 @@ class NotificationListener : NotificationListenerService() {
     sbn ?: return
     if (!ClipForegroundService.getNotificationForwarding(this)) return
     if (sbn.packageName == packageName) return // our own foreground-service notification
+    // Per-app filter (Settings ▸ Notifications): "include" mirrors only the selected apps,
+    // "exclude" (default) mirrors everything except the deselected ones. Removals are NOT
+    // filtered — a dismissal must still clear a Mac copy mirrored before a filter change.
+    val mirrored = if (ClipForegroundService.getNotifFilterMode(this) == "include") {
+      ClipForegroundService.getNotifIncludePkgs(this).contains(sbn.packageName)
+    } else {
+      !ClipForegroundService.getNotifExcludePkgs(this).contains(sbn.packageName)
+    }
+    if (!mirrored) return
     val n = sbn.notification ?: return
     // Drop status/persistent noise: ongoing (e.g. media/FGS), foreground-service, and the
     // group-summary placeholder (its children carry the real content -> avoids duplicates).
@@ -148,18 +157,20 @@ class NotificationListener : NotificationListenerService() {
     }
   }
 
-  private fun drawableToBitmap(d: Drawable, size: Int): Bitmap {
-    if (d is BitmapDrawable) {
-      d.bitmap?.let { return Bitmap.createScaledBitmap(it, size, size, true) }
-    }
-    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bmp)
-    d.setBounds(0, 0, canvas.width, canvas.height)
-    d.draw(canvas)
-    return bmp
-  }
-
   private companion object {
     const val ICON_PX = 72
   }
+}
+
+/** Rasterize any drawable (incl. adaptive icons) to a size×size bitmap. Shared with
+ *  [SelfAdbModule]'s `getInstalledApps` app-picker icon export. */
+internal fun drawableToBitmap(d: Drawable, size: Int): Bitmap {
+  if (d is BitmapDrawable) {
+    d.bitmap?.let { return Bitmap.createScaledBitmap(it, size, size, true) }
+  }
+  val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+  val canvas = Canvas(bmp)
+  d.setBounds(0, 0, canvas.width, canvas.height)
+  d.draw(canvas)
+  return bmp
 }

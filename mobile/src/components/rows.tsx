@@ -40,6 +40,7 @@ import { haptic } from "@/lib/haptics";
 export function GroupRow({
   colors,
   icon,
+  leading,
   tone = "secondary",
   label,
   labelColor,
@@ -51,7 +52,10 @@ export function GroupRow({
   shape = groupShape(true, true),
 }: {
   colors: MaterialColors;
-  icon: IconSource;
+  /** Tinted glyph for the standard tonal {@link IconCircle}. Ignored when `leading` is set. */
+  icon?: IconSource;
+  /** Custom leading element replacing the IconCircle — e.g. a full-color app icon. */
+  leading?: ReactNode;
   tone?: Tone;
   label: string;
   labelColor?: string;
@@ -85,9 +89,13 @@ export function GroupRow({
         colors={{ containerColor: "transparent" }}
         modifiers={[fillMaxWidth()]}
       >
-        <ListItem.LeadingContent>
-          <IconCircle source={icon} container={t.container} on={t.on} />
-        </ListItem.LeadingContent>
+        {leading != null || icon != null ? (
+          <ListItem.LeadingContent>
+            {leading ?? (
+              <IconCircle source={icon!} container={t.container} on={t.on} />
+            )}
+          </ListItem.LeadingContent>
+        ) : null}
         <ListItem.HeadlineContent>
           <Text
             color={labelColor ?? colors.onSurface}

@@ -115,6 +115,8 @@ function RootNavigator({
         <Stack.Protected guard={macPaired}>
           <Stack.Screen name="index" />
           <Stack.Screen name="settings" options={header("Settings")} />
+          <Stack.Screen name="notifications" options={header("Notifications")} />
+          <Stack.Screen name="notification-apps" options={header("Select apps")} />
           <Stack.Screen name="server-config" options={header("Relay server")} />
           {/* Logs never hid the header shadow — keep the platform default. */}
           <Stack.Screen
