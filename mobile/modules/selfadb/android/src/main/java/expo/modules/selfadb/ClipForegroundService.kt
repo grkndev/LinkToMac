@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import expo.modules.selfadb.R
 import org.json.JSONObject
@@ -324,7 +325,11 @@ class ClipForegroundService : Service() {
       val ext = if (mime == "image/jpeg") "jpg" else "png"
 
       val dir = File(cacheDir, "clips").apply { mkdirs() }
-      dir.listFiles()?.forEach { it.delete() } // one live clip at a time; drop stale files
+      // Reap stale clips by AGE, not wholesale: a paste target may still be streaming a
+      // previous image off its FileProvider URI (slow editor), and deleting it mid-decode
+      // breaks that read. 30 s comfortably outlives any real paste.
+      val reapCutoff = System.currentTimeMillis() - CLIP_FILE_REAP_MS
+      dir.listFiles()?.filter { it.lastModified() < reapCutoff }?.forEach { it.delete() }
       // Fresh timestamped name so a paste target never serves a cached read of an old URI.
       val file = File(dir, "clip-${System.currentTimeMillis()}.$ext")
       file.outputStream().use { it.write(bytes, 2 + headerLen, bytes.size - 2 - headerLen) }
@@ -446,7 +451,12 @@ class ClipForegroundService : Service() {
       override fun onReceive(context: Context?, intent: Intent?) = pushBatteryStat()
     }
     batteryReceiver = r
-    registerReceiver(r, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    // ACTION_BATTERY_CHANGED is a protected system broadcast (exempt from Android 14's
+    // mandatory-flag rule), but declare NOT_EXPORTED anyway - nothing else should ever
+    // deliver into this receiver.
+    ContextCompat.registerReceiver(
+      this, r, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED
+    )
   }
 
   private fun unregisterBatteryReceiver() {
@@ -631,6 +641,9 @@ class ClipForegroundService : Service() {
     @Volatile
     var instance: ClipForegroundService? = null
 
+    /** Received clip images older than this are reaped from cacheDir/clips on the next write
+     *  (age-based so a paste target still decoding the previous URI isn't cut off mid-read). */
+    private const val CLIP_FILE_REAP_MS = 30_000L
     private const val CHANNEL = "linktomac"
     private const val CHANNEL_HIDDEN = "linktomac_hidden"
     private const val NOTIF_ID = 1001
