@@ -79,38 +79,61 @@ async function main(): Promise<void> {
     'android sees mac online',
   );
 
-  android.send({ t: 'clip', nonce: 'bm9uY2U=', ct: 'Y2lwaGVydGV4dA==' });
+  // Vectors mirror what the real codecs emit: nonce = base64 of exactly 12 bytes (16 chars,
+  // no padding), ct = valid block-aligned base64 of >= 16 bytes (the Poly1305 tag minimum).
+  // The relay validates this shape since the M12 hardening — sloppy vectors get bad-message.
+  const CLIP_NONCE = 'Y2xpcG5vbmNlMDAx';
+  const CLIP_CT = 'Y2xpcHRleHRjaXBoZXIwMDAx';
+  android.send({ t: 'clip', nonce: CLIP_NONCE, ct: CLIP_CT });
   const clip = await mac.waitFor((m) => m.t === 'clip', 'mac receives clip');
-  assert(clip.nonce === 'bm9uY2U=' && clip.ct === 'Y2lwaGVydGV4dA==', 'clip payload intact');
+  assert(clip.nonce === CLIP_NONCE && clip.ct === CLIP_CT, 'clip payload intact');
 
   await sleep(300);
   assert(!android.inbox().some((m) => m.t === 'clip'), 'sender received no echo');
 
   // Notification mirroring (phone -> Mac): opaque `note` frame, same fan-out as clips.
-  android.send({ t: 'note', nonce: 'bm90ZW5vbmNl', ct: 'bm90ZWNpcGhlcg==' });
+  const NOTE_NONCE = 'bm90ZW5vbmNlMDAx';
+  const NOTE_CT = 'bm90ZWNpcGhlcnBheWxvYWQx';
+  android.send({ t: 'note', nonce: NOTE_NONCE, ct: NOTE_CT });
   const note = await mac.waitFor((m) => m.t === 'note', 'mac receives note');
-  assert(note.nonce === 'bm90ZW5vbmNl' && note.ct === 'bm90ZWNpcGhlcg==', 'note payload intact');
+  assert(note.nonce === NOTE_NONCE && note.ct === NOTE_CT, 'note payload intact');
 
   await sleep(300);
   assert(!android.inbox().some((m) => m.t === 'note'), 'note sender received no echo');
 
   // SMS mirroring (phone -> Mac): opaque `sms` frame, same fan-out as clips.
-  android.send({ t: 'sms', nonce: 'c21zbm9uY2U=', ct: 'c21zY2lwaGVy' });
+  const SMS_NONCE = 'c21zbm9uY2UwMDAx';
+  const SMS_CT = 'c21zY2lwaGVycGF5bG9hZDAx';
+  android.send({ t: 'sms', nonce: SMS_NONCE, ct: SMS_CT });
   const sms = await mac.waitFor((m) => m.t === 'sms', 'mac receives sms');
-  assert(sms.nonce === 'c21zbm9uY2U=' && sms.ct === 'c21zY2lwaGVy', 'sms payload intact');
+  assert(sms.nonce === SMS_NONCE && sms.ct === SMS_CT, 'sms payload intact');
 
   await sleep(300);
   assert(!android.inbox().some((m) => m.t === 'sms'), 'sms sender received no echo');
 
   // File transfer (Mac -> phone clipboard image): opaque `file` frame, same fan-out.
-  // Use a ~900 KB ct to prove the 1 MiB maxPayload accepts image-sized frames.
-  const bigCt = 'QUJDRA=='.repeat(115_000);
-  mac.send({ t: 'file', nonce: 'ZmlsZW5vbmNl', ct: bigCt });
+  // A ~910 KiB block-aligned ct proves the 1 MiB maxPayload accepts image-sized frames
+  // (932,000 b64 chars = 699,000 raw bytes — the fitImage/ImagePrep budget's ballpark).
+  const FILE_NONCE = 'ZmlsZW5vbmNlMDAx';
+  const bigCt = 'QUJD'.repeat(233_000);
+  mac.send({ t: 'file', nonce: FILE_NONCE, ct: bigCt });
   const file = await android.waitFor((m) => m.t === 'file', 'android receives file');
-  assert(file.nonce === 'ZmlsZW5vbmNl' && file.ct === bigCt, 'file payload intact');
+  assert(file.nonce === FILE_NONCE && file.ct === bigCt, 'file payload intact');
 
   await sleep(300);
   assert(!mac.inbox().some((m) => m.t === 'file'), 'file sender received no echo');
+
+  // Frame validation: a nonce that isn't 12 base64 bytes must be rejected, not forwarded.
+  android.send({ t: 'clip', nonce: 'dG9vc2hvcnQ=', ct: CLIP_CT });
+  await android.waitFor(
+    (m) => m.t === 'error' && m.code === 'bad-message',
+    'malformed nonce rejected with bad-message',
+  );
+  await sleep(300);
+  assert(
+    mac.inbox().filter((m) => m.t === 'clip').length === 1,
+    'malformed clip was not forwarded',
+  );
 
   mac.close();
   await android.waitFor(
