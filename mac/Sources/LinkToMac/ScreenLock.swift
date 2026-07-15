@@ -13,15 +13,15 @@ enum ScreenLock {
         suspendSession()
     }
 
-    /// `Bool` so the caller can fall back if the private symbol is unavailable.
+    /// `Bool` so the caller can fall back if the private symbol is unavailable or the call fails.
     private static func lockViaLoginFramework() -> Bool {
         let path = "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login"
         guard let handle = dlopen(path, RTLD_NOW) else { return false }
         defer { dlclose(handle) }
         guard let sym = dlsym(handle, "SACLockScreenImmediate") else { return false }
         typealias LockFn = @convention(c) () -> Int32
-        _ = unsafeBitCast(sym, to: LockFn.self)()
-        return true
+        let rc = unsafeBitCast(sym, to: LockFn.self)()
+        return rc == 0
     }
 
     /// Fallback: fast-user-switch to the login window via the CGSession helper.
