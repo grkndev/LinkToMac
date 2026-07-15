@@ -54,8 +54,23 @@ class ConnectionManager(
 
   @Volatile private var running = false
   private var lanUp = false
+  /** Relay counterpart of [lanUp]: the relay socket has actually joined its room. A constructed
+   *  [RelayClient] is not enough — its `ws?.send` silently no-ops until the socket is up. */
+  private var relayJoined = false
   private var lastLanHost: String? = null
   private var fallbackFuture: ScheduledFuture<*>? = null
+
+  /** Outbound frames produced while no link is joined (service just started, the relay grace
+   *  window, a socket still connecting). Replayed FIFO on the next joined edge instead of being
+   *  silently lost — a copy made in the first seconds after service start used to vanish. */
+  private val pending = ArrayDeque<Pending>()
+
+  /** One outbound frame held in [pending] until a link joins. */
+  private sealed class Pending(val ts: Long = System.currentTimeMillis()) {
+    class Clip(val text: String) : Pending()
+    class File(val payload: ByteArray) : Pending()
+    class Cmd(val action: String) : Pending()
+  }
 
   /** Computed once in [start]: whether LAN-direct is even a possibility for this config. */
   private var canLan = false
@@ -66,6 +81,11 @@ class ConnectionManager(
   private companion object {
     // Wait this long for LAN to authenticate before falling back to the relay.
     const val RELAY_FALLBACK_GRACE_S = 4L
+
+    // Outbound queue bounds: keep at most this many frames, each for at most this long. The TTL
+    // also caps how late a queued `cmd` (e.g. "lock") can fire after the link comes back.
+    const val PENDING_MAX = 8
+    const val PENDING_TTL_MS = 30_000L
   }
 
   fun start() {
@@ -95,16 +115,22 @@ class ConnectionManager(
       lan?.shutdown(); lan = null
       relay?.shutdown(); relay = null
       lanUp = false
+      relayJoined = false
+      pending.clear()
       wifiNets.clear()
     }
     exec.shutdown()
   }
 
-  fun sendClip(text: String) = post { activeLink()?.let { if (it === lan) lan?.sendClip(text) else relay?.sendClip(text) } }
+  // clip/file/cmd queue while no link is joined and replay on the joined edge (see [pending]).
+  // stat/note/sms deliberately don't: they have their own peer-online re-push semantics
+  // (ClipForegroundService's pushBatteryStat(force=true) / sms?.backfill() on that edge).
 
-  fun sendFile(payload: ByteArray) = post { activeLink()?.let { if (it === lan) lan?.sendFile(payload) else relay?.sendFile(payload) } }
+  fun sendClip(text: String) = post { sendOrQueue(Pending.Clip(text)) }
 
-  fun sendCmd(action: String) = post { if (lanUp) lan?.sendCmd(action) else relay?.sendCmd(action) }
+  fun sendFile(payload: ByteArray) = post { sendOrQueue(Pending.File(payload)) }
+
+  fun sendCmd(action: String) = post { sendOrQueue(Pending.Cmd(action)) }
 
   fun sendStat(payload: String) = post { if (lanUp) lan?.sendStat(payload) else relay?.sendStat(payload) }
 
@@ -114,7 +140,51 @@ class ConnectionManager(
 
   // ---- internals -----------------------------------------------------------
 
-  private fun activeLink(): Any? = if (lanUp) lan else relay
+  private fun linkReady(): Boolean = lanUp || relayJoined
+
+  /** Runs on [exec]. Send now when a link is joined, else hold in [pending] for the next join. */
+  private fun sendOrQueue(p: Pending) {
+    if (linkReady()) { dispatch(p); return }
+    prunePending()
+    if (pending.size >= PENDING_MAX) {
+      pending.removeFirst()
+      log("outbound queue full -> dropped oldest frame")
+    }
+    pending.addLast(p)
+    log("no link joined -> queued outbound ${kind(p)} (${pending.size} pending)")
+  }
+
+  /** Routes to whichever link is active — LAN wins, exactly like the pre-queue behavior. */
+  private fun dispatch(p: Pending) {
+    when (p) {
+      is Pending.Clip -> if (lanUp) lan?.sendClip(p.text) else relay?.sendClip(p.text)
+      is Pending.File -> if (lanUp) lan?.sendFile(p.payload) else relay?.sendFile(p.payload)
+      is Pending.Cmd -> if (lanUp) lan?.sendCmd(p.action) else relay?.sendCmd(p.action)
+    }
+  }
+
+  /** Runs on [exec], on every joined edge (LAN auth'd or relay room-joined). */
+  private fun flushPending() {
+    prunePending()
+    if (pending.isEmpty()) return
+    log("link joined -> flushing ${pending.size} queued frame(s)")
+    while (pending.isNotEmpty()) dispatch(pending.removeFirst())
+  }
+
+  /** FIFO + monotonic timestamps, so expired frames are only ever at the front. */
+  private fun prunePending() {
+    val cutoff = System.currentTimeMillis() - PENDING_TTL_MS
+    while (pending.isNotEmpty() && pending.first().ts < cutoff) {
+      val stale = pending.removeFirst()
+      log("queued ${kind(stale)} expired (>${PENDING_TTL_MS / 1000}s unsent) -> dropped")
+    }
+  }
+
+  private fun kind(p: Pending): String = when (p) {
+    is Pending.Clip -> "clip"
+    is Pending.File -> "image"
+    is Pending.Cmd -> "cmd:${p.action}"
+  }
 
   // ---- Wi-Fi gating ---------------------------------------------------------
   // LAN discovery (mDNS) holds a Wi-Fi multicast lock, which is a real battery cost. The Mac can
@@ -217,6 +287,7 @@ class ConnectionManager(
       cancelFallback()
       stopDiscovery() // found & connected -> stop scanning and release the multicast lock
       stopRelay() // LAN wins -> ensure a single active link
+      flushPending() // frames queued while nothing was joined go out over the fresh LAN link
       onStatus("lan", "joined", true, null, 0)
       return
     }
@@ -257,6 +328,10 @@ class ConnectionManager(
   }
 
   private fun onRelayStatus(status: String, peerOnline: Boolean, error: String?, attempt: Int) {
+    // Track the room-joined edge: only then do the relay's `ws?.send` calls actually deliver,
+    // so this is the moment queued frames stop being droppable.
+    relayJoined = relay != null && status == "joined"
+    if (relayJoined && !lanUp) flushPending()
     if (lanUp) return // ignore relay chatter while LAN is the active link
     onStatus("relay", status, peerOnline, error, attempt)
   }
@@ -264,6 +339,7 @@ class ConnectionManager(
   private fun stopRelay() {
     relay?.shutdown()
     relay = null
+    relayJoined = false
   }
 
   private fun scheduleRelayFallback() {
