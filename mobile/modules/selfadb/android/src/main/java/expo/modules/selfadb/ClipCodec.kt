@@ -41,6 +41,10 @@ object ClipCodec {
   /** Nonces accepted within the freshness window (`nonceB64 -> tsMs`); a duplicate is a replay. */
   private val seenNonces = HashMap<String, Long>()
 
+  /** Hard cap on the replay cache: pruning is time-based, so a backward local-clock jump could
+   *  otherwise let it grow for as long as the jump lasted. Overflow evicts oldest-first. */
+  private const val SEEN_NONCES_MAX = 4096
+
   /** Encrypt [text] as a [type] frame. @return (nonce, ct) both base64, or null on a bad key. */
   fun encode(text: String, keyBase64: String, type: String): Pair<String, String>? =
     encodeBytes(text.toByteArray(Charsets.UTF_8), keyBase64, type)
@@ -139,6 +143,9 @@ object ClipCodec {
     seenNonces.entries.removeAll { it.value < cutoff }
     if (seenNonces.containsKey(nonce)) return false
     seenNonces[nonce] = ts
+    if (seenNonces.size > SEEN_NONCES_MAX) {
+      seenNonces.entries.minByOrNull { it.value }?.let { seenNonces.remove(it.key) }
+    }
     return true
   }
 
