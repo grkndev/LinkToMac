@@ -107,13 +107,18 @@ export type ServerMessage = JoinedMsg | PeerMsg | ErrorMsg | PongMsg;
 const DEVICES: readonly string[] = ['android', 'mac'];
 const ROOM_MIN = 16;
 const ROOM_MAX = 128;
+// Rooms are base64 of 32 random bytes; accept the base64 + base64url alphabets and nothing
+// else (no control chars / whitespace riding into log lines or map keys).
+const ROOM_RE = /^[A-Za-z0-9+/=_-]+$/;
 
 function isDevice(v: unknown): v is Device {
   return typeof v === 'string' && DEVICES.includes(v);
 }
 
 function isValidRoom(v: unknown): v is string {
-  return typeof v === 'string' && v.length >= ROOM_MIN && v.length <= ROOM_MAX;
+  return (
+    typeof v === 'string' && v.length >= ROOM_MIN && v.length <= ROOM_MAX && ROOM_RE.test(v)
+  );
 }
 
 /** Parse + validate an inbound text frame. Returns null for anything malformed. */
