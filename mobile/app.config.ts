@@ -28,10 +28,17 @@ const BUNDLE_ID = IS_DEV ? 'com.grkndev.linktomac.dev' : 'com.grkndev.linktomac'
 // (BUILD_NUMBER=2 -> ...002). Stays under Android's signed 32-bit cap (2,147,483,647): the
 // max representable value is 991231999, i.e. it overflows only in the year 2100.
 const VERSION = '0.7.0';
+// UTC, not local time: builds from different timezones on the same UTC day must agree on the
+// prefix, or a "later" build can get a SMALLER versionCode and Android will refuse the update.
 const now = new Date();
 const DATE_PREFIX =
-  (now.getFullYear() % 100) * 10_000 + (now.getMonth() + 1) * 100 + now.getDate();
+  (now.getUTCFullYear() % 100) * 10_000 + (now.getUTCMonth() + 1) * 100 + now.getUTCDate();
 const BUILD_COUNTER = Number(process.env.BUILD_NUMBER ?? 1); // 1..999, same-day disambiguator
+if (!Number.isInteger(BUILD_COUNTER) || BUILD_COUNTER < 1 || BUILD_COUNTER > 999) {
+  // Fail the build loudly: Number("foo") is NaN, which would silently yield an invalid
+  // (null) versionCode in the manifest.
+  throw new Error(`BUILD_NUMBER must be an integer 1..999, got "${process.env.BUILD_NUMBER}"`);
+}
 const BUILD_NUMBER = DATE_PREFIX * 1000 + BUILD_COUNTER;
 
 export default (_: ConfigContext): ExpoConfig => ({

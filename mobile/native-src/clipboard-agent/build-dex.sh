@@ -42,10 +42,13 @@ echo "[1/3] javac"
 javac -source 1.8 -target 1.8 -cp "$PLATFORM_JAR" \
       -d "$BUILD/classes" "$HERE/ClipboardAgent.java"
 
-echo "[2/3] d8 -> dex (min-api 34)"
+# --min-api must match the app/module minSdk (30, see modules/selfadb/android/build.gradle
+# and app.config.ts expo-build-properties): a higher value lets d8 emit newer dex
+# features/instructions that Android 11-13 could refuse to load.
+echo "[2/3] d8 -> dex (min-api 30)"
 # shellcheck disable=SC2046
 "$D8" $(find "$BUILD/classes" -name '*.class') \
-      --lib "$PLATFORM_JAR" --min-api 34 --output "$BUILD"
+      --lib "$PLATFORM_JAR" --min-api 30 --output "$BUILD"
 
 echo "[3/3] copy asset"
 cp "$BUILD/classes.dex" "$OUT_ASSET/clipboard-agent.dex"
