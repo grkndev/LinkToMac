@@ -20,8 +20,8 @@ import kotlin.math.abs
  * timestamp (±2 min window) plus a seen-nonce cache stops replays — the relay is an
  * explicitly untrusted pipe.
  *
- * **Transitional:** decode falls back to the legacy v1 format (no AAD, raw payload) so a
- * not-yet-updated peer keeps working; remove the fallback once both ends ship v2.
+ * Legacy v1 (no AAD, raw payload) is **no longer accepted**: a v1 frame carried no
+ * freshness and was replayable indefinitely. Both ends ship v2; an old peer fails closed.
  *
  * Wire-compatible with the Mac ClipCodec (CryptoKit ChaChaPoly) — the envelope is a
  * byte-exact cross-language contract, change both sides together. Fails closed: malformed
@@ -81,10 +81,9 @@ object ClipCodec {
       val nonceBytes = Base64.decode(nonce, Base64.DEFAULT)
       val ctBytes = Base64.decode(ct, Base64.DEFAULT)
       if (nonceBytes.size != NONCE_LEN || ctBytes.size < TAG_LEN) return null
-      // A v2 frame that authenticates but is stale/replayed is rejected inside openV2; the
-      // v1 fallback can't resurrect it (its tag was computed WITH the AAD, so the AAD-less
-      // open fails authentication).
-      openV2(nonceBytes, ctBytes, key, type, nonce) ?: openV1(nonceBytes, ctBytes, key, type)
+      // v2 envelope only: a legacy v1 frame (no AAD) fails the authenticated open inside
+      // openV2 and is dropped - v1 carried no freshness and was replayable.
+      openV2(nonceBytes, ctBytes, key, type, nonce)
     } catch (e: Exception) {
       null
     }
@@ -112,22 +111,6 @@ object ClipCodec {
         else -> plain.copyOfRange(TS_LEN, plain.size)
       }
     }
-  } catch (e: Exception) {
-    null
-  }
-
-  /** Legacy v1 (no AAD, raw payload). Transitional — remove once both ends ship v2. */
-  private fun openV1(
-    nonceBytes: ByteArray,
-    ctBytes: ByteArray,
-    key: SecretKeySpec,
-    type: String,
-  ): ByteArray? = try {
-    val cipher = Cipher.getInstance(TRANSFORM)
-    cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(nonceBytes))
-    val plain = cipher.doFinal(ctBytes)
-    ClipBus.log("codec: legacy v1 frame accepted ($type) — update the peer")
-    plain
   } catch (e: Exception) {
     null
   }

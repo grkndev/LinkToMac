@@ -12,8 +12,8 @@ import Foundation
 /// timestamp (±2 min window) plus a seen-nonce cache stops replays of captured frames —
 /// the relay is an explicitly untrusted pipe.
 ///
-/// **Transitional:** decode falls back to the legacy v1 format (no AAD, raw payload) so a
-/// not-yet-updated peer keeps working; remove the fallback once both ends ship v2.
+/// Legacy v1 (no AAD, raw payload) is **no longer accepted**: a v1 frame carried no
+/// freshness and was replayable indefinitely. Both ends ship v2; an old peer fails closed.
 ///
 /// Wire-compatible with the Android `ClipCodec` (`javax.crypto "ChaCha20-Poly1305"`) — the
 /// envelope is a byte-exact cross-language contract, change both sides together. Fails
@@ -70,25 +70,18 @@ enum ClipCodec {
         let tag = ctData.suffix(tagLen)
         guard let box = try? ChaChaPoly.SealedBox(nonce: aeadNonce, ciphertext: cipher, tag: tag) else { return nil }
 
-        // v2: type bound as AAD, ts-prefixed plaintext. A v2 frame that authenticates but is
-        // stale/replayed is rejected HERE (the v1 fallback below can't resurrect it — its tag
-        // was computed with AAD, so the AAD-less open fails).
-        if let plain = try? ChaChaPoly.open(box, using: key, authenticating: Data(type.utf8)) {
-            guard plain.count >= tsLen else { return nil }
-            let ts = plain.prefix(tsLen).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-            let now = UInt64(Date().timeIntervalSince1970 * 1000)
-            let skew = now > ts ? now - ts : ts - now
-            guard skew <= freshnessWindowMs else { return nil }
-            guard rememberNonce(nonce, ts: ts, now: now) else { return nil }
-            return Data(plain.dropFirst(tsLen))
+        // v2 envelope only: type bound as AAD, ts-prefixed plaintext. A legacy v1 frame (no
+        // AAD) fails this open and is dropped — v1 carried no freshness and was replayable.
+        guard let plain = try? ChaChaPoly.open(box, using: key, authenticating: Data(type.utf8)) else {
+            return nil
         }
-        // v1 (legacy, transitional): no AAD, whole plaintext is the payload. No freshness is
-        // possible here — remove this acceptance once both ends ship the v2 codec.
-        if let plain = try? ChaChaPoly.open(box, using: key) {
-            NSLog("[ClipCodec] legacy v1 frame accepted (%@) — update the peer", type)
-            return plain
-        }
-        return nil
+        guard plain.count >= tsLen else { return nil }
+        let ts = plain.prefix(tsLen).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        let now = UInt64(Date().timeIntervalSince1970 * 1000)
+        let skew = now > ts ? now - ts : ts - now
+        guard skew <= freshnessWindowMs else { return nil }
+        guard rememberNonce(nonce, ts: ts, now: now) else { return nil }
+        return Data(plain.dropFirst(tsLen))
     }
 
     /// Records the nonce; false when it was already seen inside the window (a replay).

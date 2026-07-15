@@ -735,9 +735,9 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   and keep a **seen-nonce cache** within the window, so a captured frame (e.g. a `cmd:lock`)
   can't be replayed at all. The envelope is a **byte-exact cross-language contract** between
   `ClipCodec.swift` and `ClipCodec.kt` — change both together (cross-verified via Node/JVM/
-  CryptoKit test vectors). *Transitional:* decode currently falls back to the legacy v1 format
-  (no AAD, raw payload, logged as `legacy v1 frame accepted`) so a not-yet-updated peer keeps
-  working — **remove v1 acceptance from both codecs once both ends ship v2**.
+  CryptoKit test vectors). Legacy v1 (no AAD, raw payload) is **no longer accepted** on either
+  end: a v1 frame carried no freshness and was replayable indefinitely. A peer running a
+  pre-v2 build fails closed (its frames are dropped) — update both apps together.
 - The relay is a dumb pipe: it never stores content and never parses `nonce`/`ct`.
 - `roomId` is an unguessable 256-bit bearer; the **operator-defined relay password**
   (`RELAY_AUTH_TOKEN`) is a second gate so strangers can't even open sockets. It is no longer
@@ -750,10 +750,10 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 
 **What does NOT hold yet (be explicit about this):**
 
-- 🟡 **Static key; replay protection is transitional.** The pairing key is long-lived (rotates
-  only on re-pair). The v2 envelope above closes the replay/relabel hole, but as long as the
-  transitional v1 fallback is still accepted, an attacker can replay *legacy-format* frames —
-  full protection lands when v1 acceptance is removed from both codecs.
+- 🟡 **Static key.** The pairing key is long-lived (rotates only on re-pair). The v2 envelope
+  above closes the replay/relabel hole — and with v1 acceptance now removed from both codecs,
+  legacy-format frames are rejected outright — but a leaked key still decrypts everything
+  until the user re-pairs.
 - 🟢 **Transport supports `wss`.** A per-server `secure` flag selects `wss://` vs `ws://`:
   point the app at a domain behind a TLS-terminating reverse proxy (Let's Encrypt) and toggle
   TLS on. `ws://` remains available for a trusted LAN. The relay password still benefits from the
