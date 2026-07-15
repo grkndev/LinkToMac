@@ -121,6 +121,26 @@ function isValidRoom(v: unknown): v is string {
   );
 }
 
+// The relay must be at least as strict as the strictest client, or it forwards frames the
+// receiver silently drops ("I sent it but the Mac never saw it"). Both codecs require a
+// 12-byte nonce (`ChaChaPoly.Nonce` / `NONCE_LEN`) — exactly 16 base64 chars, no padding —
+// and reject any ct shorter than the 16-byte Poly1305 tag (24 base64 chars with padding).
+const NONCE_RE = /^[A-Za-z0-9+/]{16}$/;
+const CT_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+const CT_MIN_B64 = 24;
+
+function isValidNonce(v: unknown): v is string {
+  return typeof v === 'string' && NONCE_RE.test(v);
+}
+
+// `% 4` matters: Swift's base64 decoder rejects ragged lengths outright, so a ct that
+// isn't block-aligned would be forwarded by the relay and then fail to even decode.
+function isValidCt(v: unknown): v is string {
+  return (
+    typeof v === 'string' && v.length >= CT_MIN_B64 && v.length % 4 === 0 && CT_RE.test(v)
+  );
+}
+
 /** Parse + validate an inbound text frame. Returns null for anything malformed. */
 export function parseClientMessage(raw: string): ClientMessage | null {
   let data: unknown;
@@ -137,28 +157,22 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (!isValidRoom(obj.room) || !isDevice(obj.device)) return null;
       return { t: 'join', room: obj.room, device: obj.device };
     case 'clip':
-      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
-      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      if (!isValidNonce(obj.nonce) || !isValidCt(obj.ct)) return null;
       return { t: 'clip', nonce: obj.nonce, ct: obj.ct };
     case 'cmd':
-      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
-      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      if (!isValidNonce(obj.nonce) || !isValidCt(obj.ct)) return null;
       return { t: 'cmd', nonce: obj.nonce, ct: obj.ct };
     case 'stat':
-      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
-      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      if (!isValidNonce(obj.nonce) || !isValidCt(obj.ct)) return null;
       return { t: 'stat', nonce: obj.nonce, ct: obj.ct };
     case 'note':
-      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
-      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      if (!isValidNonce(obj.nonce) || !isValidCt(obj.ct)) return null;
       return { t: 'note', nonce: obj.nonce, ct: obj.ct };
     case 'sms':
-      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
-      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      if (!isValidNonce(obj.nonce) || !isValidCt(obj.ct)) return null;
       return { t: 'sms', nonce: obj.nonce, ct: obj.ct };
     case 'file':
-      if (typeof obj.nonce !== 'string' || obj.nonce.length === 0) return null;
-      if (typeof obj.ct !== 'string' || obj.ct.length === 0) return null;
+      if (!isValidNonce(obj.nonce) || !isValidCt(obj.ct)) return null;
       return { t: 'file', nonce: obj.nonce, ct: obj.ct };
     case 'ping':
       return { t: 'ping' };
