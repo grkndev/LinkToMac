@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import process from 'node:process';
 
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -54,9 +54,11 @@ function tokenOk(req: http.IncomingMessage): boolean {
     provided = new URL(req.url ?? '', 'http://localhost').searchParams.get('token');
   }
   if (!provided) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(config.authToken);
-  return a.length === b.length && timingSafeEqual(a, b);
+  // Hash both sides to a fixed length first: comparing the raw buffers would need an
+  // equal-length guard whose early return leaks the token's length via timing.
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(config.authToken).digest();
+  return timingSafeEqual(a, b);
 }
 
 server.on('upgrade', (req, socket, head) => {
@@ -186,3 +188,14 @@ function shutdown(signal: string): void {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// A relay that dies must say why: without these a stray throw kills the process silently
+// and a lost rejection never surfaces anywhere.
+process.on('uncaughtException', (err) => {
+  log.fatal({ err: err.message, stack: err.stack }, 'uncaught exception');
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  log.fatal({ reason: String(reason) }, 'unhandled rejection');
+  process.exit(1);
+});

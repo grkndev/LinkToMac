@@ -69,6 +69,10 @@ export class Relay {
       this.send(stale, { t: 'error', code: 'room-full', message: 'replaced by a newer connection' });
       stale.room = null;
       stale.device = null;
+      // Stop routing the dying socket's frames/pongs into the relay; its 'close' listener
+      // stays attached so the connection set is still cleaned up.
+      stale.ws.removeAllListeners('message');
+      stale.ws.removeAllListeners('pong');
       stale.ws.close(CLOSE_REPLACED, 'replaced');
     }
 

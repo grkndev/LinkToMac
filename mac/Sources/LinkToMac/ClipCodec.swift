@@ -30,6 +30,9 @@ enum ClipCodec {
     /// LanServer's serial queue.
     nonisolated(unsafe) private static var seenNonces: [String: UInt64] = [:]
     private static let seenLock = NSLock()
+    /// Hard cap on the replay cache: pruning is time-based, so a backward local-clock jump
+    /// could otherwise let it grow for as long as the jump lasted. Overflow evicts oldest-first.
+    private static let seenNoncesMax = 4096
 
     /// Encrypt `text` as a `type` frame. nil if the key is malformed.
     static func encode(_ text: String, keyBase64: String, type: String) -> (nonce: String, ct: String)? {
@@ -100,6 +103,9 @@ enum ClipCodec {
         seenNonces = seenNonces.filter { $0.value > cutoff }
         if seenNonces[nonce] != nil { return false }
         seenNonces[nonce] = ts
+        if seenNonces.count > seenNoncesMax, let oldest = seenNonces.min(by: { $0.value < $1.value }) {
+            seenNonces.removeValue(forKey: oldest.key)
+        }
         return true
     }
 
