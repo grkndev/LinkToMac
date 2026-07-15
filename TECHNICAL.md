@@ -520,7 +520,9 @@ is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on th
   LAN and falls back to the relay after a short grace window or when LAN drops, switching back
   when the Mac reappears. With no relay configured it's LAN-only. The Mac runs both the LAN server
   and (if configured) the relay client at once; the phone being the sole arbiter prevents
-  double-delivery.
+  double-delivery. Outbound `clip`/`file`/`cmd` produced while **no** link is joined (the grace
+  window, a socket still connecting) are queued (cap 8, 30 s TTL) and replayed FIFO on the next
+  joined edge instead of being dropped.
 - **Config.** Carried in QR **v3** (`lport`, `lan`) alongside the relay fields; persisted in
   `ServerConfig` (`lanEnabled`/`lanPort`/`lanHost`). Cleartext `ws://` is permitted via the
   module manifest's `usesCleartextTraffic` (Android) and `NSAllowsLocalNetworking` (macOS); the
