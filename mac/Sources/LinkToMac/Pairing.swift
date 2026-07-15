@@ -120,7 +120,11 @@ enum PairingStore {
     }
 
     private static func keychainSet(_ data: Data) -> OSStatus {
-        SecItemDelete(baseQuery() as CFDictionary)
+        // Update-in-place, never delete-then-add: if the add failed after a successful delete,
+        // the old pairing would be gone AND the new one unsaved — no pairing left at all.
+        let update = [kSecValueData as String: data]
+        let updated = SecItemUpdate(baseQuery() as CFDictionary, update as CFDictionary)
+        if updated != errSecItemNotFound { return updated }
         var add = baseQuery()
         add[kSecValueData as String] = data
         // Device-only: the 256-bit E2E pairing key must not migrate off this Mac via

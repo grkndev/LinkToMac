@@ -585,29 +585,29 @@ class SelfAdbModule : Module() {
       // WRTE payload exceeds the device's negotiated maxdata). Only fall back to adb when the
       // bridge isn't connected (daemon reachable but our client isn't attached).
       ClipForegroundService.instance?.requestDaemonLog()?.let { bridgeLog ->
-        return@AsyncFunction "bridge socket: açık (köprüden okundu)\n\n$bridgeLog"
+        return@AsyncFunction "bridge socket: open (read via bridge)\n\n$bridgeLog"
       }
       val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
       try {
         val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
-          ?: return@AsyncFunction "bridge socket: ${if (socketUp) "açık" else "KAPALI"}\n\n" +
-            "Cihaz logu okunamadı: kablosuz hata ayıklama yayında değil.\n" +
-            "Geliştirici Seçenekleri > Kablosuz hata ayıklama'yı açıp tekrar dene."
+          ?: return@AsyncFunction "bridge socket: ${if (socketUp) "open" else "CLOSED"}\n\n" +
+            "Couldn't read the device log: wireless debugging isn't broadcasting.\n" +
+            "Enable Developer Options > Wireless debugging and try again."
         val host = ep.first.hostAddress ?: "127.0.0.1"
         // false = a session is already live (libadb's isConnected() guard), not a
         // failure — reuse it. A real connect failure throws and is caught below.
         adb.connect(host, ep.second)
-        val alive = adb.runShort("pgrep -f ${AdbManager.NICE_NAME} >/dev/null 2>&1 && echo ÇALIŞIYOR || echo ÖLÜ")
+        val alive = adb.runShort("pgrep -f ${AdbManager.NICE_NAME} >/dev/null 2>&1 && echo RUNNING || echo DEAD")
         // Only the tail: clip.log grows unbounded over a long session, and a single
         // adb WRTE payload larger than the negotiated maxdata buffer throws
         // BufferOverflowException in libadb. 64 KB is the most-recent (most useful)
         // slice and stays well under the buffer on every API level.
-        val log = adb.runShort("tail -c $LOG_TAIL_BYTES /data/local/tmp/clip.log 2>/dev/null || echo '(clip.log yok — daemon hiç başlamamış olabilir)'")
-        "daemon süreci: $alive\nbridge socket: ${if (socketUp) "açık" else "KAPALI"}\n" +
-          "(clip.log son ${LOG_TAIL_BYTES / 1024} KB)\n\n$log"
+        val log = adb.runShort("tail -c $LOG_TAIL_BYTES /data/local/tmp/clip.log 2>/dev/null || echo '(no clip.log - the daemon may never have started)'")
+        "daemon process: $alive\nbridge socket: ${if (socketUp) "open" else "CLOSED"}\n" +
+          "(last ${LOG_TAIL_BYTES / 1024} KB of clip.log)\n\n$log"
       } catch (e: Exception) {
-        "Cihaz logu okunamadı: ${e.message ?: e.javaClass.simpleName}\n" +
-          "bridge socket: ${if (socketUp) "açık" else "KAPALI"}"
+        "Couldn't read the device log: ${e.message ?: e.javaClass.simpleName}\n" +
+          "bridge socket: ${if (socketUp) "open" else "CLOSED"}"
       } finally {
         if (toggled) setWifiDebug(false)
       }
@@ -631,15 +631,15 @@ class SelfAdbModule : Module() {
       val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
       try {
         val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
-          ?: return@AsyncFunction "Yeniden başlatılamadı: kablosuz hata ayıklama yayında değil. " +
-            "Geliştirici Seçenekleri > Kablosuz hata ayıklama'yı açıp tekrar dene."
+          ?: return@AsyncFunction "Restart failed: wireless debugging isn't broadcasting. " +
+            "Enable Developer Options > Wireless debugging and try again."
         adb.connect(ep.first.hostAddress ?: "127.0.0.1", ep.second)
         ClipForegroundService.stop(appCtx)  // drop our bridge so it reconnects to the fresh daemon
         deploy(clipPort, force = true)      // kill the old daemon + push/launch the rebuilt dex
         status("connected", "restarted")
-        "Daemon yeniden başlatıldı — yeni dex yüklendi."
+        "Daemon restarted - the new dex is live."
       } catch (e: Exception) {
-        "Yeniden başlatılamadı: ${e.message ?: e.javaClass.simpleName}"
+        "Restart failed: ${e.message ?: e.javaClass.simpleName}"
       } finally {
         if (toggled) setWifiDebug(false)
       }
