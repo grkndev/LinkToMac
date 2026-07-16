@@ -62,6 +62,10 @@ import java.util.ArrayDeque;
  */
 public class ClipboardAgent {
 
+    /** Build stamp injected by build-dex.sh (yyyyMMdd-HHmm). Logged on every daemon start so a
+     *  restart shows at a glance WHICH dex is actually running. "dev" = compiled by hand. */
+    static final String DEX_VERSION = "dev";
+
     static final String PKG = "com.android.shell";
     static volatile String lastSeen = null;
     /** URI of the last image we emitted, so a repeated clip-changed transact for the same image
@@ -629,7 +633,7 @@ public class ClipboardAgent {
         // Bridge-auth secret (never logged). Absent -> legacy open mode, for a stale launcher.
         final String secret = (x.length > 1 && !x[1].isEmpty()) ? x[1] : null;
         Looper.prepareMainLooper();
-        log("server up. uid=" + android.os.Process.myUid() + " port=" + port);
+        log("server up. dex=" + DEX_VERSION + " uid=" + android.os.Process.myUid() + " port=" + port);
 
         // Build the system Context HERE, on the main thread — it creates a Handler that needs this
         // thread's prepared Looper. Worker threads (clip-client / binder) only read the cached

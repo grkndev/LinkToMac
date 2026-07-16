@@ -38,9 +38,16 @@ echo
 rm -rf "$BUILD"
 mkdir -p "$BUILD/classes" "$OUT_ASSET"
 
-echo "[1/3] javac"
+# Stamp the build into DEX_VERSION so the daemon logs which dex it is on every start
+# ("server up. dex=<stamp> ..."). Compile a stamped COPY — the checked-in source keeps "dev".
+DEX_STAMP="$(date +%Y%m%d-%H%M)"
+mkdir -p "$BUILD/src"
+sed "s/DEX_VERSION = \"dev\"/DEX_VERSION = \"$DEX_STAMP\"/" \
+    "$HERE/ClipboardAgent.java" > "$BUILD/src/ClipboardAgent.java"
+
+echo "[1/3] javac (dex version $DEX_STAMP)"
 javac -source 1.8 -target 1.8 -cp "$PLATFORM_JAR" \
-      -d "$BUILD/classes" "$HERE/ClipboardAgent.java"
+      -d "$BUILD/classes" "$BUILD/src/ClipboardAgent.java"
 
 # --min-api must match the app/module minSdk (30, see modules/selfadb/android/build.gradle
 # and app.config.ts expo-build-properties): a higher value lets d8 emit newer dex
