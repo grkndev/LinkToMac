@@ -3,7 +3,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, Share, Text, View } from 'react-native';
 
 import SelfAdb, { CLIP_PORT } from '@/features/selfadb/client';
+import { TimeoutError, withTimeout } from '@/lib/async';
 import { useTheme } from '@/hooks/use-theme';
+
+// JS-side backstops. The native calls are now internally bounded (libadb connect is capped and
+// a busy op returns immediately), so these only fire if something unforeseen wedges — without
+// them a stuck promise would spin the button forever (its .finally never runs).
+const READ_LOG_TIMEOUT_MS = 25_000;
+const RESTART_TIMEOUT_MS = 40_000; // discover + connect + relaunch + bind, all bounded, summed
+
+function describeError(e: unknown): string {
+  if (e instanceof TimeoutError) return 'Timed out — is Wireless debugging on? Tap to try again.';
+  return (e as { message?: string })?.message ?? String(e);
+}
 
 /**
  * The privileged clipboard daemon's OWN on-device log — the ground truth for whether the shell
@@ -20,18 +32,18 @@ export default function DaemonLogsScreen() {
 
   const fetchLog = useCallback(() => {
     setFetching(true);
-    SelfAdb.readDaemonLog()
+    withTimeout(SelfAdb.readDaemonLog(), READ_LOG_TIMEOUT_MS, 'readDaemonLog')
       .then(setText)
-      .catch((e: any) => setText(`Error: ${e?.message ?? String(e)}`))
+      .catch((e: unknown) => setText(`Error: ${describeError(e)}`))
       .finally(() => setFetching(false));
   }, []);
 
   // Pull once on open (state is only set from the async callbacks, never synchronously here).
   useEffect(() => {
     let alive = true;
-    SelfAdb.readDaemonLog()
+    withTimeout(SelfAdb.readDaemonLog(), READ_LOG_TIMEOUT_MS, 'readDaemonLog')
       .then((blob) => alive && setText(blob))
-      .catch((e: any) => alive && setText(`Error: ${e?.message ?? String(e)}`));
+      .catch((e: unknown) => alive && setText(`Error: ${describeError(e)}`));
     return () => {
       alive = false;
     };
@@ -39,9 +51,9 @@ export default function DaemonLogsScreen() {
 
   const restartDaemon = useCallback(() => {
     setRestarting(true);
-    SelfAdb.restartDaemon(CLIP_PORT)
+    withTimeout(SelfAdb.restartDaemon(CLIP_PORT), RESTART_TIMEOUT_MS, 'restartDaemon')
       .then((msg) => setText(`${msg}\n\n(Tap Refresh to pull the new daemon log.)`))
-      .catch((e: any) => setText(`Restart error: ${e?.message ?? String(e)}`))
+      .catch((e: unknown) => setText(`Restart error: ${describeError(e)}`))
       .finally(() => setRestarting(false));
   }, []);
 
