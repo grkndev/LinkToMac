@@ -23,6 +23,7 @@ const MODULES = {
   sensors: require('../../assets/icons/sensors.xml'),
   // Settings
   search: require('../../assets/icons/search.xml'),
+  chevronRight: require('../../assets/icons/chevron_right.xml'),
   notifications: require('../../assets/icons/notifications.xml'),
   notificationsActive: require('../../assets/icons/notifications_active.xml'),
   apps: require('../../assets/icons/apps.xml'),

@@ -9,9 +9,11 @@ import {
 } from "@expo/ui/jetpack-compose";
 import {
   alpha,
+  fillMaxHeight,
   fillMaxWidth,
   padding,
   weight,
+  wrapContentHeight,
 } from "@expo/ui/jetpack-compose/modifiers";
 import type { ReactNode } from "react";
 import { Alert } from "@/components/AlertDialog";
@@ -117,7 +119,11 @@ export function GroupRow({
           </ListItem.SupportingContent>
         ) : null}
         {trailing ? (
-          <ListItem.TrailingContent>{trailing}</ListItem.TrailingContent>
+          <ListItem.TrailingContent>
+         
+              {trailing}
+            
+          </ListItem.TrailingContent>
         ) : null}
       </ListItem>
     </Surface>
@@ -167,6 +173,7 @@ export function ActionRow({
   destructive,
   onPress,
   shape,
+  trailing,
 }: {
   colors: MaterialColors;
   icon: IconSource;
@@ -175,6 +182,7 @@ export function ActionRow({
   destructive?: boolean;
   onPress: () => void;
   shape?: RowShape;
+  trailing?: ReactNode;
 }) {
   return (
     <GroupRow
@@ -186,6 +194,7 @@ export function ActionRow({
       supporting={hint}
       onClick={onPress}
       shape={shape}
+      trailing={trailing}
     />
   );
 }

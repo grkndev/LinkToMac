@@ -10,6 +10,8 @@ import { Spacing } from "@/constants/theme";
 import { usePairing } from "@/features/pairing/pairing-context";
 import SelfAdb from "@/features/selfadb/client";
 import { usePermissionSettings } from "@/features/selfadb/use-permission-settings";
+import { Icon, RNHostView } from "@expo/ui/jetpack-compose";
+import { View } from "react-native";
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -41,6 +43,13 @@ export default function SettingsScreen() {
             label="Notifications"
             hint="Status-bar icon, mirroring to your Mac, and which apps are mirrored."
             onPress={() => router.push("/notifications")}
+            trailing={
+              <Icon
+                source={icons.chevronRight}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
+            }
           />
           <SwitchRow
             colors={colors}
@@ -92,6 +101,13 @@ export default function SettingsScreen() {
               onPress={() => {
                 SelfAdb.requestIgnoreBatteryOptimizations().catch(() => {});
               }}
+              trailing={
+                <Icon
+                  source={icons.chevronRight}
+                  size={24}
+                  tint={colors.onSurfaceVariant}
+                />
+              }
             />
           ) : (
             <InfoRow
@@ -107,6 +123,13 @@ export default function SettingsScreen() {
             label="Relay server"
             hint="Set the server configuration."
             onPress={() => router.push("/server-config")}
+            trailing={
+              <Icon
+                source={icons.chevronRight}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
+            }
           />
           <ActionRow
             colors={colors}
@@ -114,6 +137,13 @@ export default function SettingsScreen() {
             label="Re-pair (Scan QR)"
             hint="Scan the Pairing QR from your Mac."
             onPress={() => router.push("/qr-scan")}
+            trailing={
+              <Icon
+                source={icons.chevronRight}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
+            }
           />
           <ActionRow
             colors={colors}
@@ -122,6 +152,13 @@ export default function SettingsScreen() {
             hint="Disconnect and remove the pairing."
             destructive
             onPress={() => setConfirmingUnpair(true)}
+            trailing={
+              <Icon
+                source={icons.chevronRight}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
+            }
           />
           <ActionRow
             colors={colors}
@@ -129,6 +166,13 @@ export default function SettingsScreen() {
             label="Logs"
             hint="View ADB and device logs."
             onPress={() => router.push("/logs")}
+            trailing={
+              <Icon
+                source={icons.chevronRight}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
+            }
           />
           <ActionRow
             colors={colors}
@@ -136,6 +180,13 @@ export default function SettingsScreen() {
             label="About"
             hint="Version, developer, and contact."
             onPress={() => router.push("/about")}
+            trailing={
+              <Icon
+                source={icons.chevronRight}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
+            }
           />
         </Group>
       </M3Screen>
