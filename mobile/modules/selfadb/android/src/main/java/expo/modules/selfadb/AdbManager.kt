@@ -53,41 +53,14 @@ class AdbManager(private val context: Context) {
   fun pair(host: String, port: Int, code: String): Boolean =
     manager.pair(host, port, code)
 
-  /**
-   * Connect, but never block the caller forever. libadb's `manager.connect` does a TLS
-   * handshake with **no internal deadline** — if adbd stalls (common right after wireless
-   * debugging is toggled on, when mDNS has advertised but adbd isn't ready to handshake yet)
-   * it hangs indefinitely, freezing whatever AsyncFunction called it. So run it on a worker
-   * thread and join with a deadline; on timeout, drop the half-open session and throw a
-   * distinct [AdbConnectTimeoutException] so the caller can surface "try again" instead of
-   * spinning. Returns libadb's Boolean (false = a session was already live — reused, not a
-   * failure) on success; rethrows a real connect error unchanged.
-   */
-  fun connect(host: String, port: Int, timeoutMs: Long = CONNECT_TIMEOUT_MS): Boolean {
-    val outcome = AtomicReference<Any?>(null) // Boolean on success, Throwable on failure
-    val worker = Thread({
-      outcome.set(
-        try {
-          manager.connect(host, port)
-        } catch (t: Throwable) {
-          t
-        },
-      )
-    }, "adb-connect")
-    worker.isDaemon = true
-    worker.start()
-    worker.join(timeoutMs)
-    return when (val r = outcome.get()) {
-      is Boolean -> r
-      is Throwable -> throw r
-      else -> {
-        // Still blocked in native connect. disconnect() best-effort unblocks the worker; the
-        // caller gets a bounded, actionable failure instead of an endless spinner.
-        disconnect()
-        throw AdbConnectTimeoutException("adb connect to $host:$port did not complete in $timeoutMs ms")
-      }
-    }
-  }
+  // Runs the libadb TLS handshake on the CALLING thread. Do NOT wrap this in a throwaway
+  // worker thread to bound it: libadb ties the connection's lifetime to the thread that
+  // established it, so a worker that exits after connect() kills the connection — the next
+  // openStream() then throws "Stream Closed" (regressed 0.8.0 fresh-install boot). UI-level
+  // hang protection lives in JS (`withTimeout` on autoStart/restartDaemon/readDaemonLog).
+  // false = a session was already live (libadb's isConnected() guard), not a failure.
+  fun connect(host: String, port: Int): Boolean =
+    manager.connect(host, port)
 
   /**
    * True while a TLS adb session is live in the shared manager. NOTE: this reads
@@ -288,8 +261,6 @@ class AdbManager(private val context: Context) {
   companion object {
     private const val DEX_PATH = "/data/local/tmp/clipboard-agent.dex"
     private const val LOG_PATH = "/data/local/tmp/clip.log"
-    /** Deadline for a single libadb `connect` handshake (which has no internal timeout). */
-    private const val CONNECT_TIMEOUT_MS = 12_000L
     /** `app_process --nice-name` of the detached daemon; also used to pgrep/kill it. */
     const val NICE_NAME = "linktomac_clip"
     private const val MAIN_CLASS = "com.grkndev.clipboard.ClipboardAgent"
@@ -356,7 +327,3 @@ class AdbManager(private val context: Context) {
     }
   }
 }
-
-/** libadb's `connect` handshake exceeded its deadline (adbd stalled). Distinct from a real
- *  connect failure so callers can prompt a retry instead of a hard error. */
-class AdbConnectTimeoutException(message: String) : Exception(message)

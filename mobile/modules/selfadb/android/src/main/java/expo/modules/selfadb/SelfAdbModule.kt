@@ -21,7 +21,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Control plane for the self-ADB clipboard pipeline.
@@ -39,12 +38,6 @@ class SelfAdbModule : Module() {
 
   private val appCtx: Context get() = appContext.reactContext!!.applicationContext
   private val adb by lazy { AdbManager(appCtx) }
-
-  /** True while an ADB operation (autoStart / restart / readDaemonLog) holds the single shared
-   *  [adb] manager. libadb is not thread-safe and a second concurrent op would contend on the
-   *  same session — e.g. the Daemon Log screen's Restart and Refresh buttons freezing each
-   *  other. Contenders bail early with a "busy" result instead of piling on. */
-  private val adbBusy = AtomicBoolean(false)
 
   private companion object {
     // Cap the daemon-log read so a single adb transfer never exceeds libadb's
@@ -139,12 +132,6 @@ class SelfAdbModule : Module() {
         log("not paired -> need-pair")
         return@AsyncFunction "need-pair"
       }
-      // Serialize the ADB path: a user-driven restart / readDaemonLog may already hold the
-      // single shared manager. Rather than contend (and freeze both), report current liveness.
-      if (!adbBusy.compareAndSet(false, true)) {
-        log("adb busy -> reporting current liveness without a competing session")
-        return@AsyncFunction if (daemonAlive(clipPort)) "ready" else "need-connect"
-      }
       // 3. Paired but daemon dead (typical after reboot). Bring wireless
       //    debugging up ourselves if we hold the permission, then mDNS-connect.
       val canToggle = hasSecureSettings()
@@ -187,12 +174,6 @@ class SelfAdbModule : Module() {
         deploy(clipPort)
         status("connected", "running")
         "ready"
-      } catch (e: AdbConnectTimeoutException) {
-        // adbd stalled the TLS handshake (often right after we toggled wireless debugging on).
-        // Bounded, not fatal -> reconnect screen; the next foreground re-check retries.
-        log("adb connect timed out -> need-connect (${e.message})")
-        status("failed", "idle")
-        "need-connect"
       } catch (e: DaemonNotStartedException) {
         // Connected over adb but the daemon never bound its socket (flaky first session
         // after a reboot). Surface the reconnect screen instead of a false "ready".
@@ -212,7 +193,6 @@ class SelfAdbModule : Module() {
         // turned it on (the detached daemon survives; leaving adbd listening after an error
         // path was a needless open surface). Mirrors readDaemonLog's try/finally.
         if (canToggle) setWifiDebug(false)
-        adbBusy.set(false)
       }
     }
 
@@ -607,12 +587,7 @@ class SelfAdbModule : Module() {
       ClipForegroundService.instance?.requestDaemonLog()?.let { bridgeLog ->
         return@AsyncFunction "bridge socket: open (read via bridge)\n\n$bridgeLog"
       }
-      // The bridge wasn't connected -> fall to adb. Don't contend with a concurrent
-      // autoStart/restart on the shared manager (that froze Refresh behind a stuck Restart).
-      if (!adbBusy.compareAndSet(false, true)) {
-        return@AsyncFunction "Another ADB operation is running (reconnect or restart in progress).\n" +
-          "Try again in a moment."
-      }
+      // The bridge wasn't connected -> fall to adb.
       val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
       try {
         val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
@@ -636,7 +611,6 @@ class SelfAdbModule : Module() {
           "bridge socket: ${if (socketUp) "open" else "CLOSED"}"
       } finally {
         if (toggled) setWifiDebug(false)
-        adbBusy.set(false)
       }
     }
 
@@ -655,13 +629,6 @@ class SelfAdbModule : Module() {
      * if we hold WRITE_SECURE_SETTINGS, then turns it back off — same dance as `readDaemonLog`.
      */
     AsyncFunction("restartDaemon") { clipPort: Int ->
-      // Don't contend with a concurrent autoStart/readDaemonLog on the shared manager — that
-      // (plus libadb's unbounded connect) is what froze the Restart button. Bounded connect
-      // now caps the work; this guard stops two ops fighting over one session.
-      if (!adbBusy.compareAndSet(false, true)) {
-        return@AsyncFunction "Another ADB operation is running (reconnect or device-log read in progress).\n" +
-          "Try again in a moment."
-      }
       val toggled = if (hasSecureSettings()) setWifiDebug(true) else false
       try {
         val ep = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000L)
@@ -676,7 +643,6 @@ class SelfAdbModule : Module() {
         "Restart failed: ${e.message ?: e.javaClass.simpleName}"
       } finally {
         if (toggled) setWifiDebug(false)
-        adbBusy.set(false)
       }
     }
 
