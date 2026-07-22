@@ -52,6 +52,14 @@ class SelfAdbModule : Module() {
     // confirmation and is effectively instant on success. Keep it short to bound the failure path.
     const val DAEMON_START_TIMEOUT_MS = 3000L
 
+    // autoStart's fast-path grace window (issue #29): how long + how often to re-poll
+    // daemonAlive() before falling through to the ADB path, so a cold-start race with the
+    // FGS's own bridge reconnect doesn't wrongly land on the (possibly unrecoverable, e.g.
+    // Mobile Hotspot) reconnect screen. ~8 polls over 2.4s — cheap, and short next to the
+    // 20s JS-side autoStart timeout.
+    const val FAST_PATH_GRACE_MS = 2400L
+    const val FAST_PATH_POLL_MS = 300L
+
     // App-picker icon raster size: 40dp row icons at ~2.5x density. PNGs live in
     // cacheDir/appicons and are served to the UI as file:// URIs.
     const val APP_ICON_PX = 96
@@ -117,11 +125,27 @@ class SelfAdbModule : Module() {
       //    A flapping bridge fails this gate too: holding *a* secret proves nothing when the
       //    daemon keeps dropping us (it was launched by another install with a different
       //    secret — dev/prod fighting over one port). Fall through so deploy() reclaims it.
-      if (
-        daemonAlive(clipPort) &&
-        ClipForegroundService.getDaemonSecret(appCtx) != null &&
-        !bridgeFlapping()
-      ) {
+      //    Give this a FAIR CHANCE on cold start (issue #29): a cold app launch races the
+      //    FGS's own START_STICKY restart + bridge reconnect, so a single instant snapshot
+      //    can lose that race even though the daemon is already up — e.g. on Mobile Hotspot,
+      //    where losing the race means falling into the ADB path, which can NEVER succeed
+      //    there (Wireless Debugging needs a Wi-Fi *client* connection). Poll for a short
+      //    bounded window instead of sampling once.
+      var fastPathReady = false
+      val fastPathDeadline = System.currentTimeMillis() + FAST_PATH_GRACE_MS
+      while (true) {
+        if (
+          daemonAlive(clipPort) &&
+          ClipForegroundService.getDaemonSecret(appCtx) != null &&
+          !bridgeFlapping()
+        ) {
+          fastPathReady = true
+          break
+        }
+        if (System.currentTimeMillis() >= fastPathDeadline) break
+        Thread.sleep(FAST_PATH_POLL_MS)
+      }
+      if (fastPathReady) {
         log("daemon already alive on :$clipPort")
         ClipForegroundService.start(appCtx, clipPort)
         status("connected", "running")
@@ -579,7 +603,8 @@ class SelfAdbModule : Module() {
      * off. The detached daemon survives that toggle.
      */
     AsyncFunction("readDaemonLog") {
-      val socketUp = daemonAlive(ClipForegroundService.getClipPort(appCtx))
+      val port = ClipForegroundService.getClipPort(appCtx)
+      val socketUp = daemonAlive(port)
       // Preferred path: ask the daemon for its log over the already-open bridge. No adb → no
       // libadb `BufferOverflowException` (which the `tail clip.log` fallback below can hit when a
       // WRTE payload exceeds the device's negotiated maxdata). Only fall back to adb when the
@@ -598,7 +623,13 @@ class SelfAdbModule : Module() {
         // false = a session is already live (libadb's isConnected() guard), not a
         // failure — reuse it. A real connect failure throws and is caught below.
         adb.connect(host, ep.second)
-        val alive = adb.runShort("pgrep -f ${AdbManager.NICE_NAME} >/dev/null 2>&1 && echo RUNNING || echo DEAD")
+        // -xf: exact-cmdline match isolates the daemon — plain -f would also match the
+        // supervisor's cmdline (it embeds the nice-name) and report RUNNING while only
+        // the supervisor is alive mid-backoff. The supervisor gets its own status token.
+        val alive = adb.runShort(
+          "s=DEAD; pgrep -xf '${AdbManager.NICE_PATTERN}' >/dev/null 2>&1 && s=RUNNING; " +
+            "pgrep -f '${AdbManager.supPattern(port)}' >/dev/null 2>&1 && s=\"\$s +supervisor\"; echo \$s"
+        )
         // Only the tail: clip.log grows unbounded over a long session, and a single
         // adb WRTE payload larger than the negotiated maxdata buffer throws
         // BufferOverflowException in libadb. 64 KB is the most-recent (most useful)
@@ -615,7 +646,7 @@ class SelfAdbModule : Module() {
     }
 
     AsyncFunction("killDaemon") {
-      val r = adb.killDaemon()
+      val r = adb.killDaemon(ClipForegroundService.getClipPort(appCtx))
       ClipForegroundService.stop(appCtx)
       status("connected", "stopped")
       r
@@ -697,7 +728,10 @@ class SelfAdbModule : Module() {
         // data), or it keeps dropping our bridge (another install owns it). Either way it
         // would never serve us — restart it under our secret.
         log("daemon alive but not serving us -> restarting it")
-        log("kill: " + adb.killDaemon())
+        // Partly redundant with launchDaemon's own self-clean kill, but kept: it frees the
+        // port BEFORE the dex push, shrinking the window where an old supervisor could
+        // respawn against a half-written dex.
+        log("kill: " + adb.killDaemon(clipPort))
       }
       log("pushing clipboard-agent.dex -> /data/local/tmp")
       adb.pushAsset("clipboard-agent.dex", "/data/local/tmp/clipboard-agent.dex") { log(it) }

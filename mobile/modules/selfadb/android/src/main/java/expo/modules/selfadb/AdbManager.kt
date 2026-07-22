@@ -11,6 +11,8 @@ import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import java.io.File
 import java.math.BigInteger
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -53,14 +55,36 @@ class AdbManager(private val context: Context) {
   fun pair(host: String, port: Int, code: String): Boolean =
     manager.pair(host, port, code)
 
-  // Runs the libadb TLS handshake on the CALLING thread. Do NOT wrap this in a throwaway
-  // worker thread to bound it: libadb ties the connection's lifetime to the thread that
-  // established it, so a worker that exits after connect() kills the connection — the next
-  // openStream() then throws "Stream Closed" (regressed 0.8.0 fresh-install boot). UI-level
-  // hang protection lives in JS (`withTimeout` on autoStart/restartDaemon/readDaemonLog).
-  // false = a session was already live (libadb's isConnected() guard), not a failure.
-  fun connect(host: String, port: Int): Boolean =
-    manager.connect(host, port)
+  /**
+   * Connect, bounded — WITHOUT repeating the reverted 0.8.0 worker-thread hazard (issue #30).
+   *
+   * `manager.connect()` has two phases and, inspecting the AAR, only one of them was ever
+   * bounded:
+   *  1. The raw TCP connect (`libadb`'s `AdbConnection` opens a plain two-arg `Socket(host,
+   *     port)`). This constructor blocks the CALLING thread with **no timeout at all** — a
+   *     half-up adbd that never completes the TCP handshake (Mobile Hotspot, Samsung right
+   *     after a Wireless-Debugging toggle) stalls here forever.
+   *  2. The ADB protocol handshake, which `AbsAdbConnectionManager.setTimeout()` DOES bound —
+   *     but safely: libadb runs the handshake on its OWN persistent thread
+   *     (`AdbConnection.mConnectionThread`, started fresh inside `connect()`), and the calling
+   *     thread only `Object.wait()`s on a deadline before throwing. We are never the thread the
+   *     connection is tied to, so this can't reproduce the "worker exits, kills the connection"
+   *     regression that `d21e16e` reverted (that bug came from wrapping the WHOLE call,
+   *     including phase 1, in a throwaway Kotlin thread we then abandoned).
+   *
+   * So: bound phase 1 ourselves with a genuine JDK-bounded preflight on a disposable plain
+   * `Socket` (same pattern as `SelfAdbModule.probe()` — closing/abandoning THIS socket can't
+   * touch libadb's connection object or its thread, because it isn't libadb's socket), then let
+   * `setTimeout()` bound phase 2 before handing off to the library for the real handshake. Both
+   * phases throw plain `IOException` on timeout, same as any other real connect failure — no new
+   * exception type needed, existing catch sites already treat a thrown `connect()` as failure.
+   * `false` = a session was already live (libadb's `isConnected()` guard), not a failure.
+   */
+  fun connect(host: String, port: Int, timeoutMs: Long = CONNECT_TIMEOUT_MS): Boolean {
+    Socket().use { it.connect(InetSocketAddress(host, port), timeoutMs.toInt()) }
+    manager.setTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+    return manager.connect(host, port)
+  }
 
   /**
    * True while a TLS adb session is live in the shared manager. NOTE: this reads
@@ -137,12 +161,19 @@ class AdbManager(private val context: Context) {
   }
 
   /**
-   * Launch the clipboard agent as a DETACHED daemon (Shizuku-style). `setsid` puts it in a
+   * Launch the clipboard agent as a DETACHED daemon (Shizuku-style), wrapped in a tiny
+   * shell-UID SUPERVISOR loop (issue #31). `setsid` puts the supervisor in a
    * new session so adbd's process-group kill can't reach it; `nohup` ignores
    * SIGHUP; stdio is redirected to a log file and /dev/null so it no longer
    * depends on the adb stream. Result: it survives adb disconnect, wireless
-   * debugging being turned off, and the app being killed. Only a reboot, a
-   * crash, or killDaemon() stops it.
+   * debugging being turned off, and the app being killed — and because One UI/lmkd
+   * kills the ~50 MB Java daemon under memory pressure even with no reboot (seen
+   * in the field), the 1-2 MB supervisor (a far less attractive lmkd target)
+   * respawns it with the same port + secret: no ADB, no Wi-Fi, no user. Healthy
+   * runs (>=30 s) respawn in 3 s; fast deaths back off 6->12->...->120 s and give
+   * up after 10 in a row (bad dex / stolen port — deploy()'s self-heal owns that
+   * case, and any later deploy re-arms the supervisor). Only a reboot or
+   * killDaemon() stops the pair for good.
    *
    * CRITICAL: this command must NOT return until the daemon has bound its socket.
    * We launch over libadb's `exec:` service, and adbd kills that service's process
@@ -154,23 +185,53 @@ class AdbManager(private val context: Context) {
    * the daemon's flushed `listening` line, and only then closes the stream — by
    * which point the daemon is fully detached + bound and survives the close.
    * (Verified: same launch dies via `exec:` when it returns immediately, survives
-   * when it waits for `listening`.) `rm` first so a stale log can't false-match.
+   * when it waits for `listening`.) `rm` first so a stale log can't false-match;
+   * the supervisor's own lines are prefixed `supervisor:` and never contain
+   * `listening`, so they can't false-fire the gate either.
    */
   fun launchDaemon(clipPort: Int, secret: String? = null): String {
+    // Self-cleaning, and in a SEPARATE exec on purpose: deploy() launches without
+    // killing when the daemon is dead, and a leftover supervisor mid-backoff would
+    // resurrect the OLD daemon to duel the new one over the port bind. The kill can't
+    // ride inside the launch cmd below — the supervisor script (raw marker included)
+    // is part of that shell's own cmdline, so an inline pkill would match and kill
+    // the launching shell itself before rm/launch ever ran.
+    killDaemon(clipPort)
     // The optional second arg is the bridge-auth secret (base64, shell-safe inside the single
     // quotes): the daemon serves nothing on its localhost socket until a client presents it.
     // Other apps can't read our /proc/<pid>/cmdline on modern Android, so it doesn't leak.
-    val inner = "CLASSPATH=$DEX_PATH app_process /system/bin " +
+    val agent = "CLASSPATH=$DEX_PATH app_process /system/bin " +
       "--nice-name=$NICE_NAME $MAIN_CLASS $clipPort" +
       (secret?.let { " $it" } ?: "")
+    // Supervisor script constraints: rides inside sh -c '…' so it must contain NO single
+    // quotes; every mksh-side $ is Kotlin-escaped \$; POSIX $(( )) arithmetic + toybox
+    // `date +%s` only (no mksh-only $SECONDS). The leading `: marker;` no-op stamps the
+    // port-scoped marker into the supervisor's cmdline for supPattern() targeting.
+    val inner = ": ${SUP_MARKER}_$clipPort; d=3; f=0; while :; do t=\$(date +%s); $agent; r=\$?; " +
+      "u=\$((\$(date +%s)-t)); if [ \$u -ge 30 ]; then d=3; f=0; else f=\$((f+1)); " +
+      "[ \$f -ge 10 ] && { echo supervisor: giving up after \$f fast exits; exit 0; }; " +
+      "d=\$((d*2)); [ \$d -gt 120 ] && d=120; fi; " +
+      "echo supervisor: agent exit rc=\$r after \${u}s, respawn in \${d}s; sleep \$d; done"
     val cmd = "rm -f $LOG_PATH; nohup setsid sh -c '$inner' >$LOG_PATH 2>&1 </dev/null & " +
       "i=0; while [ \$i -lt 40 ]; do grep -q listening $LOG_PATH 2>/dev/null && { echo LAUNCHED; exit 0; }; " +
       "sleep 0.2; i=\$((i+1)); done; echo LAUNCH_TIMEOUT"
     return runShort(cmd)
   }
 
-  /** Kill the detached daemon (requires adb connected). */
-  fun killDaemon(): String = runShort("pkill -f $NICE_NAME; echo KILLED")
+  /**
+   * Kill the daemon AND its supervisor (requires adb connected). Two-stage, supervisor
+   * FIRST — a dead supervisor can't resurrect the daemon it just lost. The daemon is
+   * then killed by exact-cmdline match (`--nice-name` replaces argv with the bare
+   * `linktomac_clip`; comm stays `main` on One UI, so `-x` alone won't find it —
+   * verified on-device). `-xf` spares the OTHER variant's supervisor (its cmdline
+   * *contains* the nice-name inside the script text but never *equals* it); that
+   * variant's daemon is still collateral (identical cmdline — same as before the
+   * supervisor existed) and its surviving supervisor respawns it in ~3 s. Backward
+   * compatible: a pre-supervisor daemon has the same cmdline, and the supervisor
+   * pkill just no-ops.
+   */
+  fun killDaemon(clipPort: Int): String =
+    runShort("pkill -f '${supPattern(clipPort)}'; pkill -xf '$NICE_PATTERN'; echo KILLED")
 
   /**
    * Stream a bundled asset to a device path. Logs each step so a stall is
@@ -261,8 +322,22 @@ class AdbManager(private val context: Context) {
   companion object {
     private const val DEX_PATH = "/data/local/tmp/clipboard-agent.dex"
     private const val LOG_PATH = "/data/local/tmp/clip.log"
-    /** `app_process --nice-name` of the detached daemon; also used to pgrep/kill it. */
+    /** Deadline for EACH bounded phase of [connect] (raw TCP preflight, then the ADB
+     *  handshake wait) — not their sum. Matches the original 0.8.0 bound (issue #26). */
+    private const val CONNECT_TIMEOUT_MS = 12_000L
+    /** `app_process --nice-name` of the detached daemon (= its whole post-nice-name cmdline;
+     *  its comm stays `main` on One UI, so match by cmdline, never `pgrep -x`). */
     const val NICE_NAME = "linktomac_clip"
+    /** `pgrep/pkill -xf` pattern for the daemon: the [] regex trick means a shell whose own
+     *  cmdline contains this pattern text can never match itself, while the daemon's bare
+     *  `linktomac_clip` cmdline still exact-matches. */
+    const val NICE_PATTERN = "linktomac_cli[p]"
+    /** No-op marker (`: linktomac_sup_<port>;`) stamped into the supervisor shell's cmdline
+     *  so it can be pgrep/pkill-targeted per port (dev :53125 / prod :53123 supervisors must
+     *  not kill each other — both cmdlines contain the shared nice-name). */
+    const val SUP_MARKER = "linktomac_sup"
+    /** `pgrep/pkill -f` pattern for THIS port's supervisor; same [] self-match-proofing. */
+    fun supPattern(port: Int) = "linktomac_su[p]_$port"
     private const val MAIN_CLASS = "com.grkndev.clipboard.ClipboardAgent"
 
     private const val KEY_FILE = "adbkey"

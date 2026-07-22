@@ -22,8 +22,11 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
   const theme = useTheme();
   const [code, setCode] = useState('');
 
-  const busy = boot.state === 'pairing';
   const mode = boot.state === 'need-pair' || boot.state === 'pairing' ? 'pair' : 'reconnect';
+  // In reconnect mode, `boot.refreshing` covers both the initial auto-retry-on-foreground
+  // and a manual Try Again tap — without it the button looked dead for its whole in-flight
+  // window (up to 20s) with zero feedback (issue #30).
+  const busy = boot.state === 'pairing' || (mode === 'reconnect' && boot.refreshing);
   const canSubmit = code.length === CODE_LENGTH && !busy;
 
   const openSettings = () => {

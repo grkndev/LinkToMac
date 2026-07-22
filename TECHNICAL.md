@@ -264,8 +264,34 @@ allowed to):
 `nohup setsid sh -c '…' >log 2>&1 </dev/null &`. `setsid` puts it in a new session so adbd's
 process-group kill can't reach it; `nohup` ignores `SIGHUP`; stdio is detached. Result: the
 daemon **survives ADB disconnect, Wireless Debugging being turned off, and the app being
-killed.** Only a reboot, a crash, or an explicit `killDaemon()` stops it. ADB is needed only
-to *launch* (or relaunch) it — never for the steady-state data path.
+killed.** ADB is needed only to *launch* (or relaunch) it — never for the steady-state data path.
+
+**Supervisor loop (issue #31):** `nohup setsid` does nothing against **lmkd/One UI memory
+kills**, which take the ~50 MB Java daemon down *without a reboot* (seen in the field on One UI).
+So the `sh -c '…'` body is not the bare `app_process` line but a tiny watchdog:
+`: linktomac_sup_<port>; while :; do app_process …; <backoff>; done`. The 1–2 MB `sh` supervisor
+is a far less attractive lmkd target; when the daemon dies it relaunches it **with the same port
+and secret — no ADB, no Wi-Fi, no user** (the FGS bridge retries every 3 s, so sync self-heals
+end to end). Healthy runs (≥ 30 s) respawn in 3 s; fast deaths back off 6→12→…→120 s and the
+supervisor **gives up after 10 consecutive fast exits** (bad dex / stolen port — `deploy()`'s
+self-heal owns that case and re-arms it). Its log lines are prefixed `supervisor:` and never
+contain `listening`, so the launch gate can't false-fire. Only a reboot or `killDaemon()` stops
+the pair for good. Three contracts around it (all verified on-device):
+- **Two-stage kill, supervisor first**: `killDaemon(port)` = `pkill -f 'linktomac_su[p]_<port>'`
+  then `pkill -xf 'linktomac_cli[p]'` — a dead supervisor can't resurrect the daemon it just
+  lost. The `[]` bracket trick means a shell whose own cmdline contains the pattern text never
+  matches itself. The daemon is matched by **exact cmdline** (`--nice-name` replaces argv with
+  the bare `linktomac_clip`; its comm stays `main` on One UI, so `pgrep -x` won't find it), which
+  spares the *other* variant's supervisor — the marker is **port-scoped** (dev `53125` / prod
+  `53123`) so the two installs can't kill each other's supervisor.
+- **Launch is self-cleaning, via a separate exec**: `launchDaemon` calls `killDaemon` first in
+  its own exec session — `deploy()` launches without killing when the daemon is dead, and a
+  leftover supervisor mid-backoff would resurrect the old daemon to duel the new one over the
+  port bind. The kill can't ride inline in the launch cmd: the supervisor script (raw marker
+  included) is part of that shell's own cmdline, so an inline pkill would kill the launcher
+  itself.
+- The supervisor script rides inside `sh -c '…'`: **no single quotes** in the body, POSIX
+  arithmetic + toybox `date +%s` only.
 
 > **`nohup setsid` is NOT enough on its own — `launchDaemon` must block until the daemon binds.**
 > We launch over libadb's `exec:` service, and adbd kills that service's process group when the
@@ -296,7 +322,11 @@ to *launch* (or relaunch) it — never for the steady-state data path.
   logs the reason once, backs off to 15 s, and `isDaemonAlive` starts reporting `false` so the
   JS heartbeat triggers `autoStart`, whose fast path and `deploy()` both treat a flapping
   bridge as "daemon not ours" and **kill + relaunch it under our secret** (self-heal, no
-  reboot needed).
+  reboot needed). A **supervisor respawn is not a flap**: the respawned daemon runs under our
+  persisted secret, so the reconnected bridge survives ≥ 3 s and the streak resets. A
+  never-binding crash-loop (bad dex) shows as ECONNREFUSED — not accept-then-drop — and the
+  same heartbeat→redeploy self-heal clears the crash-looping supervisor too (its kill is part
+  of every launch).
 - **`ClipForegroundService`** owns the bridge, the relay WS client, and the BLE advertiser. It
   runs as a **`START_STICKY` foreground service** with type `specialUse|connectedDevice`
   (Android 14+ requires a declared type). Because it's `START_STICKY`, the system restarts it
@@ -346,8 +376,8 @@ One `autoStart(clipPort)` call drives the whole bring-up and returns a state str
 root layout gates a screen on:
 
 ```
-probe localhost:<clipPort> ── alive + secret known + not flapping ─► "ready"  (attach, no ADB)
-        │ dead (or alive with an unknown secret / dropping our bridge -> restart it via ADB below)
+poll daemonAlive (≤2.4s, issue #29) ─ alive + secret known + not flapping ─► "ready" (no ADB)
+        │ still dead after the grace window (or alive w/ unknown secret / flapping bridge)
    isPaired()? ── no ──────────────────────────────────────────► "need-pair"
         │ yes
    self-enable Wireless Debugging (if WRITE_SECURE_SETTINGS held)
@@ -360,11 +390,37 @@ probe localhost:<clipPort> ── alive + secret known + not flapping ─► "re
    deploy (push dex if needed + launch daemon) → start service → "ready"
 ```
 
-The JS hook (`useClipBoot`) wraps the native call in a **20 s timeout** because ADB's TLS
-connect and exec streams have no internal deadline and a half-trusted adbd can stall forever.
-A timeout is treated as "paired but stuck" → routed to the recoverable reconnect screen, and
-the hook re-runs `autoStart` whenever the app returns to the foreground (covers the user
-toggling Wireless Debugging in system settings).
+**Fast-path grace window (issue #29):** step 1 isn't a single instant snapshot — a cold app
+launch races the FGS's own `START_STICKY` restart + bridge reconnect, so one bad-luck sample
+can lose that race even though the daemon is already up and just hasn't finished (re)attaching
+the bridge yet. `autoStart` polls `daemonAlive()` every 300 ms for up to 2.4 s before falling
+through to the ADB path — cheap, and small next to the 20 s JS-side ceiling below. This matters
+most on **Mobile Hotspot**, where losing the race is unrecoverable: Wireless Debugging can never
+come up while the phone is a Wi-Fi *access point* rather than a *client*, so falling into the
+ADB path there used to strand the user on a Reconnect screen forever even though the FGS-owned
+relay/LAN link, remote lock, and battery/notification/SMS mirroring were all working fine behind
+it. The root layout now treats `need-connect`/`error` as **non-blocking** whenever
+`useRelayStatus()`'s `peerOnline` is true (`_layout.tsx`'s `adbBlocked`/`adbBypassed`): the app
+renders normally with a dismissible `ReconnectBanner` instead of the full-screen `adb-setup`
+gate. Only `need-pair` (and the in-flight `pairing` state) stays a hard gate — nothing works
+before that first pairing.
+
+The JS hook (`useClipBoot`) wraps the native call in a **20 s timeout** to flip the UI even
+though the native call can (legitimately) still be running. **`adb.connect()` itself is bounded
+too (issue #30):** a preflight raw-TCP `Socket.connect(addr, timeoutMs)` (12 s) catches a
+half-up adbd that never completes the TCP handshake (Mobile Hotspot, Samsung right after a
+Wireless-Debugging toggle), then `AbsAdbConnectionManager.setTimeout()` (12 s) bounds the ADB
+protocol handshake wait — safe to bound because libadb runs that handshake on **its own**
+persistent thread and the calling thread only waits on a deadline, so this can't repeat the
+`d21e16e` regression (that one wrapped the *whole* call, including the raw-TCP phase, in a
+throwaway Kotlin thread whose exit broke the connection). Before this, a stalled `connect()` had
+no deadline at all: the busy gate in `use-clip-boot.ts` intentionally outlives the 20 s UI
+timeout (so a second `autoStart` can't interleave on the shared `AdbManager` — issue #5's
+failure class) but never freed, and **Try Again went dead** — no spinner, no retry, forever.
+`refreshing` (exposed by `useClipBoot`) now drives the button's spinner/disabled state so an
+in-flight retry never looks like a no-op. A timeout is treated as "paired but stuck" → routed to
+the recoverable reconnect screen, and the hook re-runs `autoStart` whenever the app returns to
+the foreground (covers the user toggling Wireless Debugging in system settings).
 
 > **`adb.connect()` returns `false` only when a session is already live** (libadb's
 > `isConnected()` guard) — it is *never* a genuine failure, which always **throws**
@@ -785,6 +841,7 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 |---|---|
 | App swiped away | Foreground service + detached daemon keep syncing; JS callbacks just detach |
 | Service killed by OS | `START_STICKY` restarts it; it re-reads `SharedPreferences` and reconnects with no JS |
+| Daemon killed by lmkd/One UI (no reboot) | The shell-UID supervisor loop respawns it in ~3 s with the same port + secret — no ADB, no Wi-Fi, no JS (§3.3, issue #31) |
 | Relay WS drops | Both clients reconnect with exponential backoff (cap 30 s) |
 | Phone reboot | Wireless Debugging usually off → app self-enables it (if it holds `WRITE_SECURE_SETTINGS`), mDNS-reconnects, relaunches the daemon, turns WD back off |
 | adbd forgot the key (Samsung) | `connect` throws `AdbPairingRequiredException` → routed to `need-pair` for a fresh code |

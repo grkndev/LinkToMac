@@ -25,6 +25,9 @@ export type BootState =
 export type ClipBoot = {
   state: BootState;
   error: string | null;
+  /** true while a refresh() is in flight (up to the UI timeout) — drive Try Again's
+   *  spinner/disabled state so a tap never looks like a no-op (issue #30). */
+  refreshing: boolean;
   /** re-run autoStart (e.g. after the user enabled wireless debugging) */
   refresh: () => Promise<void>;
   /** first-time pairing with the 6-digit code from the system dialog */
@@ -40,6 +43,7 @@ export type ClipBoot = {
 export function useClipBoot(): ClipBoot {
   const [state, setState] = useState<BootState>('booting');
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const busy = useRef(false);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -47,6 +51,7 @@ export function useClipBoot(): ClipBoot {
   const refresh = useCallback(async () => {
     if (busy.current) return;
     busy.current = true;
+    setRefreshing(true);
     setError(null);
 
     // The busy gate must follow the NATIVE promise, not the UI timeout race below: a timed-out
@@ -86,6 +91,10 @@ export function useClipBoot(): ClipBoot {
       } else {
         setState('error');
       }
+    } finally {
+      // Only covers the UI-visible portion of this refresh (up to the 20s timeout) — the
+      // native promise may keep running past this and is tracked separately by `busy`.
+      setRefreshing(false);
     }
   }, []);
 
@@ -121,5 +130,5 @@ export function useClipBoot(): ClipBoot {
   // Skip a probe while a refresh is already in flight (busy) — see use-daemon-heartbeat.
   useDaemonHeartbeat(state === 'ready', refresh, () => busy.current);
 
-  return { state, error, refresh, pair };
+  return { state, error, refreshing, refresh, pair };
 }

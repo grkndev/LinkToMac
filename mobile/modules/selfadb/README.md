@@ -66,14 +66,18 @@ Still to confirm at runtime (the actual spike):
 
 ## Daemon behaviour (confirmed)
 
-`deployAndRun` launches ClipboardAgent **detached** (`setsid` + `nohup`), so it keeps
-running after:
+`deployAndRun` launches ClipboardAgent **detached** (`setsid` + `nohup`) and **wrapped in a
+shell-UID supervisor loop** (issue #31), so it keeps running after:
 
 - the adb connection drops,
 - **Wireless debugging is turned off**,
-- the app is killed.
+- the app is killed,
+- **lmkd/One UI kills the daemon under memory pressure** — the tiny supervisor respawns it
+  in ~3 s with the same port + secret (no ADB, no Wi-Fi; exponential backoff on fast deaths,
+  gives up after 10 in a row).
 
-Only a **reboot, crash, or `killDaemon()`** stops it. The clipboard data flows
+Only a **reboot or `killDaemon()`** stops the pair for good (`killDaemon` is two-stage:
+supervisor first, then the daemon by exact cmdline). The clipboard data flows
 over the localhost socket (`127.0.0.1:53123`) — adb is needed **only** to launch
 (or relaunch) the daemon, not during steady-state sync.
 
