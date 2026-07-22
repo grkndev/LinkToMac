@@ -15,6 +15,10 @@ struct SettingsScreen: View {
     let onOpen: (DashRoute) -> Void
 
     @State private var showPairing = false
+    /// True once the OS reports notification permission as denied — drives the "open System
+    /// Settings" affordance below (issue #23/L12). Re-checked whenever the app regains focus,
+    /// since the user typically flips this in System Settings and switches back.
+    @State private var notificationsDenied = false
 
     var body: some View {
         ScrollView {
@@ -37,10 +41,19 @@ struct SettingsScreen: View {
                 group("NOTIFICATIONS") {
                     M3ToggleRow(
                         icon: "bell.badge", title: "Notification banners",
-                        subtitle: "Show a macOS banner when your phone gets a notification",
+                        subtitle: notificationsDenied
+                            ? "Blocked in System Settings — banners can't show until you allow them"
+                            : "Show a macOS banner when your phone gets a notification",
                         isOn: Binding(get: { client.showNotificationBanners },
-                                      set: { client.showNotificationBanners = $0 })
+                                      set: { client.showNotificationBanners = $0 }),
+                        position: notificationsDenied ? .first : .single
                     )
+                    if notificationsDenied {
+                        M3SettingsRow(icon: "gear", title: "Open Notification Settings…",
+                                      trailingSymbol: "arrow.up.right", position: .last) {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!)
+                        }
+                    }
                 }
 
                 group("SECURITY") {
@@ -121,6 +134,10 @@ struct SettingsScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(M3.surface)
+        .task { await refreshNotificationStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshNotificationStatus() }
+        }
         .sheet(isPresented: $showPairing) {
             VStack(spacing: 0) {
                 PairingView(client: client)
@@ -138,6 +155,10 @@ struct SettingsScreen: View {
             M3SectionHeader(title)
             VStack(spacing: 3) { content() }
         }
+    }
+
+    private func refreshNotificationStatus() async {
+        notificationsDenied = await MacNotifier.currentStatus() == .denied
     }
 
     /// One-line summary of the relay endpoint for the "Relay Server" row.

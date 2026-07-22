@@ -15,7 +15,7 @@ struct LinkToMacApp: App {
         MenuBarExtra(isInserted: $showInMenuBar) {
             MenuPanel(
                 client: delegate.client,
-                onOpenWindow: delegate.showDashboardWindow,
+                onOpenWindow: { delegate.showDashboardWindow() },
             )
         } label: {
             // The app mark as a template image (monochrome; the system tints it for the menu bar).
@@ -63,7 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.onPairingChanged = { [weak self] in self?.applyLanSettings() }
         applyLanSettings()
         appearance.applyDockPolicy() // honour the persisted "Show in Dock" pref at launch
-        showDashboardWindow() // open the dashboard on every launch
+        // Don't steal focus here: at launch (esp. as a background "Start at login" item) the
+        // user may already be mid-task in another app — order the window front without activating.
+        showDashboardWindow(activate: false)
         // Prompt for notification permission up front so the first mirrored notification can
         // already raise a banner (the prompt is async; an early request avoids the first one
         // being silently skipped while authorization is still undetermined).
@@ -111,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lazily build and front the main dashboard window. Hosts `DashboardView` (which folds the
     /// former pairing / server-settings / about windows into its `NavigationStack`). Forced to a
     /// dark appearance so the titlebar matches the dark dashboard content.
-    func showDashboardWindow() {
+    func showDashboardWindow(activate: Bool = true) {
         if dashboardWindow == nil {
             let root = DashboardView(
                 client: client,
@@ -145,7 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center()
             dashboardWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true)
+        // Explicit user requests (Dock reopen, the menu panel's "Open Window…") still activate —
+        // only the just-launched case opts out (see the call in applicationDidFinishLaunching).
+        if activate { NSApp.activate(ignoringOtherApps: true) }
         dashboardWindow?.makeKeyAndOrderFront(nil)
     }
 

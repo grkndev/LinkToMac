@@ -10,17 +10,31 @@ import { WebSocket } from 'ws';
 const PORT = process.env.PORT ?? '8080';
 const TOKEN = process.env.RELAY_AUTH_TOKEN ?? '';
 const ROOM = 'smoke-room-0123456789'; // >= 16 chars
+const BEARER_ROOM = 'smoke-bearer-room-0123456789'; // >= 16 chars, distinct from ROOM
 const URL = `ws://127.0.0.1:${PORT}/ws${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`;
+const BEARER_URL = `ws://127.0.0.1:${PORT}/ws`;
 
 type Msg = Record<string, unknown>;
 
-function client() {
-  const ws = new WebSocket(URL);
+/** `authHeader: true` connects with `Authorization: Bearer <token>` instead of `?token=`, to
+ *  cover the auth path the rest of this suite doesn't exercise (index.ts accepts either). */
+function client(opts: { authHeader?: boolean } = {}) {
+  const ws = opts.authHeader
+    ? new WebSocket(BEARER_URL, TOKEN ? { headers: { Authorization: `Bearer ${TOKEN}` } } : undefined)
+    : new WebSocket(URL);
   const inbox: Msg[] = [];
   const waiters: { pred: (m: Msg) => boolean; resolve: (m: Msg) => void }[] = [];
 
   ws.on('message', (data) => {
-    const m = JSON.parse(data.toString()) as Msg;
+    // A malformed/non-JSON frame must not crash the smoke harness itself — log and drop it,
+    // same as any other client would, rather than letting JSON.parse throw out of the handler.
+    let m: Msg;
+    try {
+      m = JSON.parse(data.toString()) as Msg;
+    } catch (err) {
+      console.error('  (ignoring non-JSON message):', err instanceof Error ? err.message : err);
+      return;
+    }
     inbox.push(m);
     for (let i = waiters.length - 1; i >= 0; i--) {
       const w = waiters[i]!;
@@ -64,6 +78,16 @@ function assert(cond: boolean, label: string): void {
 }
 
 async function main(): Promise<void> {
+  // Auth: the `?token=` path is exercised by every other client below; cover the
+  // `Authorization: Bearer` path separately (only meaningful when a token is configured).
+  if (TOKEN) {
+    const bearer = client({ authHeader: true });
+    await bearer.open();
+    bearer.send({ t: 'join', room: BEARER_ROOM, device: 'android' });
+    await bearer.waitFor((m) => m.t === 'joined', 'Bearer-header auth joins successfully');
+    bearer.close();
+  }
+
   const android = client();
   const mac = client();
   await Promise.all([android.open(), mac.open()]);

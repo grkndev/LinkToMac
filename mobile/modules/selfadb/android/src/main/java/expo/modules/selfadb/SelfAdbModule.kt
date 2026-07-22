@@ -71,12 +71,16 @@ class SelfAdbModule : Module() {
     Events("onClip", "onMacClip", "onMacStat", "onLog", "onStatus", "onRelay")
 
     // Attach UI callbacks to the (possibly already-running) service.
+    // Each callback runs on ClipForegroundService's thread, not JS's — a sendEvent() that
+    // throws (e.g. the JS bridge mid-teardown on some SDK 56 build) would otherwise propagate
+    // out of ClipBus's dispatch and could kill the service thread. Never let one bad event tear
+    // down the pipe; just drop it (best-effort UI plumbing, not the data path).
     OnCreate {
-      ClipBus.onClip = { text, ts -> sendEvent("onClip", mapOf("text" to text, "ts" to ts)) }
-      ClipBus.onMacClip = { text, ts -> sendEvent("onMacClip", mapOf("text" to text, "ts" to ts)) }
-      ClipBus.onMacStat = { json -> parseStat(json)?.let { sendEvent("onMacStat", it) } }
-      ClipBus.onLog = { msg -> sendEvent("onLog", mapOf("message" to msg)) }
-      ClipBus.onRelay = { payload -> sendEvent("onRelay", payload) }
+      ClipBus.onClip = { text, ts -> safeSendEvent("onClip", mapOf("text" to text, "ts" to ts)) }
+      ClipBus.onMacClip = { text, ts -> safeSendEvent("onMacClip", mapOf("text" to text, "ts" to ts)) }
+      ClipBus.onMacStat = { json -> parseStat(json)?.let { safeSendEvent("onMacStat", it) } }
+      ClipBus.onLog = { msg -> safeSendEvent("onLog", mapOf("message" to msg)) }
+      ClipBus.onRelay = { payload -> safeSendEvent("onRelay", payload) }
     }
 
     AsyncFunction("isPaired") {
@@ -802,6 +806,15 @@ class SelfAdbModule : Module() {
   private fun log(message: String) = ClipBus.log(message)
   private fun status(adbState: String, clipState: String) =
     sendEvent("onStatus", mapOf("adb" to adbState, "clip" to clipState))
+
+  /** `sendEvent` on the service thread, best-effort: a JS-bridge throw here must never take
+   *  down the caller (see the `OnCreate` `ClipBus.onFoo` wiring). */
+  private fun safeSendEvent(name: String, body: Map<String, Any?>) {
+    try {
+      sendEvent(name, body)
+    } catch (_: Throwable) {
+    }
+  }
 }
 
 /** Thrown by deploy() when the daemon was launched but never bound its socket. */

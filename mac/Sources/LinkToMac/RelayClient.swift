@@ -86,7 +86,10 @@ final class RelayClient {
         let read: Bool
 
         /// Contact name when known, else the raw address.
-        var display: String { (name?.isEmpty == false) ? name! : addr }
+        var display: String {
+            guard let name, !name.isEmpty else { return addr }
+            return name
+        }
     }
 
     /// A conversation: all messages sharing a `threadKey`, chronological (oldest → newest). Derived
@@ -95,7 +98,9 @@ final class RelayClient {
         let id: String
         let display: String
         let messages: [MessageEntry]
-        var latest: MessageEntry { messages[messages.count - 1] }
+        /// `nil` only if `messages` is empty — `rebuildConversations()`'s `Dictionary(grouping:)`
+        /// never produces that today, but callers still handle it rather than force-unwrapping.
+        var latest: MessageEntry? { messages.last }
         var unread: Int { messages.lazy.filter { !$0.read && !$0.outgoing }.count }
     }
 
@@ -113,10 +118,10 @@ final class RelayClient {
         conversations = Dictionary(grouping: messages, by: { $0.threadKey }).map { key, msgs in
             let sorted = msgs.sorted { $0.date < $1.date }
             // Prefer a contact-name label if any message in the thread resolved one.
-            let display = sorted.last(where: { $0.name?.isEmpty == false })?.display ?? sorted[sorted.count - 1].display
+            let display = sorted.last(where: { $0.name?.isEmpty == false })?.display ?? sorted.last?.display ?? key
             return Conversation(id: key, display: display, messages: sorted)
         }
-        .sorted { $0.latest.date > $1.latest.date }
+        .sorted { ($0.latest?.date ?? .distantPast) > ($1.latest?.date ?? .distantPast) }
     }
 
     /// Strip formatting noise from a phone-number address so the thread fallback key is stable.
@@ -214,7 +219,7 @@ final class RelayClient {
                 guard let self, self.sendToAndroid, self.syncImages else { return }
                 guard let (bytes, mime) = ImagePrep.prepare(data) else {
                     self.log("image copy skipped (can't fit under the frame budget)")
-                    MacNotifier.post(title: "Image not synced", body: "The copied image couldn't be compressed under the transfer limit.")
+                    Task { await MacNotifier.post(title: "Image not synced", body: "The copied image couldn't be compressed under the transfer limit.") }
                     return
                 }
                 let payload = FileFrame.payload(mime: mime, bytes: bytes)
@@ -440,7 +445,7 @@ final class RelayClient {
             let bannerTitle = entry.title.isEmpty ? entry.app : "\(entry.app) · \(entry.title)"
             // The phone sends the icon on every post, so iconPNG is normally present; the banner
             // attachment surfaces the source app's icon (WhatsApp, Discord, …).
-            MacNotifier.post(title: bannerTitle, body: entry.text, iconPNG: iconPNG)
+            Task { await MacNotifier.post(title: bannerTitle, body: entry.text, iconPNG: iconPNG) }
         }
     }
 

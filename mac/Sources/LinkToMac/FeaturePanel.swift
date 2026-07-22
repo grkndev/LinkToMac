@@ -131,10 +131,12 @@ struct FeaturePanel: View {
                     Button {
                         selectedThread = convo.id
                     } label: {
+                        // `latest` is nil only for a (never-observed) empty Conversation; fall
+                        // back to blank/"now" rather than force-unwrapping.
                         M3Row(icon: "message.fill",
                               title: convo.display,
-                              subtitle: preview(convo.latest),
-                              trailing: Self.relativeFormatter.localizedString(for: convo.latest.date, relativeTo: Date()),
+                              subtitle: convo.latest.map(preview) ?? " ",
+                              trailing: convo.latest.map { Self.relativeFormatter.localizedString(for: $0.date, relativeTo: Date()) } ?? "",
                               position: groupPosition(index, count: slice.count))
                     }
                     .buttonStyle(.plain)
@@ -151,7 +153,7 @@ struct FeaturePanel: View {
 
     @ViewBuilder
     private func threadView(_ convo: RelayClient.Conversation) -> some View {
-        let address = convo.id.hasPrefix("t") ? convo.latest.addr : convo.id
+        let address = convo.id.hasPrefix("t") ? (convo.latest?.addr ?? "") : convo.id
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Button {
@@ -192,7 +194,7 @@ struct FeaturePanel: View {
                         proxy.scrollTo(last, anchor: .bottom)
                     }
                 }
-                .onChange(of: convo.latest.id) {
+                .onChange(of: convo.latest?.id) {
                     if let last = convo.messages.last?.id {
                         withAnimation { proxy.scrollTo(last, anchor: .bottom) }
                     }

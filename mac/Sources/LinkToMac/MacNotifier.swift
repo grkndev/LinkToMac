@@ -15,25 +15,41 @@ import Foundation
 @MainActor
 enum MacNotifier {
     private static var requested = false
+    /// Non-nil while the (one-time) authorization request is in flight. `post` awaits this
+    /// before reading settings, so a banner that races the very first request doesn't read a
+    /// stale `.notDetermined` and get silently dropped (the first-launch race).
+    private static var pendingAuthorization: Task<Void, Never>?
 
     /// Ask for banner authorization once. Safe to call repeatedly; only the first call prompts.
     static func requestAuthorizationIfNeeded() {
         guard !requested else { return }
         requested = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, error in
-            if let error { print("[MacNotifier] authorization error: \(error.localizedDescription)") }
+        pendingAuthorization = Task {
+            do {
+                _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+            } catch {
+                print("[MacNotifier] authorization error: \(error.localizedDescription)")
+            }
+            pendingAuthorization = nil
         }
+    }
+
+    /// Current OS authorization state — lets UI (Settings' "Notification banners" toggle) react
+    /// to a denial with an "open System Settings" affordance instead of leaving the toggle a
+    /// silent no-op forever (there is no in-app re-request once the user has said no).
+    static func currentStatus() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
     /// Raise a banner. No-op if the user hasn't authorized notifications. `iconPNG`, when present, is
     /// the source app's icon (PNG bytes) shown as the banner's attachment thumbnail.
-    static func post(title: String, body: String, iconPNG: Data? = nil) {
+    static func post(title: String, body: String, iconPNG: Data? = nil) async {
         requestAuthorizationIfNeeded()
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-            else { return }
-            deliver(title: title, body: body, iconURL: iconPNG.flatMap { writeTempIcon($0) })
-        }
+        await pendingAuthorization?.value
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+        else { return }
+        deliver(title: title, body: body, iconURL: iconPNG.flatMap { writeTempIcon($0) })
     }
 
     /// Build + add the request. `nonisolated` so it runs in `getNotificationSettings`'s off-main
