@@ -180,10 +180,19 @@ public class ClipboardAgent {
      * clip on the clipboard pointing at a provider it has no permission for (MediaStore, Contacts,
      * …) that shell CAN read, and have this daemon read it and sync it to the Mac. Gate the read on
      * the *copier's* own access: resolve who set the clip ({@link #primaryClipSource}) and confirm
-     * that uid holds read permission for the URI. This blocks privilege *escalation* only — an app
-     * that could already read the content itself is allowed (no confused deputy). Fails CLOSED — if
-     * the system Context is unavailable or the source can't be determined, skip the image (text
-     * sync is unaffected).
+     * that source could itself read the URI. This blocks privilege *escalation* only — an app that
+     * could already read the content is allowed (no confused deputy).
+     *
+     * Three ways the source legitimately has access, checked in turn:
+     *   1. An explicit URI grant to the source, or a provider with a *static* readPermission the
+     *      source holds — both visible to {@link Context#checkUriPermission}.
+     *   2. The source *owns* the backing provider (its own FileProvider, etc.).
+     *   3. MediaStore (`content://media/…`) enforces READ_MEDIA_* *dynamically* per caller and
+     *      declares no static readPermission, so (1) can't see a gallery's access — check the media
+     *      read grants directly.
+     *
+     * Fails CLOSED — if the system Context is unavailable, the source can't be determined, or none
+     * of the above hold, the image is skipped (text sync is unaffected).
      */
     static boolean sourceMayReadImage(Uri uri) {
         Context ctx = appContext;
@@ -197,14 +206,37 @@ public class ClipboardAgent {
             return false;
         }
         try {
-            int srcUid = ctx.getPackageManager().getPackageUid(srcPkg, 0);
-            int perm = ctx.checkUriPermission(
-                    uri, -1, srcUid, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                log("image skipped: source " + srcPkg + " lacks read access to " + uri.getAuthority());
-                return false;
+            android.content.pm.PackageManager pm = ctx.getPackageManager();
+            int srcUid = pm.getPackageUid(srcPkg, 0);
+            // (1) explicit grant to the source, or a static provider readPermission it holds
+            if (ctx.checkUriPermission(uri, -1, srcUid,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return true;
             }
-            return true;
+            // (2) the source owns the backing provider outright
+            android.content.pm.ProviderInfo pi = pm.resolveContentProvider(uri.getAuthority(), 0);
+            if (pi != null && pi.applicationInfo != null && pi.applicationInfo.uid == srcUid) {
+                return true;
+            }
+            // (3) MediaStore: dynamic per-caller enforcement -> check the source's own media grants.
+            //     A hostile app forging a media URI it can't read is rejected; one that already holds
+            //     a media read permission gains nothing it couldn't read directly.
+            if ("media".equals(uri.getAuthority())) {
+                String[] mediaPerms = {
+                        "android.permission.READ_MEDIA_IMAGES",
+                        "android.permission.READ_MEDIA_VIDEO",
+                        "android.permission.READ_EXTERNAL_STORAGE",
+                };
+                for (String p : mediaPerms) {
+                    if (pm.checkPermission(p, srcPkg)
+                            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        return true;
+                    }
+                }
+            }
+            log("image skipped: source " + srcPkg + " lacks read access to " + uri.getAuthority());
+            return false;
         } catch (Throwable t) {
             log("image skipped: source access check failed (" + t + ")");
             return false;

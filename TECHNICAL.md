@@ -357,10 +357,14 @@ the pair for good. Three contracts around it (all verified on-device):
     (MediaStore, Contacts, …). A hostile co-installed app could `setPrimaryClip` a forged `image/*`
     clip pointing at such a URI and have the daemon read + sync it to the Mac. So before reading an
     image URI, the daemon resolves **who set the clip** (`IClipboard.getPrimaryClipSource`) and only
-    proceeds if that uid holds read permission for the URI (`Context.checkUriPermission`). This
-    blocks privilege *escalation* only — an app that could already read the content itself is
-    allowed. **Fails closed:** if the source or its permission can't be determined, the image is
-    skipped (text sync unaffected). Our own Mac→phone writes are skipped earlier by the
+    proceeds if that source could itself read the URI — checked three ways: (1) an explicit URI grant
+    or a static provider `readPermission` the source holds (`Context.checkUriPermission`), (2) the
+    source **owns** the backing provider (its own FileProvider), or (3) for MediaStore
+    (`content://media/…`, which enforces `READ_MEDIA_*` *dynamically* and exposes no static
+    permission for (1) to see) the source holds a media read grant. This blocks privilege
+    *escalation* only — an app that could already read the content itself is allowed (a plain gallery
+    copy lands in case 3). **Fails closed:** if the source or its access can't be determined, the
+    image is skipped (text sync unaffected). Our own Mac→phone writes are skipped earlier by the
     `*.selfadb.fileprovider` authority check, so they never reach this guard.
   - *Echo:* the Mac→phone write lands on the clipboard, the daemon re-reads it, and would bounce it
     back — so `applyFile` stamps the raw bytes' **SHA-256** in `recentImageWrites` and `captureImage`
