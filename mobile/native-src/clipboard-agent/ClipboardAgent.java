@@ -159,6 +159,58 @@ public class ClipboardAgent {
         return (c == null || c.getItemCount() == 0) ? null : c.getItemAt(0).getText();
     }
 
+    /** Package that set the current primary clip, via IClipboard.getPrimaryClipSource (API 29+).
+     *  Null if the method is absent on this build or the call fails. Both known signatures
+     *  ((String,int) and (String,String,int)) are filled by the generic {@link #args} helper
+     *  (first String -> our package, any second String -> null, int -> userId 0). */
+    static String primaryClipSource() {
+        try {
+            Method m = find("getPrimaryClipSource");
+            Object r = m.invoke(svc(), args(m, null, null));
+            return (r instanceof String) ? (String) r : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Confused-deputy guard for clipboard image URIs (issue #32). This process reads URIs as shell
+     * (uid 2000) via {@link #readViaExternalProvider}, which uses shell's ambient privilege and
+     * bypasses Android's clipboard URI-grant model — so a hostile app could put a forged image/*
+     * clip on the clipboard pointing at a provider it has no permission for (MediaStore, Contacts,
+     * …) that shell CAN read, and have this daemon read it and sync it to the Mac. Gate the read on
+     * the *copier's* own access: resolve who set the clip ({@link #primaryClipSource}) and confirm
+     * that uid holds read permission for the URI. This blocks privilege *escalation* only — an app
+     * that could already read the content itself is allowed (no confused deputy). Fails CLOSED — if
+     * the system Context is unavailable or the source can't be determined, skip the image (text
+     * sync is unaffected).
+     */
+    static boolean sourceMayReadImage(Uri uri) {
+        Context ctx = appContext;
+        if (ctx == null) {
+            log("image skipped: no system context to verify copier access");
+            return false;
+        }
+        String srcPkg = primaryClipSource();
+        if (srcPkg == null || srcPkg.isEmpty()) {
+            log("image skipped: could not determine clip source");
+            return false;
+        }
+        try {
+            int srcUid = ctx.getPackageManager().getPackageUid(srcPkg, 0);
+            int perm = ctx.checkUriPermission(
+                    uri, -1, srcUid, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                log("image skipped: source " + srcPkg + " lacks read access to " + uri.getAuthority());
+                return false;
+            }
+            return true;
+        } catch (Throwable t) {
+            log("image skipped: source access check failed (" + t + ")");
+            return false;
+        }
+    }
+
     // ---------------------------------------------------------------------
     // clipboard capture (text or image) — the single path both the change
     // listener and the on-connect initial sync go through
@@ -205,6 +257,12 @@ public class ClipboardAgent {
             // Our own Mac→phone image just written to the clipboard — don't read + echo it back.
             String auth = uri.getAuthority();
             if (auth != null && auth.endsWith(".selfadb.fileprovider")) {
+                return;
+            }
+            // Confused-deputy guard (issue #32): only read an image the app that actually copied it
+            // could read — otherwise a hostile app forges an image/* clip at a provider shell can
+            // over-read (MediaStore, Contacts, …) and we'd exfiltrate it to the Mac. Fails closed.
+            if (!sourceMayReadImage(uri)) {
                 return;
             }
             emitImage(uri, initial);

@@ -352,6 +352,16 @@ the pair for good. Three contracts around it (all verified on-device):
     It emits `{"type":"image",…}` over the bridge; `captureImage` fits the bytes under the frame
     budget (`fitImage`) and sends a `file` frame via `conn.sendFile`. Fails soft: if the Context
     can't be built on some OEM build, text sync is unaffected and images are simply skipped.
+  - *Confused-deputy guard (outbound, issue #32):* the daemon runs as **shell (uid 2000)** and its
+    provider read uses shell's ambient privilege — which can over-read providers a normal app can't
+    (MediaStore, Contacts, …). A hostile co-installed app could `setPrimaryClip` a forged `image/*`
+    clip pointing at such a URI and have the daemon read + sync it to the Mac. So before reading an
+    image URI, the daemon resolves **who set the clip** (`IClipboard.getPrimaryClipSource`) and only
+    proceeds if that uid holds read permission for the URI (`Context.checkUriPermission`). This
+    blocks privilege *escalation* only — an app that could already read the content itself is
+    allowed. **Fails closed:** if the source or its permission can't be determined, the image is
+    skipped (text sync unaffected). Our own Mac→phone writes are skipped earlier by the
+    `*.selfadb.fileprovider` authority check, so they never reach this guard.
   - *Echo:* the Mac→phone write lands on the clipboard, the daemon re-reads it, and would bounce it
     back — so `applyFile` stamps the raw bytes' **SHA-256** in `recentImageWrites` and `captureImage`
     drops the matching re-capture (the image analogue of the text `recentWrites` map). The outbound
