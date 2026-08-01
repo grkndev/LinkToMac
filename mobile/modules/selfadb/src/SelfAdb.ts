@@ -32,6 +32,13 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
    * WRITE_SECURE_SETTINGS, then connects + deploys. Resolves "ready".
    */
   pairAuto(code: string, clipPort: number): Promise<'ready'>;
+  /**
+   * Force-wake a stalled ADB call (autoStart/pairAuto/connect/…) by closing the underlying adb
+   * session. Runs on the module's default queue so it's reachable even while those calls are
+   * stuck on the dedicated ADB queue — call this before giving up on a timed-out `autoStart` so
+   * "Try Again" doesn't depend on the stuck call ever returning on its own.
+   */
+  cancelAdb(): Promise<void>;
   /** true once we hold WRITE_SECURE_SETTINGS (can self-toggle wireless debugging). */
   hasSecureSettings(): Promise<boolean>;
   /** deep-link to Developer options so the user can open the pairing dialog. */
@@ -111,6 +118,10 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   setSmsForwarding(enabled: boolean): Promise<void>;
   /** force an immediate SMS (re)sync to the Mac (used right after granting access). */
   syncSms(): Promise<void>;
+  /** whether we hold SEND_SMS (requested lazily, on the first reply attempt). */
+  hasSendSmsAccess(): Promise<boolean>;
+  /** request SEND_SMS; resolves whether replies from the Mac can now be sent. */
+  requestSendSmsAccess(): Promise<boolean>;
   /** whether the app is exempt from battery optimizations (more resilient FGS). */
   hasIgnoreBatteryOptimizations(): Promise<boolean>;
   /** open the system dialog to request battery-optimization exemption. */

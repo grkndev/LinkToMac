@@ -446,6 +446,45 @@ the foreground (covers the user toggling Wireless Debugging in system settings).
 > failed despite mDNS endpoint" and skipped the redeploy, looping the reconnect screen after a
 > successful re-pair. Don't reintroduce a `throw` on `connect()==false`.
 
+**Every ADB-touching `AsyncFunction` runs on its own single-thread queue, not Expo's shared
+one (issue found 2026-08-01).** `expo-modules-core` dispatches every module's default-queue
+`AsyncFunction` — including `expo-secure-store`'s — onto one shared HandlerThread
+(`expo.modules.AsyncFunctionQueue`, `AppContext.modulesQueue`). Before this fix, a stalled
+`autoStart()` (or `pairAuto`/`deploy`/etc.) blocked that thread, which blocked **every other
+module in the app**, not just self-ADB. Concretely: `pairing-context.tsx`'s `loadPairing()`
+(SecureStore) queued behind the wedged `autoStart`, and `_layout.tsx`'s Booting gate is
+`boot.state === "booting" || pairing === undefined` — the 20 s JS timeout in `use-clip-boot.ts`
+only clears the first half, so the user was stuck on "Connecting to Mac…" with no way out except
+Force Stop. `SelfAdbModule` now builds its own `HandlerThread` + single-thread `CoroutineScope`
+(`adbQueue`) and chains `.runOnQueue(adbQueue)` onto `isPaired`/`pair`/`connect`/`deployAndRun`/
+`autoStart`/`pairAuto`/`readDaemonLog`/`killDaemon`/`restartDaemon`/`stop` — still serialized
+against each other (preserves issue #5's invariant that only one ADB session-manipulating call
+runs at a time), but isolated from the rest of the app.
+
+**libadb's exec-stream I/O has no timeout of its own — only `connect()`'s two phases were ever
+bounded.** Decompiling `libadb-android:3.1.1`: `AdbConnection.open` (`openStream`)'s wait and
+`AdbStream.read`/`write`'s waits are all bare `Object.wait()`/`Queue.wait()`, no deadline, and
+`PairingConnectionCtx` opens its own raw `Socket(host, port)` with no connect timeout either. So
+everything `deploy()` does past `connect()` — `pushAsset`, `launchDaemon`, `killDaemon`,
+`grantSecureSettings` (all through `AdbManager.runShort`) — could hang forever on a half-dead
+session (Wireless Debugging dropped mid-call, a half-trusted adbd). `AdbManager.bounded()` fixes
+this: it arms a watchdog `Thread` that, after a deadline, calls `disconnect()` from a thread
+other than the caller's (`AdbConnection.close()` does its own unbounded `Thread.join()`, so the
+watchdog must never be the blocked thread) — `disconnect()` closes the socket, `interrupt()`s +
+`join()`s the connection thread, and `notifyAll()`s every open stream's write lock and read
+queue, so the pending `wait()` wakes and throws. `runShort` (15 s default, 25 s for
+`launchDaemon`'s longer poll) and each `pushAsset` phase (20 s) are wrapped; `pair()` gets the
+same raw-TCP preflight `connect()` already used, since `PairingConnectionCtx`'s socket is outside
+`disconnect()`'s reach. A resulting timeout surfaces as `AdbManager.AdbTimeoutException` — a
+plain `IOException` subtype, so existing `catch (Exception)` call sites need no changes.
+
+**`cancelAdb()` makes "Try Again" instant instead of racing the native timeout.** It's the one
+ADB-touching call that deliberately stays on the *default* Expo queue (not `adbQueue`) — its
+whole point is to be reachable while `adbQueue` is occupied. It just calls `adb.disconnect()`,
+the same force-wake `bounded()`'s watchdog uses. `use-clip-boot.ts`'s `refresh()` calls it in the
+`TimeoutError` branch, right after routing to `need-connect`, so the stuck native call settles
+within milliseconds of the JS timeout instead of however long is left on its own internal bound.
+
 ### 3.7 The JS ↔ native seam (`ClipBus.kt`)
 
 The Expo module only exists while the JS runtime is alive; the foreground service outlives it.

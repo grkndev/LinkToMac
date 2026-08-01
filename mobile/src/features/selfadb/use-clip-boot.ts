@@ -88,6 +88,12 @@ export function useClipBoot(): ClipBoot {
       if (e instanceof TimeoutError) {
         timedOut = true;
         setState('need-connect');
+        // Force-wake the still-running native autoStart (closes the adb session) instead of
+        // leaving it to fail on its own internal watchdog — makes the very next Try Again
+        // responsive instead of racing whatever's left of autoStart's own bound. cancelAdb runs
+        // on the native module's default queue, so it's reachable even while autoStart occupies
+        // the dedicated ADB queue (see SelfAdbModule.kt).
+        SelfAdb.cancelAdb().catch(() => {});
       } else {
         setState('error');
       }

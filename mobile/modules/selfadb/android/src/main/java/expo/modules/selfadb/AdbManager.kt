@@ -15,6 +15,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.security.KeyFactory
 import java.security.KeyPair
@@ -52,8 +53,18 @@ class AdbManager(private val context: Context) {
   fun isPaired(): Boolean =
     File(context.filesDir, KEY_FILE).exists() && File(context.filesDir, PUB_FILE).exists()
 
-  fun pair(host: String, port: Int, code: String): Boolean =
-    manager.pair(host, port, code)
+  /**
+   * Pair, with a bounded raw-TCP preflight — same reasoning as [connect]. `manager.pair()`
+   * opens its OWN fresh socket inside a `PairingConnectionCtx` (verified in the 3.1.1 AAR: it's
+   * not reusing anything [connect] bounds), so a half-up pairing dialog / dropped Wi-Fi can
+   * stall the raw connect forever without this. Unlike [connect], there's no second (handshake)
+   * phase to bound with `setTimeout()` — the pairing exchange itself is short-lived once the
+   * socket is up, so the preflight alone is enough.
+   */
+  fun pair(host: String, port: Int, code: String): Boolean {
+    Socket().use { it.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS.toInt()) }
+    return manager.pair(host, port, code)
+  }
 
   /**
    * Connect, bounded — WITHOUT repeating the reverted 0.8.0 worker-thread hazard (issue #30).
@@ -145,10 +156,16 @@ class AdbManager(private val context: Context) {
    * command executes server-side as soon as the stream opens, so the read is
    * best-effort: a backgrounded (`&`) command can close the stream before we
    * read the ack ("Stream closed") — that's expected, not a failure.
+   *
+   * Bounded by [bounded] with [timeoutMs] (default [EXEC_TIMEOUT_MS]). Note: if the stall is in
+   * the read (not `openStream`), the watchdog's forced `disconnect()` closes the stream and the
+   * inner catch above swallows that as an ordinary "(no output: …)" result rather than an
+   * [AdbTimeoutException] — that's the existing best-effort contract, and it's still fine here:
+   * the point of [bounded] is that this returns at all, not that every stall reports the same way.
    */
-  fun runShort(command: String): String {
+  fun runShort(command: String, timeoutMs: Long = EXEC_TIMEOUT_MS): String = bounded("exec", timeoutMs) {
     val stream = manager.openStream("exec:$command")
-    return try {
+    try {
       stream.openInputStream().bufferedReader().readText().trim()
     } catch (e: Exception) {
       "(no output: ${e.message})"
@@ -215,7 +232,9 @@ class AdbManager(private val context: Context) {
     val cmd = "rm -f $LOG_PATH; nohup setsid sh -c '$inner' >$LOG_PATH 2>&1 </dev/null & " +
       "i=0; while [ \$i -lt 40 ]; do grep -q listening $LOG_PATH 2>/dev/null && { echo LAUNCHED; exit 0; }; " +
       "sleep 0.2; i=\$((i+1)); done; echo LAUNCH_TIMEOUT"
-    return runShort(cmd)
+    // Own (longer) bound: the remote poll loop above legitimately blocks up to ~8s waiting for
+    // the daemon's `listening` line, on top of ordinary exec-stream latency.
+    return runShort(cmd, LAUNCH_TIMEOUT_MS)
   }
 
   /**
@@ -243,32 +262,39 @@ class AdbManager(private val context: Context) {
     val bytes = context.assets.open(assetName).use { it.readBytes() }
     log("asset $assetName = ${bytes.size} bytes")
 
-    val push = manager.openStream("exec:cat > $devicePath")
-    log("exec stream opened, writing...")
-    try {
-      val os = push.openOutputStream()
-      os.write(bytes)
-      os.flush()
-    } finally {
-      // Happy path: adb CLSE -> remote `cat` sees EOF and writes the file.
-      // Failure path: without this the exec stream leaks on a write error.
+    // Each phase gets its own [bounded] deadline (not one for the whole function) so a stall in
+    // any single exec stream (openStream/write/read all being unbounded in libadb) fails fast and
+    // names the phase, instead of the whole push silently eating up to 3x the budget.
+    bounded("push write", PUSH_TIMEOUT_MS) {
+      val push = manager.openStream("exec:cat > $devicePath")
+      log("exec stream opened, writing...")
       try {
-        push.close()
-      } catch (_: Exception) {
+        val os = push.openOutputStream()
+        os.write(bytes)
+        os.flush()
+      } finally {
+        // Happy path: adb CLSE -> remote `cat` sees EOF and writes the file.
+        // Failure path: without this the exec stream leaks on a write error.
+        try {
+          push.close()
+        } catch (_: Exception) {
+        }
       }
     }
     log("write done, EOF sent")
 
     // verify + fix perms on a separate stream that completes quickly
-    val verify = manager.openStream("exec:chmod 644 $devicePath; ls -l $devicePath")
-    val info = try {
-      verify.openInputStream().bufferedReader().readText().trim()
-    } catch (e: Exception) {
-      "verify failed: ${e.message}"
-    } finally {
+    val info = bounded("push verify", PUSH_TIMEOUT_MS) {
+      val verify = manager.openStream("exec:chmod 644 $devicePath; ls -l $devicePath")
       try {
-        verify.close()
-      } catch (_: Exception) {
+        verify.openInputStream().bufferedReader().readText().trim()
+      } catch (e: Exception) {
+        "verify failed: ${e.message}"
+      } finally {
+        try {
+          verify.close()
+        } catch (_: Exception) {
+        }
       }
     }
     log("on device: $info")
@@ -276,13 +302,15 @@ class AdbManager(private val context: Context) {
     // Byte-count check: a session drop mid-write leaves a truncated file that would otherwise
     // only surface 3 s later as a generic DaemonNotStartedException. `ls -l` above is
     // human-readable metadata; this is the machine check.
-    val sizeStream = manager.openStream("exec:wc -c < $devicePath")
-    val onDevice = try {
-      sizeStream.openInputStream().bufferedReader().readText().trim().toLongOrNull()
-    } finally {
+    val onDevice = bounded("push size check", PUSH_TIMEOUT_MS) {
+      val sizeStream = manager.openStream("exec:wc -c < $devicePath")
       try {
-        sizeStream.close()
-      } catch (_: Exception) {
+        sizeStream.openInputStream().bufferedReader().readText().trim().toLongOrNull()
+      } finally {
+        try {
+          sizeStream.close()
+        } catch (_: Exception) {
+        }
       }
     }
     if (onDevice != bytes.size.toLong()) {
@@ -296,6 +324,53 @@ class AdbManager(private val context: Context) {
   /** The pushed asset didn't land intact (connection drop mid-write). Distinct from a generic
    *  daemon-start failure so callers/logs can say exactly what went wrong. */
   class AssetTruncatedException(message: String) : Exception(message)
+
+  /** A [bounded] operation didn't return before its deadline and was force-woken via
+   *  [disconnect]. Distinct from a generic IOException so logs name exactly which phase stalled;
+   *  existing `catch (Exception)` call sites keep treating it as an ordinary connect/deploy
+   *  failure with no new handling required. */
+  class AdbTimeoutException(label: String) : java.io.IOException("$label timed out")
+
+  /**
+   * Run [block] with a hard deadline. libadb's exec-stream I/O has NO built-in timeout —
+   * verified against the 3.1.1 AAR: `AdbConnection.open` (== `openStream`) does a bare
+   * `Object.wait()`, `AdbStream.read`/`write` do `Queue.wait()`/`Object.wait()`, all with no
+   * deadline — so a half-dead adb session (Wireless Debugging dropped mid-session, a
+   * half-trusted adbd) can stall these forever. `connect()` is the only libadb call bounded
+   * today (issue #30), and only because it front-loads a disposable raw-TCP preflight ahead of
+   * `setTimeout()`-bounded phase.
+   *
+   * The only lever that wakes an in-flight `wait()` here is closing the connection:
+   * `disconnect()` -> `AdbConnection.close()` closes the socket, interrupts+joins the connection
+   * thread, and `notifyAll()`s every open `AdbStream`'s write lock and read queue (verified in
+   * the AAR) — so every pending wait wakes and the stream throws `IOException`. So: arm a
+   * watchdog that calls [disconnect] from a SEPARATE thread after [timeoutMs] — never from
+   * `block()`'s own thread, since `AdbConnection.close()` itself does an unbounded
+   * `Thread.join()` and would deadlock against itself — then let `block()` fail on its own.
+   *
+   * If `block()` throws while the watchdog already fired, wrap it as [AdbTimeoutException] so
+   * the failure names the stuck phase; a genuine (non-timeout) failure passes through unchanged.
+   */
+  private fun <T> bounded(label: String, timeoutMs: Long, block: () -> T): T {
+    val fired = AtomicBoolean(false)
+    val watchdog = Thread {
+      try {
+        Thread.sleep(timeoutMs)
+        fired.set(true)
+        disconnect()
+      } catch (_: InterruptedException) {
+      }
+    }.apply { isDaemon = true }
+    watchdog.start()
+    try {
+      return block()
+    } catch (e: Exception) {
+      if (fired.get()) throw AdbTimeoutException(label)
+      throw e
+    } finally {
+      watchdog.interrupt()
+    }
+  }
 
   fun close() {
     try {
@@ -323,8 +398,18 @@ class AdbManager(private val context: Context) {
     private const val DEX_PATH = "/data/local/tmp/clipboard-agent.dex"
     private const val LOG_PATH = "/data/local/tmp/clip.log"
     /** Deadline for EACH bounded phase of [connect] (raw TCP preflight, then the ADB
-     *  handshake wait) — not their sum. Matches the original 0.8.0 bound (issue #26). */
+     *  handshake wait) — not their sum. Matches the original 0.8.0 bound (issue #26). Also the
+     *  raw-TCP preflight deadline for [pair]. */
     private const val CONNECT_TIMEOUT_MS = 12_000L
+    /** Default [bounded] deadline for [runShort] — plenty for a short shell command's
+     *  exec-stream round trip. */
+    private const val EXEC_TIMEOUT_MS = 15_000L
+    /** [bounded] deadline for [launchDaemon]'s `runShort`, which legitimately blocks up to ~8s
+     *  polling for the daemon's `listening` line on top of ordinary exec-stream latency. */
+    private const val LAUNCH_TIMEOUT_MS = 25_000L
+    /** [bounded] deadline for each [pushAsset] phase. The dex is ~20 KB, so this is pure
+     *  headroom against a stalled stream, not a realistic transfer time. */
+    private const val PUSH_TIMEOUT_MS = 20_000L
     /** `app_process --nice-name` of the detached daemon (= its whole post-nice-name cmdline;
      *  its comm stays `main` on One UI, so match by cmdline, never `pgrep -x`). */
     const val NICE_NAME = "linktomac_clip"

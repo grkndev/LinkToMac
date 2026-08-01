@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.PowerManager
 import android.provider.Settings
 import expo.modules.interfaces.permissions.PermissionsStatus
@@ -16,6 +18,11 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import io.github.muntashirakon.adb.AdbPairingRequiredException
 import io.github.muntashirakon.adb.android.AdbMdns
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.android.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -38,6 +45,30 @@ class SelfAdbModule : Module() {
 
   private val appCtx: Context get() = appContext.reactContext!!.applicationContext
   private val adb by lazy { AdbManager(appCtx) }
+
+  /**
+   * Every ADB-touching `AsyncFunction` below runs on this dedicated single-thread queue, NEVER
+   * Expo's shared `expo.modules.AsyncFunctionQueue` (the one HandlerThread every module's
+   * default-queue `AsyncFunction`s share, including expo-secure-store's). `AdbManager` calls can
+   * legitimately block for seconds (mDNS discover, exec-stream I/O now bounded only by
+   * [AdbManager]'s watchdog, not instant) — on the shared queue, a stall there stalls EVERY other
+   * module's AsyncFunction in the app for the same window. That's what turned a stuck
+   * `autoStart()` into a stuck "Connecting to Mac…" screen: `pairing-context.tsx`'s SecureStore
+   * read for `pairing` was queued behind it, and `_layout.tsx`'s Booting gate is `boot.state ===
+   * "booting" || pairing === undefined` — the JS-side 20s timeout only clears the first half.
+   * Single-threaded on purpose: it preserves the existing serialization of the one shared [adb]
+   * instance (interleaved connect/deploy was issue #5's failure class) while isolating that
+   * serialization from the rest of the app. [cancelAdb] deliberately does NOT run here — it must
+   * be reachable while this queue is occupied.
+   */
+  private val adbThread by lazy { HandlerThread("SelfAdbQueue").apply { start() } }
+  private val adbQueue by lazy {
+    CoroutineScope(
+      Handler(adbThread.looper).asCoroutineDispatcher() +
+        SupervisorJob() +
+        CoroutineName("SelfAdbQueue")
+    )
+  }
 
   private companion object {
     // Cap the daemon-log read so a single adb transfer never exceeds libadb's
@@ -85,14 +116,14 @@ class SelfAdbModule : Module() {
 
     AsyncFunction("isPaired") {
       adb.isPaired()
-    }
+    }.runOnQueue(adbQueue)
 
     AsyncFunction("pair") { host: String, port: Int, code: String ->
       log("pairing $host:$port")
       val ok = adb.pair(host, port, code)
       if (!ok) throw Exception("pair failed (wrong code / port / not in pairing mode)")
       "paired"
-    }
+    }.runOnQueue(adbQueue)
 
     AsyncFunction("connect") { host: String, port: Int ->
       status("connecting", "idle")
@@ -103,13 +134,13 @@ class SelfAdbModule : Module() {
       val fresh = adb.connect(host, port)
       status("connected", "idle")
       if (fresh) "connected" else "already connected"
-    }
+    }.runOnQueue(adbQueue)
 
     AsyncFunction("deployAndRun") { clipPort: Int ->
       deploy(clipPort)
       status("connected", "running")
       "running"
-    }
+    }.runOnQueue(adbQueue)
 
     // ---- Auto-start orchestration (no manual host/port, no taps) ------------
 
@@ -222,7 +253,7 @@ class SelfAdbModule : Module() {
         // path was a needless open surface). Mirrors readDaemonLog's try/finally.
         if (canToggle) setWifiDebug(false)
       }
-    }
+    }.runOnQueue(adbQueue)
 
     /**
      * First-time pairing, fully discovered. The system "Pair device with pairing
@@ -254,6 +285,20 @@ class SelfAdbModule : Module() {
       deploy(clipPort)
       status("connected", "running")
       "ready"
+    }.runOnQueue(adbQueue)
+
+    /**
+     * Force-wake whatever the ADB queue is currently stuck in (`disconnect()` closes the socket
+     * and interrupts+joins the connection thread — see [AdbManager.bounded]) so a wedged
+     * `autoStart`/`pairAuto`/etc. settles almost immediately instead of waiting out its own
+     * internal watchdog. Deliberately stays on the DEFAULT queue (not `.runOnQueue(adbQueue)`) —
+     * it exists specifically to be reachable while [adbQueue] is occupied. `useClipBoot`'s
+     * `refresh()` calls this right before routing a timed-out `autoStart` to the reconnect
+     * screen, so "Try Again" no longer depends on the stalled native call ever returning on its
+     * own.
+     */
+    AsyncFunction("cancelAdb") {
+      adb.disconnect()
     }
 
     AsyncFunction("hasSecureSettings") {
@@ -558,6 +603,27 @@ class SelfAdbModule : Module() {
       ClipForegroundService.instance?.startSmsMirroring()
     }
 
+    // ---- Reply to messages (Mac -> phone -> real SMS) ------------------------
+
+    /** Whether we hold SEND_SMS — separate from [hasSmsAccess]'s READ_SMS/READ_CONTACTS since
+     *  it's requested lazily (on the first reply attempt), not bundled with mirroring setup. */
+    AsyncFunction("hasSendSmsAccess") {
+      appCtx.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Request SEND_SMS at runtime; resolves whether replies can now be sent. Surfaced from the
+     *  "Grant SMS Send Access" row shown after a reply fails for lack of permission. */
+    AsyncFunction("requestSendSmsAccess") { promise: Promise ->
+      val manager = appContext.permissions
+      if (manager == null) {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+      manager.askForPermissions({ result ->
+        promise.resolve(result[Manifest.permission.SEND_SMS]?.status == PermissionsStatus.GRANTED)
+      }, Manifest.permission.SEND_SMS)
+    }
+
     AsyncFunction("hasIgnoreBatteryOptimizations") {
       val pm = appCtx.getSystemService(Context.POWER_SERVICE) as PowerManager
       pm.isIgnoringBatteryOptimizations(appCtx.packageName)
@@ -647,14 +713,14 @@ class SelfAdbModule : Module() {
       } finally {
         if (toggled) setWifiDebug(false)
       }
-    }
+    }.runOnQueue(adbQueue)
 
     AsyncFunction("killDaemon") {
       val r = adb.killDaemon(ClipForegroundService.getClipPort(appCtx))
       ClipForegroundService.stop(appCtx)
       status("connected", "stopped")
       r
-    }
+    }.runOnQueue(adbQueue)
 
     /**
      * Kill the running daemon and redeploy the bundled dex. The whole point is to load a **rebuilt**
@@ -679,14 +745,14 @@ class SelfAdbModule : Module() {
       } finally {
         if (toggled) setWifiDebug(false)
       }
-    }
+    }.runOnQueue(adbQueue)
 
     // Stop the foreground service (ends clipboard sync). The daemon keeps running.
     AsyncFunction("stop") {
       ClipForegroundService.stop(appCtx)
       adb.close()
       status("idle", "stopped")
-    }
+    }.runOnQueue(adbQueue)
 
     OnDestroy {
       // App going away: detach UI callbacks but LEAVE the service (and relay) running.
@@ -696,6 +762,11 @@ class SelfAdbModule : Module() {
       ClipBus.onLog = null
       ClipBus.onRelay = null
       adb.close()
+      // Mirrors adb.close() above: this module instance is done, so tear down its dedicated ADB
+      // thread too. quitSafely() just stops the looper (non-blocking) — no join, so this can't
+      // wedge OnDestroy the way an unbounded libadb call could.
+      adbQueue.cancel()
+      adbThread.quitSafely()
     }
   }
 
