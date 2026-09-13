@@ -153,6 +153,18 @@ class SelfAdbModule : Module() {
      *                     self-enable it yet -> PairScreen reconnect mode
      */
     AsyncFunction("autoStart") { clipPort: Int ->
+      // 0. Bring the foreground service up FIRST, before any ADB work touches anything.
+      //    It owns everything that does NOT need ADB — the relay/LAN link, remote lock,
+      //    battery telemetry, notification + SMS mirroring, Mac->phone clipboard — so none
+      //    of that may depend on whether the ADB path below succeeds. It used to be started
+      //    only on the two ADB *success* paths (fast-path attach, and the end of deploy()),
+      //    which was invisible while the UI hard-gated the whole app on ADB: you could never
+      //    reach the app with ADB down. Now that ADB is a capability rather than a gate, that
+      //    coupling would leave a phone with unreachable Wireless Debugging (Mobile Hotspot,
+      //    or adbd having dropped key trust) with no link to the Mac at all.
+      //    onStartCommand is idempotent and reconnects from the persisted config.
+      ClipForegroundService.start(appCtx, clipPort)
+
       // 1. Daemon still alive from a previous run? Attach, touch no adb. Only when we
       //    still hold the secret it was launched with — alive + no persisted secret means
       //    our data was cleared since its launch, the bridge could never authenticate, so
@@ -348,6 +360,10 @@ class SelfAdbModule : Module() {
         svc.applyRelayConfig(url, token, room, key, peerName, lanEnabled, lanPort, lanHost)
       } else {
         ClipForegroundService.saveConfig(appCtx, url, token, room, key, peerName, lanEnabled, lanPort, lanHost)
+        // Persisting alone isn't enough: nothing else is guaranteed to start the service, and a
+        // fresh QR pair must connect NOW rather than at the next app launch. (autoStart also
+        // starts it, but it can be mid-flight or have failed — this path must not depend on it.)
+        ClipForegroundService.start(appCtx, ClipForegroundService.getClipPort(appCtx))
       }
     }
 

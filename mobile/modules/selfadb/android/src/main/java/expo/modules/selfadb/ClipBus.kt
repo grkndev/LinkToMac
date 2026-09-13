@@ -103,4 +103,8 @@ object ClipBus {
     lastRelay = payload
     onRelay?.invoke(payload)
   }
+
+  /** Whether the Mac was last seen joined on the live link. Read by the manual-capture
+   *  activities to tell the user whether their tap reached the Mac or only queued. */
+  fun peerOnline(): Boolean = lastRelay?.get("peerOnline") == true
 }

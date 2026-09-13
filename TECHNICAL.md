@@ -384,10 +384,38 @@ the pair for good. Three contracts around it (all verified on-device):
   128-bit service UUID derived from the pairing room (see §8). Balanced advertise mode, medium
   TX power. Presence *is* the entire signal — there's no connection or data exchange.
 
-### 3.6 Boot orchestration (`SelfAdbModule.autoStart` + `use-clip-boot.ts`)
+### 3.6 Capture bring-up (`SelfAdbModule.autoStart` + `use-clip-boot.ts`)
 
-One `autoStart(clipPort)` call drives the whole bring-up and returns a state string the JS
-root layout gates a screen on:
+**ADB is a capability, not a boot phase.** The self-ADB pipeline buys exactly one thing:
+*automatic* clipboard capture, i.e. background clipboard **reads**, which AOSP focus-gates
+(§3.3). Nothing else in the app needs it — the relay/LAN link, remote lock, telemetry,
+notification + SMS mirroring, and even Mac→phone clipboard and images all run without it. So
+`autoStart` runs in the background and its result is *reported*, never routed on: the only route
+gate left in `_layout.tsx` is the Mac (relay) pairing. `use-clip-boot.ts` maps the native string
+onto a `CaptureState` (`starting` | `live` | `needs-setup` | `pairing` | `error`) plus a
+`CaptureSetupReason` (`never-paired` | `debugging-unreachable`). A degraded state is reported in
+exactly one place — the Settings ▸ "Automatic capture" row, which opens `adb-setup`, now an
+ordinary sub-screen with a header and a working back button. No banner and nothing on Home:
+capture being off doesn't warrant interrupting the main screen.
+
+This matters because the old full-screen gate was unescapable exactly where ADB is impossible:
+Wireless Debugging needs a Wi-Fi *client* connection, so on Mobile Hotspot it can never come up
+(issue #29), and adbd silently drops key trust across a Samsung reboot — which `isPaired()`, a
+local key-file check, can't see (§3.1). A working phone↔Mac link was being held hostage by both.
+
+When automatic capture is down, capture degrades rather than stopping: `ProcessTextActivity`
+(the text-selection toolbar entry) and `ClipboardReadActivity` (the sticky notification's "Send
+clipboard" action) both cost one tap and need no ADB, no Wi-Fi and no permission. Every path —
+daemon or manual — funnels through `ClipForegroundService.ingestClip(text, ts, source)`, which
+owns echo suppression, the clip history and the `sendPaused` gate (§6).
+
+`autoStart` therefore starts the **foreground service first**, before touching ADB at all
+(and `setRelay` starts it too when the service is down, so a fresh QR pair connects immediately
+rather than at the next launch). Previously the FGS was started only on the two ADB *success*
+paths, which was invisible behind the old gate and became a total connection failure the moment
+the gate was removed.
+
+One `autoStart(clipPort)` call still drives the whole bring-up and returns a state string:
 
 ```
 poll daemonAlive (≤2.4s, issue #29) ─ alive + secret known + not flapping ─► "ready" (no ADB)
@@ -413,11 +441,9 @@ most on **Mobile Hotspot**, where losing the race is unrecoverable: Wireless Deb
 come up while the phone is a Wi-Fi *access point* rather than a *client*, so falling into the
 ADB path there used to strand the user on a Reconnect screen forever even though the FGS-owned
 relay/LAN link, remote lock, and battery/notification/SMS mirroring were all working fine behind
-it. The root layout now treats `need-connect`/`error` as **non-blocking** whenever
-`useRelayStatus()`'s `peerOnline` is true (`_layout.tsx`'s `adbBlocked`/`adbBypassed`): the app
-renders normally with a dismissible `ReconnectBanner` instead of the full-screen `adb-setup`
-gate. Only `need-pair` (and the in-flight `pairing` state) stays a hard gate — nothing works
-before that first pairing.
+it. That whole class of dead end is gone: the root layout no longer gates on ADB **at all** (its
+only gate is the Mac pairing), so every capture state renders the app normally. See "Capture
+bring-up" above.
 
 The JS hook (`useClipBoot`) wraps the native call in a **20 s timeout** to flip the UI even
 though the native call can (legitimately) still be running. **`adb.connect()` itself is bounded
@@ -482,7 +508,7 @@ plain `IOException` subtype, so existing `catch (Exception)` call sites need no 
 ADB-touching call that deliberately stays on the *default* Expo queue (not `adbQueue`) — its
 whole point is to be reachable while `adbQueue` is occupied. It just calls `adb.disconnect()`,
 the same force-wake `bounded()`'s watchdog uses. `use-clip-boot.ts`'s `refresh()` calls it in the
-`TimeoutError` branch, right after routing to `need-connect`, so the stuck native call settles
+`TimeoutError` branch, right after landing on `needs-setup`/`debugging-unreachable`, so the stuck native call settles
 within milliseconds of the JS timeout instead of however long is left on its own internal bound.
 
 ### 3.7 The JS ↔ native seam (`ClipBus.kt`)
@@ -718,19 +744,37 @@ unpair.
 1. The user copies. The system fires `dispatchPrimaryClipChanged` into `ClipboardAgent`'s
    proxy binder.
 2. The agent reads the clip and emits `{"type":"clip", …}` over localhost to `ClipBridge`.
-3. The foreground service checks it isn't the echo of its own write, records history, and
-   (unless `sendPaused`) calls `RelayClient.sendClip`.
+3. `ClipForegroundService.ingestClip(text, ts, DAEMON)` checks it isn't the echo of its own
+   write, records history, and (unless `sendPaused`) calls `ConnectionManager.sendClip`.
 4. `ClipCodec.encode` **encrypts** (ChaCha20-Poly1305) → `{ t:"clip", nonce, ct }` → relay → Mac.
 5. The Mac **decrypts** `ct`, stamps `lastChangeCount`, and writes `NSPasteboard`.
+
+Steps 1–2 are the **only** part that needs ADB, and they're the only reason the shell daemon
+exists. When it's gone, steps 3–5 are reached through a manual source instead — `ClipSource.MANUAL`,
+from either `ProcessTextActivity` (the text-selection toolbar entry; the text arrives in
+`EXTRA_PROCESS_TEXT`, so the clipboard is never touched and no focus is needed) or
+`ClipboardReadActivity` (the sticky notification's "Send clipboard" action; a real translucent
+window so `clipboardAccessAllowed`'s `isUidFocused` check passes, read in `onWindowFocusChanged`).
+Both hand off via `ClipForegroundService.submitClip`, so **`ingestClip` is the single funnel**
+every capture path goes through and no source can skip echo suppression or the history. `MANUAL`
+deliberately bypasses `sendPaused`: that switch turns off *automatic* forwarding, and an explicit
+tap on "send this" isn't what the user disabled.
 
 **Mac → Phone (copy on macOS):**
 
 1. `PasteboardWatcher` poll sees a new `changeCount`, reads the string.
 2. `RelayClient.sendClip` → `{ t:"clip", … }` → relay → phone.
-3. The Android service stamps the text into its recent-writes map, writes it through the
-   bridge → the daemon's `setPrimaryClip`. The agent's resulting change event is swallowed via
-   `lastSeen`, and the service's own `onClip` is swallowed by the recent-writes stamp —
-   **double echo suppression** because the write traverses two echo-producing boundaries.
+3. `writeRemoteText` stamps the text into the recent-writes map, then `putOnClipboard` writes
+   it: through the bridge → the daemon's `setPrimaryClip` while the bridge is up, else **directly**
+   via `ClipboardManager.setPrimaryClip`. Background clipboard *writes* are allowed — only reads
+   are focus-gated — which is the same property `applyFile` already relied on for images. Before
+   that fallback existed, a dead daemon made this whole direction a silent no-op while the log
+   still claimed success, so ADB dying took Mac→phone down with it despite it never needing ADB.
+   The two paths log distinctly (`clip -> clipboard via daemon` / `... direct`) so the direct one
+   can be confirmed on-device and the daemon branch eventually dropped.
+   On the daemon path the agent's resulting change event is swallowed via `lastSeen`, and the
+   service's own `onClip` is swallowed by the recent-writes stamp — **double echo suppression**
+   because the write traverses two echo-producing boundaries.
 
 Loop prevention is **per-boundary echo stamping** (not the version-vector/seq scheme sketched
 in `workflow.md` — the implementation uses the simpler stamp because the relay never echoes to

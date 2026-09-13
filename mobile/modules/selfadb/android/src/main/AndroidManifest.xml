@@ -105,6 +105,58 @@
     </provider>
 
     <!--
+      Manual clipboard capture — the ADB-free half of the pipeline. The shell daemon is the only
+      thing that can see a copy on its own (background clipboard READS are focus-gated by
+      AOSP's ClipboardService), and it needs ADB, which needs Wireless Debugging, which needs
+      Wi-Fi. These two activities need none of that, so capture degrades to one tap instead of
+      stopping when the daemon is gone.
+
+      Neither declares android:label on purpose: without one they inherit the application label,
+      which is per-variant ("LinkToMac (Dev)" vs "Link to Mac"), so a dev and a release install
+      are told apart in the text-selection toolbar without this module knowing which variant it
+      was built into.
+    -->
+
+    <!--
+      Text-selection toolbar entry. The selection arrives in EXTRA_PROCESS_TEXT, so the
+      clipboard is never touched and no window focus is needed -> NoDisplay is right here.
+    -->
+    <activity
+      android:name=".ProcessTextActivity"
+      android:theme="@android:style/Theme.NoDisplay"
+      android:taskAffinity=""
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.PROCESS_TEXT" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="text/plain" />
+      </intent-filter>
+    </activity>
+
+    <!--
+      Reads the clipboard for the notification's "Send clipboard" action. Needs a REAL window:
+      clipboardAccessAllowed() checks mWm.isUidFocused(uid), and a NoDisplay activity is never
+      given one, so getPrimaryClip() would return null every time. The Invisible theme is a real
+      window that paints nothing and animates nothing. Not exported — only our own notification
+      launches it.
+
+      `taskAffinity=""` is load-bearing: with the default affinity this activity belongs to the
+      APP's task, so FLAG_ACTIVITY_NEW_TASK brings that whole task forward and starts on top of
+      it — the user taps "Send clipboard" and the app visibly opens behind the transparent
+      window, then stays open. An empty affinity gives it a task of its own, so the app is never
+      touched and the system returns to whatever was in front once it finishes.
+    -->
+    <activity
+      android:name=".ClipboardReadActivity"
+      android:theme="@style/Theme.LinkToMac.Invisible"
+      android:taskAffinity=""
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:exported="false" />
+
+    <!--
       Notification mirroring: a NotificationListenerService that captures every posted/removed
       notification and forwards it to the Mac. `BIND_NOTIFICATION_LISTENER_SERVICE` + the
       service intent-filter are how the system recognises it; the user must still grant

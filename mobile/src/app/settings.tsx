@@ -9,9 +9,20 @@ import { M3Screen } from "@/components/m3-screen";
 import { Spacing } from "@/constants/theme";
 import { usePairing } from "@/features/pairing/pairing-context";
 import SelfAdb from "@/features/selfadb/client";
+import { useClipBootContext } from "@/features/selfadb/clip-boot-context";
+import type { CaptureState } from "@/features/selfadb/use-clip-boot";
 import { usePermissionSettings } from "@/features/selfadb/use-permission-settings";
 import { Icon, RNHostView } from "@expo/ui/jetpack-compose";
 import { View } from "react-native";
+
+/** Row hint per capture state — the self-ADB pipeline's health, reported not gated on. */
+const CAPTURE_HINT: Record<CaptureState, string> = {
+  live: "On. Copies on this phone reach your Mac without a tap.",
+  starting: "Checking…",
+  pairing: "Setting up…",
+  "needs-setup": "Off. Set it up to send copies without a tap.",
+  error: "Off. Something went wrong — tap for details.",
+};
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -19,6 +30,7 @@ export default function SettingsScreen() {
   const colors = useM3Colors();
   const icons = useIcons();
   const [confirmingUnpair, setConfirmingUnpair] = useState(false);
+  const capture = useClipBootContext();
   const {
     smsMirrorOn,
     toggleSmsMirror,
@@ -94,6 +106,20 @@ export default function SettingsScreen() {
             hint="Copied images are sent to your Mac's clipboard. You'll still receive the Mac's images when off."
             value={sendImagesOn}
             onValueChange={toggleSendImages}
+          />
+          <ActionRow
+            colors={colors}
+            icon={icons.clipboard}
+            label="Automatic capture"
+            hint={CAPTURE_HINT[capture.state]}
+            onPress={() => router.push("/adb-setup")}
+            trailing={
+              <Icon
+                source={icons.chevronRight}
+                size={24}
+                tint={colors.onSurfaceVariant}
+              />
+            }
           />
           <SwitchRow
             colors={colors}

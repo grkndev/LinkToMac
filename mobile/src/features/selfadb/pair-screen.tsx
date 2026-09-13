@@ -12,8 +12,10 @@ import type { ClipBoot } from '@/features/selfadb/use-clip-boot';
 const CODE_LENGTH = 6;
 
 /**
- * First-run / reconnect gate. Shown by the root layout whenever the pipeline
- * isn't running yet. Two modes derived from the boot state:
+ * Setup screen for *automatic* clipboard capture (self-ADB -> shell-UID daemon). Reachable from
+ * Settings and from the capture banner; never a gate — see the routing note in app/_layout.tsx.
+ * Three modes derived from the capture state:
+ *   - live:      the daemon is up, nothing to do
  *   - pair:      never paired -> collect the 6-digit code, then pairAuto()
  *   - reconnect: paired but wireless debugging is off and we can't self-enable
  *                it yet -> ask the user to turn it back on, then retry
@@ -22,7 +24,12 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
   const theme = useTheme();
   const [code, setCode] = useState('');
 
-  const mode = boot.state === 'need-pair' || boot.state === 'pairing' ? 'pair' : 'reconnect';
+  const mode =
+    boot.state === 'live'
+      ? 'live'
+      : boot.state === 'pairing' || boot.reason === 'never-paired'
+        ? 'pair'
+        : 'reconnect';
   // In reconnect mode, `boot.refreshing` covers both the initial auto-retry-on-foreground
   // and a manual Try Again tap — without it the button looked dead for its whole in-flight
   // window (up to 20s) with zero feedback (issue #30).
@@ -38,17 +45,24 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
       <SafeAreaView style={styles.safe}>
         <View style={styles.hero}>
           <ThemedText type="title" style={styles.title}>
-            {mode === 'pair' ? 'Connect to Mac' : 'Reconnect'}
+            {mode === 'live' ? 'Capture is on' : mode === 'pair' ? 'Capture setup' : 'Reconnect'}
           </ThemedText>
           <ThemedText type="default" themeColor="textSecondary" style={styles.subtitle}>
-            {mode === 'pair'
-              ? 'Setup is a one-time thing. Enter the pairing code and we’ll handle the rest.'
-              : 'Turn Wireless debugging back on and the connection will be restored automatically.'}
+            {mode === 'live'
+              ? 'Anything you copy on this phone reaches your Mac on its own.'
+              : mode === 'pair'
+                ? 'Setup is a one-time thing. Enter the pairing code and we’ll handle the rest.'
+                : 'Turn Wireless debugging back on and capture will be restored automatically.'}
           </ThemedText>
         </View>
 
         <ThemedView type="backgroundElement" style={styles.card}>
-          {mode === 'pair' ? (
+          {mode === 'live' ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              Everything else — the Mac link, remote lock, battery, notification and message
+              mirroring — runs without this and keeps working if it ever drops.
+            </ThemedText>
+          ) : mode === 'pair' ? (
             <>
               <Step n={1} text="Turn on Wireless debugging" />
               <Step n={2} text="Tap “Pair device with pairing code”" />
@@ -73,9 +87,11 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
             <Step n={1} text="Turn on Wireless debugging in Developer options" />
           )}
 
-          <Pressable onPress={openSettings} style={styles.linkBtn} disabled={busy}>
-            <ThemedText type="linkPrimary">Open Developer Settings</ThemedText>
-          </Pressable>
+          {mode !== 'live' ? (
+            <Pressable onPress={openSettings} style={styles.linkBtn} disabled={busy}>
+              <ThemedText type="linkPrimary">Open Developer Settings</ThemedText>
+            </Pressable>
+          ) : null}
         </ThemedView>
 
         {boot.error ? (
@@ -84,22 +100,24 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
           </ThemedText>
         ) : null}
 
-        <Pressable
-          onPress={() => (mode === 'pair' ? boot.pair(code) : boot.refresh())}
-          disabled={mode === 'pair' ? !canSubmit : busy}
-          style={[
-            styles.primaryBtn,
-            { backgroundColor: theme.text },
-            (mode === 'pair' ? !canSubmit : busy) && styles.primaryBtnDisabled,
-          ]}>
-          {busy ? (
-            <ActivityIndicator color={theme.background} />
-          ) : (
-            <ThemedText type="default" style={[styles.primaryLabel, { color: theme.background }]}>
-              {mode === 'pair' ? 'Pair' : 'Try Again'}
-            </ThemedText>
-          )}
-        </Pressable>
+        {mode !== 'live' ? (
+          <Pressable
+            onPress={() => (mode === 'pair' ? boot.pair(code) : boot.refresh())}
+            disabled={mode === 'pair' ? !canSubmit : busy}
+            style={[
+              styles.primaryBtn,
+              { backgroundColor: theme.text },
+              (mode === 'pair' ? !canSubmit : busy) && styles.primaryBtnDisabled,
+            ]}>
+            {busy ? (
+              <ActivityIndicator color={theme.background} />
+            ) : (
+              <ThemedText type="default" style={[styles.primaryLabel, { color: theme.background }]}>
+                {mode === 'pair' ? 'Pair' : 'Try Again'}
+              </ThemedText>
+            )}
+          </Pressable>
+        ) : null}
       </SafeAreaView>
     </ThemedView>
   );

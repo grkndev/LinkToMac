@@ -65,6 +65,9 @@ class ClipBridge(
           o.flush()
         }
         out = o
+        // A fresh outage after a good connection deserves an immediate line again.
+        lastRetryLogAt = 0L
+        suppressedRetries = 0
         onLog("bridge connected :$port")
         val r = BufferedReader(InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8))
         var line: String? = r.readLine()
@@ -73,7 +76,7 @@ class ClipBridge(
           line = r.readLine()
         }
       } catch (e: Exception) {
-        if (running && connectedAt == 0L) onLog("bridge retry (${e.message})")
+        if (running && connectedAt == 0L) logRetry(e.message)
       } finally {
         // Every exit path (clean EOF, IOException, stop()) drops the fd — the old code
         // leaked the socket on an abnormal read error.
@@ -111,6 +114,28 @@ class ClipBridge(
         break
       }
     }
+  }
+
+  /** When the last "bridge retry" line was emitted; 0 = none since the last good connection. */
+  @Volatile private var lastRetryLogAt = 0L
+  /** Failed connects folded into the next line, so a quiet log still shows it kept trying. */
+  @Volatile private var suppressedRetries = 0
+
+  /**
+   * Rate-limited "can't reach the daemon" line. An absent daemon is now an ordinary, indefinite
+   * state — self-ADB is optional, so a phone that never paired (or whose adbd dropped key trust)
+   * sits here forever — and the 3 s reconnect cadence would bury every other line in the Logs
+   * screen. First failure logs immediately; after that, at most one line per
+   * [RETRY_LOG_INTERVAL_MS], carrying the count it swallowed.
+   */
+  private fun logRetry(message: String?) {
+    suppressedRetries++
+    val now = System.currentTimeMillis()
+    if (lastRetryLogAt != 0L && now - lastRetryLogAt < RETRY_LOG_INTERVAL_MS) return
+    val folded = if (suppressedRetries > 1) " x$suppressedRetries" else ""
+    onLog("bridge retry$folded ($message)")
+    lastRetryLogAt = now
+    suppressedRetries = 0
   }
 
   private fun handle(line: String) {
@@ -202,5 +227,9 @@ class ClipBridge(
     const val FLAP_THRESHOLD = 3
     /** Retry interval once flapping is confirmed (vs. the normal 3 s cap). */
     const val FLAP_BACKOFF_MS = 15_000L
+
+    /** How often an ongoing "daemon unreachable" outage may re-log. The retry cadence itself
+     *  stays at ~3 s; only the logging is throttled. */
+    const val RETRY_LOG_INTERVAL_MS = 60_000L
   }
 }

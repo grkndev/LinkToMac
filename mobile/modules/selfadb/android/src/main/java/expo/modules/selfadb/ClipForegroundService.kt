@@ -16,6 +16,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
@@ -30,6 +31,19 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
+
+/**
+ * What caught a clip. The shell daemon is the only source that sees a copy on its own; every
+ * other one costs the user a tap but needs no ADB, no Wi-Fi and no special permission — so a
+ * dead daemon degrades capture instead of ending it.
+ */
+enum class ClipSource(val label: String) {
+  /** The shell-UID daemon's clip-changed listener (self-ADB pipeline). */
+  DAEMON("daemon"),
+
+  /** An explicit user action: the text-selection toolbar entry, or the notification action. */
+  MANUAL("manual"),
+}
 
 /**
  * Hosts the clipboard pipeline so it survives the app being swiped away.
@@ -143,15 +157,7 @@ class ClipForegroundService : Service() {
       bridge = ClipBridge(
         port = port,
         secret = daemonSecret,
-        onClip = { text, ts ->
-          if (consumeEcho(text)) {
-            // echo of our own recent write -> swallow
-          } else {
-            ClipBus.log("clip: ${text.take(60)}")
-            ClipBus.clip(text, ts)
-            if (!sendPaused) conn?.sendClip(text)
-          }
-        },
+        onClip = { text, ts -> ingestClip(text, ts, ClipSource.DAEMON) },
         onImage = { mime, bytes, _ -> captureImage(mime, bytes) },
         onLog = { ClipBus.log(it) }
       ).also { it.start() }
@@ -163,12 +169,36 @@ class ClipForegroundService : Service() {
     maybeStartAdvertising()
     // And the SMS mirror (live observer), if enabled + permitted. Backfill runs on the peer-online edge.
     maybeStartSmsMirroring()
+    // A manual capture rides in on the same intent, handled only after the setup above: the
+    // process may have been restarted by this very start, in which case `conn` was null until
+    // maybeStartConnection() ran. The ConnectionManager queues until a link joins, so an
+    // offline send still lands (PENDING_TTL_MS).
+    if (intent?.action == ACTION_SUBMIT_CLIP) {
+      intent.getStringExtra(EXTRA_TEXT)
+        ?.let { ingestClip(it, System.currentTimeMillis().toDouble(), ClipSource.MANUAL) }
+    }
     return START_STICKY
   }
 
-  fun write(text: String) {
-    bridge?.write(text)
+  /**
+   * Single funnel for every captured clip, whatever caught it. Echo suppression, the clip
+   * history and the outbound pause gate all live here so a new capture source can't
+   * accidentally bypass one of them.
+   */
+  private fun ingestClip(text: String, ts: Double, source: ClipSource) {
+    if (text.isEmpty()) return
+    if (consumeEcho(text)) return // echo of our own recent write -> swallow
+    ClipBus.log("clip [${source.label}]: ${text.take(60)}")
+    ClipBus.clip(text, ts)
+    // `sendPaused` gates *automatic* forwarding. A manual capture is an explicit tap on "send
+    // this", so it isn't what the user turned off.
+    if (source == ClipSource.MANUAL || !sendPaused) conn?.sendClip(text)
   }
+
+  /** JS-initiated write (the clipboard-history screen's "copy again"). Deliberately skips the
+   *  echo stamp [writeRemoteText] applies: this is an explicit user action, so letting a live
+   *  daemon carry it back to the Mac keeps both clipboards in step. */
+  fun write(text: String) = putOnClipboard(text)
 
   /** Whether the localhost bridge currently holds a live connection to the daemon. */
   fun isBridgeConnected(): Boolean = bridge?.isConnected() == true
@@ -284,10 +314,8 @@ class ClipForegroundService : Service() {
       lanPort = lanPort,
       lanHost = lanHost,
       onClipReceived = { text ->
-        stampWrite(text)
-        bridge?.write(text)
+        writeRemoteText(text)
         ClipBus.macClip(text, System.currentTimeMillis().toDouble())
-        ClipBus.log("clip -> clipboard (${text.length})")
       },
       onStatReceived = { json -> ClipBus.macStat(json) },
       onFileReceived = { bytes -> applyFile(bytes) },
@@ -311,6 +339,44 @@ class ClipForegroundService : Service() {
   // ---- File transfer (Mac -> phone clipboard image) -------------------------
   // Plaintext layout (byte-exact contract with the Mac's `FileFrame.payload`):
   //   u16 BE header-len ‖ header JSON utf8 ‖ raw image bytes.   Header v1: {"mime":"image/…"}.
+
+  /**
+   * Put text on the system clipboard, daemon-first with a direct fallback.
+   *
+   * The daemon write stays preferred while the bridge is up: it's the proven path, and the
+   * daemon is the one that re-reads the resulting change. When the daemon is gone we write
+   * through [ClipboardManager] ourselves — background clipboard *writes* are allowed (only
+   * reads are focus-gated), the same reasoning [applyFile] already relies on for images.
+   * Without the fallback a dead daemon made every inbound clip a silent no-op while the log
+   * still claimed success, so ADB dying took this direction down with it even though it never
+   * needed ADB.
+   *
+   * The two paths log distinctly on purpose: killing the daemon and watching for
+   * "clip -> clipboard direct" is how we confirm background *text* writes behave like the
+   * image write does. Once confirmed on-device the daemon branch can be dropped entirely.
+   */
+  private fun putOnClipboard(text: String) {
+    val b = bridge
+    if (b != null && b.isConnected()) {
+      b.write(text)
+      ClipBus.log("clip -> clipboard via daemon (${text.length})")
+      return
+    }
+    try {
+      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+      clipboard.setPrimaryClip(ClipData.newPlainText("Text", text))
+      ClipBus.log("clip -> clipboard direct (${text.length})")
+    } catch (e: Exception) {
+      ClipBus.log("clip -> clipboard failed (${e.message})")
+    }
+  }
+
+  /** A clip the Mac sent us. [stampWrite] first: a live daemon's clip-changed listener will
+   *  re-read this text and try to forward it straight back, and [consumeEcho] drops that. */
+  private fun writeRemoteText(text: String) {
+    stampWrite(text)
+    putOnClipboard(text)
+  }
 
   /** Write a received image to cache and put it on the system clipboard as a FileProvider URI.
    *  Goes through [ClipboardManager] directly (background clipboard *writes* are allowed; only
@@ -606,9 +672,34 @@ class ClipForegroundService : Service() {
       // adaptive icon, whose safe-zone padding made the bare mipmap render tiny in the bar.
       .setSmallIcon(R.drawable.ic_stat_link)
       .setOngoing(true)
+      .addAction(sendClipboardAction())
       .build()
   }
 
+  /**
+   * "Send clipboard" on the sticky notification — the manual capture path that stays available
+   * when the shell daemon is gone, and the only one that catches a *programmatic* copy (an
+   * in-app "Copy link" button leaves no selection for the text-selection toolbar to hang off).
+   *
+   * The PendingIntent targets the Activity directly on purpose: Android 12+ bans notification
+   * trampolines, so routing through a service or receiver to then launch the reader would be
+   * dropped. Reading the clipboard needs real window focus, which is why it's an Activity at
+   * all — see [ClipboardReadActivity].
+   */
+  private fun sendClipboardAction(): Notification.Action =
+    Notification.Action.Builder(
+      Icon.createWithResource(this, R.drawable.ic_stat_link),
+      "Send clipboard",
+      PendingIntent.getActivity(
+        this,
+        REQ_SEND_CLIPBOARD,
+        Intent(this, ClipboardReadActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      ),
+    ).build()
+
+  /** Whether the "grant SMS send access" alert has already been shown this process lifetime —
+   *  avoids re-notifying on every subsequent reply attempt while the permission stays denied. */
   @Volatile private var smsSendAlertShown = false
 
   /** Heads-up notification prompting the user to grant SEND_SMS, shown the first time a Mac
@@ -707,7 +798,26 @@ class ClipForegroundService : Service() {
     private const val CHANNEL_SMS_ALERT = "linktomac_sms_alert"
     private const val NOTIF_ID = 1001
     private const val SMS_ALERT_NOTIF_ID = 1002
+    /** PendingIntent request code for the notification's "Send clipboard" action. */
+    private const val REQ_SEND_CLIPBOARD = 1
     private const val EXTRA_PORT = "port"
+
+    /** Start-intent action carrying a manually captured clip (see [submitClip]). */
+    private const val ACTION_SUBMIT_CLIP = "expo.modules.selfadb.SUBMIT_CLIP"
+    private const val EXTRA_TEXT = "text"
+
+    /**
+     * Hand a manually captured clip to the service, starting it if the process came back
+     * without it. Always goes through a start-intent rather than [instance] so there is one
+     * code path whether or not the service is already up. Safe from an Activity: Android 12+
+     * only blocks FGS starts from the *background*, and every caller is on screen.
+     */
+    fun submitClip(ctx: Context, text: String) {
+      val intent = Intent(ctx, ClipForegroundService::class.java)
+        .setAction(ACTION_SUBMIT_CLIP)
+        .putExtra(EXTRA_TEXT, text)
+      ContextCompat.startForegroundService(ctx, intent)
+    }
     private const val PREFS = "linktomac_relay"
     // Separate prefs file: clearConfig() wipes PREFS on unpair, UI settings must survive that.
     private const val PREFS_UI = "linktomac_ui"
@@ -892,12 +1002,20 @@ class ClipForegroundService : Service() {
       ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
+    /**
+     * Bring the service up (idempotent — `onStartCommand` reconnects from the persisted
+     * config). Called on every app launch *before* any ADB work and again on a relay-config
+     * push, because everything this service owns except clipboard *capture* works without ADB.
+     */
     fun start(ctx: Context, port: Int) {
       val intent = Intent(ctx, ClipForegroundService::class.java).putExtra(EXTRA_PORT, port)
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        ctx.startForegroundService(intent)
-      } else {
-        ctx.startService(intent)
+      try {
+        ContextCompat.startForegroundService(ctx, intent)
+      } catch (e: Exception) {
+        // Android 12+ refuses an FGS start from the background. Every caller is on a
+        // foreground path, so this only fires in corner cases (the app dying mid-call) —
+        // log it instead of taking the process down; START_STICKY recovers on the next launch.
+        ClipBus.log("service start refused (${e.message})")
       }
     }
 

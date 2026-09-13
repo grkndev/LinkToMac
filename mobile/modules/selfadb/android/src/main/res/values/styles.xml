@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+  <!--
+    Theme for ClipboardReadActivity: a window that exists but shows nothing and animates
+    nothing. It needs to be a REAL window (AOSP's clipboardAccessAllowed() gates reads on
+    mWm.isUidFocused(uid), which a Theme.NoDisplay activity can never satisfy because it is
+    never given one), but the user should never notice it — they tapped "Send clipboard" from
+    a notification and should stay exactly where they were.
+
+    windowAnimationStyle=@null is the part that matters most: without it the empty task
+    animates in and out, which reads as "the app opened and closed".
+  -->
+  <style name="Theme.LinkToMac.Invisible" parent="@android:style/Theme.Translucent.NoTitleBar">
+    <item name="android:windowAnimationStyle">@null</item>
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:windowContentOverlay">@null</item>
+    <item name="android:windowIsTranslucent">true</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:backgroundDimEnabled">false</item>
+  </style>
+
+</resources>
