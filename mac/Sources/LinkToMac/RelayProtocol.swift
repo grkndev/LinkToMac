@@ -17,6 +17,10 @@ enum ClientMessage: Encodable {
     /// Encrypted file payload (Mac → phone clipboard image): plaintext is
     /// `u16 BE header-len ‖ header JSON ‖ raw bytes` inside the v2 envelope, AAD "file".
     case file(nonce: String, ct: String)
+    /// Encrypted SMS reply request (Mac → phone): plaintext is
+    /// `{"op":"send","corr":"…","addr":"…","body":"…"}`, AAD "sms" — same envelope inbound
+    /// `sms` batches/deltas use. The relay forwards it opaquely.
+    case sms(nonce: String, ct: String)
 
     private enum CodingKeys: String, CodingKey {
         case t, room, device, nonce, ct
@@ -43,6 +47,10 @@ enum ClientMessage: Encodable {
             try c.encode(ct, forKey: .ct)
         case let .file(nonce, ct):
             try c.encode("file", forKey: .t)
+            try c.encode(nonce, forKey: .nonce)
+            try c.encode(ct, forKey: .ct)
+        case let .sms(nonce, ct):
+            try c.encode("sms", forKey: .t)
             try c.encode(nonce, forKey: .nonce)
             try c.encode(ct, forKey: .ct)
         }

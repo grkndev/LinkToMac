@@ -151,6 +151,13 @@ struct FeaturePanel: View {
         m.body.isEmpty ? " " : (m.outgoing ? "You: \(m.body)" : m.body)
     }
 
+    /// A thread can be replied to only when every message in it shares one address — the SMS
+    /// store doesn't cleanly model group-thread participants today, so a mixed-address thread
+    /// (a group conversation) hides the composer rather than guessing recipients.
+    private func isOneToOne(_ convo: RelayClient.Conversation) -> Bool {
+        Set(convo.messages.map(\.addr)).filter { !$0.isEmpty }.count <= 1
+    }
+
     @ViewBuilder
     private func threadView(_ convo: RelayClient.Conversation) -> some View {
         let address = convo.id.hasPrefix("t") ? (convo.latest?.addr ?? "") : convo.id
@@ -200,6 +207,47 @@ struct FeaturePanel: View {
                     }
                 }
             }
+            if isOneToOne(convo) {
+                ReplyComposer(address: address) { body in
+                    client.sendReply(addr: address, body: body)
+                }
+            }
+        }
+    }
+
+    /// Inline text field + send button pinned under a 1:1 thread, iMessage-style.
+    private struct ReplyComposer: View {
+        let address: String
+        let onSend: (String) -> Void
+        @State private var draft = ""
+
+        var body: some View {
+            HStack(spacing: 8) {
+                TextField("Text Message", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(M3.bodyLarge)
+                    .foregroundStyle(M3.onSurface)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: M3.corLarge, style: .continuous).fill(M3.surfaceContainer))
+                    .onSubmit(send)
+                Button(action: send) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                          ? M3.onSurfaceVariant : M3.primary)
+                }
+                .buttonStyle(.plain)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || address.isEmpty)
+            }
+        }
+
+        private func send() {
+            let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, !address.isEmpty else { return }
+            onSend(text)
+            draft = ""
         }
     }
 
@@ -228,9 +276,19 @@ struct FeaturePanel: View {
                             RoundedRectangle(cornerRadius: M3.corLarge, style: .continuous)
                                 .fill(message.outgoing ? M3.primaryContainer : M3.surfaceContainerHigh)
                         )
-                    Text(Self.timeFormatter.string(from: message.date))
-                        .font(.system(size: 11))
-                        .foregroundStyle(M3.onSurfaceVariant)
+                        .opacity(message.status == .sending ? 0.6 : 1)
+                    HStack(spacing: 4) {
+                        if message.status == .sending {
+                            Image(systemName: "clock").font(.system(size: 10))
+                            Text("Sending…").font(.system(size: 11))
+                        } else if case let .failed(reason) = message.status {
+                            Image(systemName: "exclamationmark.circle.fill").font(.system(size: 10))
+                            Text("Not delivered (\(reason))").font(.system(size: 11))
+                        } else {
+                            Text(Self.timeFormatter.string(from: message.date)).font(.system(size: 11))
+                        }
+                    }
+                    .foregroundStyle(message.status.isFailed ? M3.error : M3.onSurfaceVariant)
                 }
                 if !message.outgoing { Spacer(minLength: 48) }
             }

@@ -39,6 +39,9 @@ class LanClient(
   private val onStatReceived: (String) -> Unit,
   /** Decrypted `file` plaintext from the Mac (u16 header-len ‖ header JSON ‖ raw bytes). */
   private val onFileReceived: (ByteArray) -> Unit,
+  /** Decrypted `sms` JSON from the Mac — today only `{"op":"send",…}` reply requests arrive
+   *  inbound (batch/add are Mac-only shapes the phone never receives). */
+  private val onSmsReceived: (String) -> Unit,
   private val onStatus: (status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
   private val log: (String) -> Unit,
 ) {
@@ -247,6 +250,10 @@ class LanClient(
       "file" -> {
         val decoded = ClipCodec.decodeBytes(o.optString("nonce"), o.optString("ct"), key, "file")
         if (decoded != null) onFileReceived(decoded) else log("lan file decrypt failed")
+      }
+      "sms" -> {
+        val decoded = ClipCodec.decode(o.optString("nonce"), o.optString("ct"), key, "sms")
+        if (decoded != null) onSmsReceived(decoded) else log("lan sms decrypt failed")
       }
       "pong" -> {}
     }

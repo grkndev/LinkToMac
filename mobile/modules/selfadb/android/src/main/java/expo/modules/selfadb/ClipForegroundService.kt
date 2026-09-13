@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -290,6 +291,7 @@ class ClipForegroundService : Service() {
       },
       onStatReceived = { json -> ClipBus.macStat(json) },
       onFileReceived = { bytes -> applyFile(bytes) },
+      onSmsReceived = { json -> handleInboundSms(json) },
       onStatus = { transport, status, peerOnline, error, attempt ->
         ClipBus.relay(status, peerOnline, error, transport, attempt)
         updateNotification(peerOnline)
@@ -508,7 +510,29 @@ class ClipForegroundService : Service() {
   private fun maybeStartSmsMirroring() {
     if (sms != null) return
     if (!getSmsForwarding(this) || !hasSmsPermission()) return
-    sms = SmsMirror(this, send = { json -> sendSms(json) }, log = { ClipBus.log(it) }).also { it.start() }
+    sms = SmsMirror(
+      this,
+      send = { json -> sendSms(json) },
+      log = { ClipBus.log(it) },
+      onSendPermissionDenied = { postSmsSendPermissionAlert() },
+    ).also { it.start() }
+  }
+
+  /** A reply requested from the Mac, routed here from the relay/LAN inbound `sms` dispatch. */
+  fun receiveSmsReply(addr: String, body: String, corr: String) {
+    sms?.sendReply(addr, body, corr)
+  }
+
+  /** Parse a decrypted inbound `sms` payload from the Mac. The only inbound shape the phone
+   *  receives is `{"op":"send","corr","addr","body"}` (batch/add are Mac-only). */
+  private fun handleInboundSms(json: String) {
+    val o = try { JSONObject(json) } catch (e: Exception) { return }
+    if (o.optString("op") != "send") return
+    val corr = o.optString("corr")
+    val addr = o.optString("addr")
+    val body = o.optString("body")
+    if (corr.isEmpty() || addr.isEmpty() || body.isEmpty()) return
+    receiveSmsReply(addr, body, corr)
   }
 
   /** Public hook for the module after the user grants SMS access from Settings — starts the
@@ -585,6 +609,40 @@ class ClipForegroundService : Service() {
       .build()
   }
 
+  @Volatile private var smsSendAlertShown = false
+
+  /** Heads-up notification prompting the user to grant SEND_SMS, shown the first time a Mac
+   *  reply is blocked by the missing permission (requesting it needs an Activity, which this
+   *  background service doesn't have — tapping the notification opens the app instead). */
+  private fun postSmsSendPermissionAlert() {
+    if (smsSendAlertShown) return
+    smsSendAlertShown = true
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      nm.createNotificationChannel(
+        NotificationChannel(CHANNEL_SMS_ALERT, "Message replies", NotificationManager.IMPORTANCE_HIGH)
+      )
+    }
+    val launchIntent = (packageManager.getLaunchIntentForPackage(packageName) ?: Intent())
+      .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    val contentIntent = PendingIntent.getActivity(
+      this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(this, CHANNEL_SMS_ALERT)
+    } else {
+      @Suppress("DEPRECATION") Notification.Builder(this)
+    }
+    val notification = builder
+      .setContentTitle("Reply couldn't be sent")
+      .setContentText("Open Link to macOS to allow sending text messages")
+      .setSmallIcon(R.drawable.ic_stat_link)
+      .setAutoCancel(true)
+      .setContentIntent(contentIntent)
+      .build()
+    nm.notify(SMS_ALERT_NOTIF_ID, notification)
+  }
+
   /** Last peerOnline value shown in the notification; skips redundant notify() calls. */
   @Volatile private var notifiedPeerOnline: Boolean? = null
 
@@ -646,7 +704,9 @@ class ClipForegroundService : Service() {
     private const val CLIP_FILE_REAP_MS = 30_000L
     private const val CHANNEL = "linktomac"
     private const val CHANNEL_HIDDEN = "linktomac_hidden"
+    private const val CHANNEL_SMS_ALERT = "linktomac_sms_alert"
     private const val NOTIF_ID = 1001
+    private const val SMS_ALERT_NOTIF_ID = 1002
     private const val EXTRA_PORT = "port"
     private const val PREFS = "linktomac_relay"
     // Separate prefs file: clearConfig() wipes PREFS on unpair, UI settings must survive that.

@@ -75,8 +75,18 @@ final class RelayClient {
 
     /// One mirrored SMS message. `id` is the Android `_id` (stable → drives upsert/dedup). `threadKey`
     /// groups messages into a conversation (Android `thread_id`, falling back to the address).
+    /// Send-state of an outgoing reply composed on the Mac. Mirrored messages (read from the
+    /// phone's SMS store) are always `.sent`; only a Mac-composed placeholder starts `.sending`.
+    enum SendStatus: Equatable {
+        case sending
+        case sent
+        case failed(String)
+
+        var isFailed: Bool { if case .failed = self { return true } else { return false } }
+    }
+
     struct MessageEntry: Identifiable {
-        let id: Int64
+        var id: Int64
         let threadKey: String
         let addr: String
         let name: String?
@@ -84,6 +94,7 @@ final class RelayClient {
         let date: Date
         let outgoing: Bool
         let read: Bool
+        var status: SendStatus = .sent
 
         /// Contact name when known, else the raw address.
         var display: String {
@@ -108,6 +119,16 @@ final class RelayClient {
     /// the `conversations` grouping. In-memory only — cleared on quit / unpair.
     private(set) var messages: [MessageEntry] = []
     private static let messagesCap = 500
+
+    /// Placeholder ids for in-flight replies composed on the Mac (always negative — real SMS-store
+    /// ids from the phone are always ≥0, so the two id spaces can never collide).
+    private var nextPendingId: Int64 = -1
+
+    /// In-flight replies awaiting a phone ack, keyed by the `corr` sent in the `sms` "send" op, to
+    /// the placeholder `MessageEntry.id` they correspond to. Cleared on ack (success rewrites the
+    /// id to the real one; failure just clears the tracking, the entry stays `.failed`) or timeout.
+    private var pendingReplies: [String: Int64] = [:]
+    private static let pendingReplyTimeout: Duration = .seconds(15)
 
     /// Messages grouped into conversations, newest activity first. Rebuilt eagerly on every
     /// `messages` mutation — as a computed property it re-grouped and re-sorted up to 500
@@ -188,6 +209,10 @@ final class RelayClient {
     /// Fan-out hook for an image copy onto the LAN-direct server, mirroring `onLocalClip`.
     /// Carries the assembled `file` plaintext (header + raw bytes); each transport seals it.
     var onLocalFile: ((Data) -> Void)?
+
+    /// Fan-out hook for an outbound SMS reply onto the LAN-direct server, mirroring `onLocalStat`.
+    /// Carries the plaintext `{"op":"send",…}` payload; each transport seals it.
+    var onLocalSms: ((String) -> Void)?
 
     /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
     /// re-advertise under the new pairing id and invalidate any stale authenticated socket.
@@ -284,6 +309,60 @@ final class RelayClient {
         Task { [weak self] in try? await self?.send(.stat(nonce: nonce, ct: ct)) }
     }
 
+    /// Compose + send an SMS reply to `addr` (a 1:1 thread's address). Appends an optimistic
+    /// `.sending` placeholder to `messages` immediately for instant feedback; the placeholder's
+    /// `id` is rewritten to the real SMS-store id (and `status` flips to `.sent`) once the phone
+    /// acks, so the later genuine `SmsMirror` delta upserts over it instead of duplicating. Flips
+    /// to `.failed` after `pendingReplyTimeout` with no ack. No-op (returns nil) if the pairing key
+    /// is malformed — fail closed, same as every other outbound frame.
+    @discardableResult
+    func sendReply(addr: String, body: String) -> String? {
+        guard !addr.isEmpty, !body.isEmpty else { return nil }
+        let corr = UUID().uuidString
+        let escapedBody = body
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        let escapedAddr = addr.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let payload = "{\"op\":\"send\",\"corr\":\"\(corr)\",\"addr\":\"\(escapedAddr)\",\"body\":\"\(escapedBody)\"}"
+        guard let (nonce, ct) = ClipCodec.encode(payload, keyBase64: pairing.key, type: "sms") else {
+            log("encrypt failed (bad pairing key); not sending reply")
+            return nil
+        }
+
+        let placeholderId = nextPendingId
+        nextPendingId -= 1
+        let threadKey: String = {
+            if let existing = messages.last(where: { Self.normalizeAddr($0.addr) == Self.normalizeAddr(addr) }) {
+                return existing.threadKey
+            }
+            return Self.normalizeAddr(addr)
+        }()
+        let placeholder = MessageEntry(
+            id: placeholderId, threadKey: threadKey, addr: addr, name: nil, body: body,
+            date: Date(), outgoing: true, read: true, status: .sending
+        )
+        messages.append(placeholder)
+        rebuildConversations()
+        pendingReplies[corr] = placeholderId
+
+        Task { [weak self] in try? await self?.send(.sms(nonce: nonce, ct: ct)) }
+        onLocalSms?(payload)
+
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.pendingReplyTimeout)
+            self?.timeoutPendingReply(corr: corr)
+        }
+        return corr
+    }
+
+    private func timeoutPendingReply(corr: String) {
+        guard let placeholderId = pendingReplies.removeValue(forKey: corr) else { return }
+        guard let idx = messages.firstIndex(where: { $0.id == placeholderId }) else { return }
+        messages[idx].status = .failed("timeout")
+        rebuildConversations()
+    }
+
     /// This Mac's battery + BLE proximity merged into one `stat` payload, omitting whichever isn't
     /// available (no battery on a desktop Mac; no proximity until the user enables auto-lock). `nil`
     /// when there's nothing to report. The peer updates only the fields present, so a battery-only
@@ -358,9 +437,10 @@ final class RelayClient {
         applyNotification(json)
     }
 
-    /// Apply a phone `sms` batch/delta that arrived over the LAN-direct transport (already decrypted by `LanServer`).
+    /// Apply a phone `sms` frame that arrived over the LAN-direct transport (already decrypted by
+    /// `LanServer`) — batch/delta or a reply ack, dispatched by `handleInboundSms`.
     func writeRemoteSms(_ json: String) {
-        applySms(json)
+        handleInboundSms(json)
     }
 
     /// Re-copy a clip-history entry to the pasteboard. Echo-suppressed (same writer as inbound
@@ -476,6 +556,61 @@ final class RelayClient {
         return try? JSONDecoder().decode(NotePayload.self, from: data)
     }
 
+    /// Peek the `op` of a decrypted `sms` payload and route to the right handler: `sent`/`failed`
+    /// are acks for a Mac-composed reply, everything else (`batch`/`add`, or missing) is a mirrored
+    /// message list.
+    private func handleInboundSms(_ json: String) {
+        switch Self.peekSmsOp(json) {
+        case "sent", "failed":
+            applySmsAck(json)
+        default:
+            applySms(json)
+        }
+    }
+
+    private struct SmsOpPeek: Decodable { let op: String? }
+
+    private static func peekSmsOp(_ json: String) -> String? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return (try? JSONDecoder().decode(SmsOpPeek.self, from: data))?.op
+    }
+
+    /// Resolve an in-flight reply's ack: `sent` rewrites the placeholder's id to the real SMS-store
+    /// id and marks it `.sent` (so the later genuine `SmsMirror` delta upserts over it, no
+    /// duplicate); `failed` marks it `.failed` with the phone-reported reason. A `corr` with no
+    /// matching pending reply (already timed out, or a stale/duplicate ack) is ignored.
+    private func applySmsAck(_ json: String) {
+        guard let ack = Self.decodeSmsAck(json), let placeholderId = pendingReplies.removeValue(forKey: ack.corr) else {
+            log("sms ack: no matching pending reply")
+            return
+        }
+        guard let idx = messages.firstIndex(where: { $0.id == placeholderId }) else { return }
+        if ack.op == "sent" {
+            // The phone couldn't write its own SMS store (only the default SMS app reliably can)
+            // when `id` is absent — the placeholder stays as the permanent record for this reply
+            // rather than being superseded by a mirrored delta that will never arrive.
+            if let realId = ack.id { messages[idx].id = realId }
+            messages[idx].status = .sent
+            log("sms reply sent" + (ack.id.map { " (id \($0))" } ?? " (no store id)"))
+        } else {
+            messages[idx].status = .failed(ack.error ?? "send-error")
+            log("sms reply failed: \(ack.error ?? "unknown")")
+        }
+        rebuildConversations()
+    }
+
+    private struct SmsAckPayload: Decodable {
+        let op: String
+        let corr: String
+        let id: Int64?
+        let error: String?
+    }
+
+    private static func decodeSmsAck(_ json: String) -> SmsAckPayload? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(SmsAckPayload.self, from: data)
+    }
+
     /// Parse + apply a decrypted phone `sms` payload (`{op, msgs:[…]}`). Each item is upserted by `id`
     /// (a backfill chunk and a live delta are handled identically — re-sends are idempotent). Trims to
     /// the cap by dropping the oldest. Grouping into threads happens in `conversations`.
@@ -555,6 +690,7 @@ final class RelayClient {
         clipHistory.removeAll()
         notifications.removeAll()
         messages.removeAll()
+        pendingReplies.removeAll()
         rebuildConversations()
         iconCache.removeAll()
         phoneBatteryLevel = nil
@@ -751,9 +887,10 @@ final class RelayClient {
                 log("note decrypt failed (key mismatch or corrupt)")
             }
         case let .sms(nonce, ct):
-            // A mirrored phone SMS batch/delta. Same AEAD as clips; drop anything unauthenticated.
+            // A mirrored phone SMS batch/delta, or a reply ack. Same AEAD as clips; drop anything
+            // unauthenticated.
             if let json = ClipCodec.decode(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "sms") {
-                applySms(json)
+                handleInboundSms(json)
             } else {
                 log("sms decrypt failed (key mismatch or corrupt)")
             }

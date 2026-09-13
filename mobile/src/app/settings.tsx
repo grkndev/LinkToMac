@@ -24,6 +24,8 @@ export default function SettingsScreen() {
     toggleSmsMirror,
     smsAccess,
     requestSmsPermission,
+    sendSmsAccess,
+    requestSendSmsPermission,
     sendImagesOn,
     toggleSendImages,
     batteryOk,
@@ -66,6 +68,15 @@ export default function SettingsScreen() {
               label="Grant SMS access"
               hint="Allow Link to macOS to read your messages and contacts so they can be shown on your Mac."
               onPress={requestSmsPermission}
+            />
+          ) : null}
+          {smsMirrorOn && sendSmsAccess === false ? (
+            <ActionRow
+              colors={colors}
+              icon={icons.chat}
+              label="Grant SMS Send Access"
+              hint="Allow Link to macOS to send text messages so you can reply from your Mac."
+              onPress={requestSendSmsPermission}
             />
           ) : null}
           <SwitchRow

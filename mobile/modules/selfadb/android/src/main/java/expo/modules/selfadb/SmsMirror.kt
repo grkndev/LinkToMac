@@ -1,17 +1,29 @@
 package expo.modules.selfadb
 
+import android.Manifest
+import android.app.Activity
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.provider.ContactsContract
 import android.provider.Telephony
+import android.telephony.SmsManager
 import android.util.LruCache
+import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Reads this phone's SMS store and forwards it to the Mac over the E2E `sms` channel, so the Mac
@@ -30,14 +42,27 @@ import java.util.concurrent.RejectedExecutionException
  * Wire payload (plaintext, then E2E-encrypted by the active link):
  *   { "op":"batch"|"add", "msgs":[ { "id":N, "thread":N, "addr":…, "name":…, "body":…,
  *     "date":<epoch ms>, "dir":"in"|"out", "read":bool }, … ] }
+ *
+ * [sendReply] is the reverse direction (Mac → phone → real SMS): given a Mac `{"op":"send",…}`
+ * request, it sends via [SmsManager] and reports back through [send] (the same outbound channel
+ * mirrored messages use) as `{"op":"sent","corr":…,"id":N?}` or
+ * `{"op":"failed","corr":…,"error":…}`. We are not the default SMS app, so the OS generally
+ * won't let us write the sent message into the SMS store ourselves — [sendReply] best-effort
+ * inserts one (so it shows up mirrored like any other sent text) but degrades gracefully (`id`
+ * omitted) if the OS/OEM refuses the write; the Mac keeps its own optimistic placeholder then.
  */
 class SmsMirror(
   context: Context,
   /** Forwards one ready-to-send `sms` payload JSON (→ [ClipForegroundService.sendSms]). */
   private val send: (String) -> Unit,
   private val log: (String) -> Unit,
+  /** Called (in addition to the "failed"/"permission" ack) the first time [sendReply] is
+   *  blocked by a missing SEND_SMS grant, so the caller can surface a "grant access" prompt —
+   *  requesting a dangerous permission needs an Activity, which this background class doesn't have. */
+  private val onSendPermissionDenied: () -> Unit = {},
 ) {
-  private val resolver = context.applicationContext.contentResolver
+  private val appContext = context.applicationContext
+  private val resolver = appContext.contentResolver
 
   /** Heavy work (provider queries, contact lookups, JSON build) off the observer/caller thread.
    *  Recreated by [start] after a [stop] — callers happen to reconstruct the whole object today,
@@ -50,6 +75,10 @@ class SmsMirror(
 
   /** Highest `_id` already forwarded, so the observer only sends new rows. -1 until first baseline. */
   @Volatile private var lastMaxId: Long = -1
+
+  /** Monotonic base for sent-intent `PendingIntent` request codes, so concurrent [sendReply]
+   *  calls (and their possibly-multipart sent intents) never collide with FLAG_UPDATE_CURRENT. */
+  private val nextReqCode = AtomicInteger(0)
 
   private var observerThread: HandlerThread? = null
   private var observer: ContentObserver? = null
@@ -82,6 +111,89 @@ class SmsMirror(
     observerThread?.quitSafely()
     observerThread = null
     worker.shutdown()
+  }
+
+  /** Send [body] to [addr] as a real SMS via [SmsManager], reporting the result back through
+   *  [send] as an ack keyed by the Mac's [corr]. Checked/dispatched synchronously (permission
+   *  check + `sendMultipartTextMessage` are cheap/async themselves); the ack arrives later via
+   *  the sent-intent [BroadcastReceiver] once the radio confirms (or fails) the send. */
+  fun sendReply(addr: String, body: String, corr: String) {
+    if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+      send(ackJson("failed", corr, error = "permission"))
+      onSendPermissionDenied()
+      log("sms reply: SEND_SMS not granted")
+      return
+    }
+    post {
+      try {
+        val smsManager = SmsManager.getDefault()
+        val parts = smsManager.divideMessage(body)
+        val reqBase = nextReqCode.getAndAdd(parts.size)
+        val pendingCount = AtomicInteger(parts.size)
+        val anyFailed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val action = "expo.modules.selfadb.SMS_REPLY_SENT.$reqBase"
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val sentIntents = ArrayList<PendingIntent>(parts.size)
+        for (i in parts.indices) {
+          val intent = Intent(action).setPackage(appContext.packageName)
+          sentIntents.add(PendingIntent.getBroadcast(appContext, reqBase + i, intent, flags))
+        }
+        val receiver = object : BroadcastReceiver() {
+          override fun onReceive(ctx: Context, intent: Intent) {
+            if (resultCode != Activity.RESULT_OK) anyFailed.set(true)
+            if (pendingCount.decrementAndGet() == 0) {
+              try { appContext.unregisterReceiver(this) } catch (e: Exception) {}
+              if (anyFailed.get()) {
+                send(ackJson("failed", corr, error = "send-error"))
+                log("sms reply failed ($corr)")
+              } else {
+                val id = tryInsertSent(addr, body)
+                send(ackJson("sent", corr, id = id))
+                log("sms reply sent ($corr)" + (id?.let { " id=$it" } ?: " (no store id)"))
+              }
+            }
+          }
+        }
+        val filter = IntentFilter(action)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+          @Suppress("UnspecifiedRegisterReceiverFlag")
+          appContext.registerReceiver(receiver, filter)
+        }
+        smsManager.sendMultipartTextMessage(addr, null, parts, sentIntents, null)
+      } catch (e: Exception) {
+        log("sms reply send threw: ${e.message}")
+        send(ackJson("failed", corr, error = "send-error"))
+      }
+    }
+  }
+
+  /** Best-effort insert of the just-sent message into the SMS store so it mirrors like any other
+   *  sent text. Returns the new row id, or null if the OS/OEM refused the write — expected on
+   *  most devices since we're not the default SMS app, not a bug. */
+  private fun tryInsertSent(addr: String, body: String): Long? {
+    return try {
+      val threadId = Telephony.Threads.getOrCreateThreadId(appContext, addr)
+      val values = ContentValues().apply {
+        put(Telephony.Sms.ADDRESS, addr)
+        put(Telephony.Sms.BODY, body)
+        put(Telephony.Sms.DATE, System.currentTimeMillis())
+        put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+        put(Telephony.Sms.READ, 1)
+        put(Telephony.Sms.THREAD_ID, threadId)
+      }
+      resolver.insert(Telephony.Sms.CONTENT_URI, values)?.lastPathSegment?.toLongOrNull()
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  private fun ackJson(op: String, corr: String, id: Long? = null, error: String? = null): String {
+    val o = JSONObject().put("op", op).put("corr", corr)
+    id?.let { o.put("id", it) }
+    error?.let { o.put("error", it) }
+    return o.toString()
   }
 
   /** Run on the worker, dropping the task if [stop] already shut it down (a late observer

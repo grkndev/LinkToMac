@@ -337,6 +337,17 @@ final class LanServer: @unchecked Sendable {
         }
     }
 
+    /// Encrypt + send an SMS reply request (`{"op":"send",…}`) to the authenticated phone.
+    /// Mirrors `sendStat`; no-op if no peer / bad key.
+    func sendSms(_ payload: String) {
+        queue.async { [self] in
+            guard let conn = connection, !payload.isEmpty,
+                  let key = pairingProvider()?.key,
+                  let (nonce, ct) = ClipCodec.encode(payload, keyBase64: key, type: "sms") else { return }
+            send(["t": "sms", "nonce": nonce, "ct": ct], on: conn)
+        }
+    }
+
     /// Encrypt + send an assembled `file` plaintext (header + image bytes) to the
     /// authenticated phone. Mirrors `sendClip`; no-op if no peer / bad key.
     func sendFile(_ payload: Data) {

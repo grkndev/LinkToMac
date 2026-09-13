@@ -31,6 +31,13 @@
   <uses-permission android:name="android.permission.READ_SMS" />
   <uses-permission android:name="android.permission.READ_CONTACTS" />
 
+  <!--
+    Reply to messages (Mac → Android → SMS stack): send a real SMS via SmsManager on the Mac
+    dashboard's request. Dangerous runtime permission, requested lazily on the first reply attempt
+    (not bundled with READ_SMS/READ_CONTACTS above) via the in-app "Grant SMS Send Access" action.
+  -->
+  <uses-permission android:name="android.permission.SEND_SMS" />
+
   <!-- mDNS discovery of _adb-tls-pairing / _adb-tls-connect via NsdManager -->
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 

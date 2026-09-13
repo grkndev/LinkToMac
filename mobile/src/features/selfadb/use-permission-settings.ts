@@ -16,6 +16,7 @@ export function usePermissionSettings() {
   const [notifAccess, setNotifAccess] = useState<boolean | null>(null);
   const [smsMirrorOn, setSmsMirrorOn] = useState(true);
   const [smsAccess, setSmsAccess] = useState<boolean | null>(null);
+  const [sendSmsAccess, setSendSmsAccess] = useState<boolean | null>(null);
   const [sendImagesOn, setSendImagesOn] = useState(true);
   const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
   const [proximityOn, setProximityOn] = useState(false);
@@ -39,6 +40,9 @@ export function usePermissionSettings() {
         .catch(() => {});
       SelfAdb.hasSmsAccess()
         .then(setSmsAccess)
+        .catch(() => {});
+      SelfAdb.hasSendSmsAccess()
+        .then(setSendSmsAccess)
         .catch(() => {});
       // The OS may have revoked Nearby Devices behind our back -> reflect the real
       // beacon state. Skip while a toggle is in flight so we don't read the beacon
@@ -133,6 +137,12 @@ export function usePermissionSettings() {
       .catch(() => {});
   };
 
+  const requestSendSmsPermission = () => {
+    SelfAdb.requestSendSmsAccess()
+      .then(setSendSmsAccess)
+      .catch(() => {});
+  };
+
   return {
     notifIconVisible,
     toggleNotifIcon,
@@ -145,6 +155,8 @@ export function usePermissionSettings() {
     toggleSmsMirror,
     smsAccess,
     requestSmsPermission,
+    sendSmsAccess,
+    requestSendSmsPermission,
     sendImagesOn,
     toggleSendImages,
     batteryOk,
