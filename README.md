@@ -36,7 +36,7 @@ are end-to-end encrypted — the relay only ever sees opaque ciphertext.
 | 🚶 | **Auto-lock when you leave** | The Mac locks itself once your phone leaves Bluetooth range. _(Lock-only — macOS can't auto-unlock.)_ |
 | 🔋 | **Battery both ways** | Your Mac's charge shows on the phone; your phone's battery + name show on the Mac. Live. |
 | 🔔 | **Notification mirroring** | Android notifications pop as native banners on the Mac and collect in a tab. _(One-way, pausable.)_ |
-| 📎 | **Send files both ways** | Share anything from the phone's share sheet; drop a file on the Mac's window or menu-bar icon, or use Finder ▸ Share. Chunked, so size isn't a limit. |
+| 📎 | **Send files both ways** | Share anything from the phone's share sheet; drop a file on the Mac's window or menu-bar icon. Chunked, so size isn't a limit. |
 | 💬 | **Your messages** | Your SMS appear as conversation threads on the Mac, and you can reply to 1:1 threads from there. _(Pausable.)_ |
 | 🖥️ | **Mac dashboard** | A Material 3 menu-bar card + window: your phone, clip history, notifications, messages. |
 | 📶 | **LAN-direct, relay optional** | Same Wi-Fi → straight to the Mac. Leave home → seamless relay fallback. Works relay-free if you never set one up. |
@@ -118,7 +118,7 @@ A small **menu-bar app** on the Mac and a **background app** on Android stay con
   copies, and there's a separate **Send images** switch if you want text-only in one direction.
 - **Send a file** — from the phone, share anything and pick **Send to Clipboard** (images, ready
   to paste) or **Send as a File** (any type, original quality). From the Mac, drop a file on the
-  dashboard window or the menu-bar icon, or right-click it in Finder → **Share ▸ Send to Phone**.
+  dashboard window or the menu-bar icon.
   Files land in `Downloads/Link to Mac` on the phone, and in the folder you pick under
   **Settings ▸ Files** on the Mac. Both ends show progress while it transfers.
 - **Lock Mac** — tap **Lock Mac** on the phone's Home screen (needs the Mac connected).
@@ -164,8 +164,8 @@ v1 links **one phone and one Mac**. Shipping today:
 - ✅ **Two-way battery / phone telemetry**
 - ✅ **One-way notification mirroring**
 - ✅ **SMS mirroring** (phone → Mac) with **replies** to 1:1 threads from the Mac
-- ✅ **File transfer both ways** — phone share sheet, and drag-and-drop / Finder Share on the Mac
-  (chunked + acknowledged, so the 1 MiB frame cap isn't a size limit)
+- ✅ **File transfer both ways** — phone share sheet, and drag-and-drop onto the Mac's window or
+  menu-bar icon (chunked + acknowledged, so the 1 MiB frame cap isn't a size limit)
 
 On the roadmap: **screen mirroring** and read-only **Calls / Photos** tabs. A separate technical document
 ([`TECHNICAL.md`](TECHNICAL.md)) covers the internals in depth.
