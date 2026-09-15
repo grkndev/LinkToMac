@@ -38,6 +38,16 @@ struct SettingsScreen: View {
                     )
                 }
 
+                group("FILES") {
+                    M3SettingsRow(
+                        icon: "folder",
+                        title: "Save files to",
+                        subtitle: "Where \"Send as a File\" drops land, shared from your phone",
+                        value: client.fileDrop.folder.lastPathComponent,
+                        action: { client.fileDrop.chooseFolder() }
+                    )
+                }
+
                 group("NOTIFICATIONS") {
                     M3ToggleRow(
                         icon: "bell.badge", title: "Notification banners",

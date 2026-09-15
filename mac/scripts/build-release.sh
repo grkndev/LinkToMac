@@ -47,6 +47,20 @@ echo "==> version $VERSION"
 echo "==> ad-hoc codesign"
 codesign --force --deep --sign - "$APP"
 
+# `--deep` re-signs nested code with NO entitlements, which silently strips the Share extension's
+# sandbox entitlement — and macOS refuses to register an unsandboxed app extension at all, so the
+# Finder "Send to Phone" entry would just never appear in a released build (it works fine from a
+# local xcodebuild, which is what makes this easy to miss). Re-sign the extension with its
+# entitlements, then re-seal the outer bundle WITHOUT --deep so it doesn't clobber it again.
+APPEX="$APP/Contents/PlugIns/SendToPhone.appex"
+if [ -d "$APPEX" ]; then
+  echo "==> re-sign Share extension with entitlements"
+  codesign --force --sign - --entitlements ShareExtension/ShareExtension.entitlements "$APPEX"
+  codesign --force --sign - "$APP"
+  codesign -d --entitlements - "$APPEX" 2>&1 | grep -q "app-sandbox" \
+    || { echo "ERROR: Share extension lost its sandbox entitlement" >&2; exit 1; }
+fi
+
 echo "==> package DMG"
 mkdir -p "$OUT"
 STAGE="$(mktemp -d)"

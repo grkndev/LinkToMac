@@ -32,6 +32,10 @@ targets:
       Release: Config.xcconfig
     dependencies:
       - package: Sparkle
+      # Embedded into Contents/PlugIns so Finder's Share menu can find it. The release script's
+      # `codesign --deep` covers it; there is no separate signing step.
+      - target: LinkToMacShareExtension
+        embed: true
     sources:
       - path: Sources
       - path: Resources/AppIcon.icon
@@ -43,6 +47,23 @@ targets:
         INFOPLIST_FILE: Resources/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  # Finder ▸ Share ▸ "Send to Phone". Sandboxed by definition (every app extension is), so it
+  # can't send anything itself — it hands the file path to the app over the linktomac:// scheme.
+  LinkToMacShareExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: ShareExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMac.ShareExtension
+        PRODUCT_NAME: SendToPhone
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        SKIP_INSTALL: "YES"
+        # Mandatory: macOS won't register an unsandboxed app extension at all.
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+
 schemes:
   LinkToMac:
     build:

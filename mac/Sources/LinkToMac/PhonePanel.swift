@@ -17,6 +17,13 @@ struct PhonePanel: View {
             identity
             Spacer().frame(height: 24)
             actionGrid
+            // Only while a file is arriving. Deliberately an inline row rather than the drop
+            // overlay the *outgoing* direction uses: an incoming transfer isn't something the
+            // user just asked for, so covering the dashboard for a minute would be wrong.
+            if let incoming = client.incomingFile {
+                Spacer().frame(height: 16)
+                incomingRow(incoming)
+            }
             Spacer().frame(height: 16)
             mediaCard
         }
@@ -128,6 +135,33 @@ struct PhonePanel: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    // MARK: - Incoming transfer
+
+    private func incomingRow(_ file: TransferProgress) -> some View {
+        HStack(spacing: 14) {
+            M3IconBadge(icon: "arrow.down.circle.fill", size: 44)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(file.name)
+                    .font(M3.bodyLarge)
+                    .foregroundStyle(M3.onSurface)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                ProgressView(value: file.fraction)
+                    .progressViewStyle(.linear)
+                    .tint(M3.primary)
+            }
+            Text("\(file.percent)%")
+                .font(M3.bodyLarge)
+                .foregroundStyle(M3.onSurfaceVariant)
+                .monospacedDigit()
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: M3.corLargeIncreased, style: .continuous)
+                .fill(M3.surfaceContainer)
+        )
     }
 
     // MARK: - Media (roadmap)

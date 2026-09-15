@@ -57,31 +57,116 @@ enum ClientMessage: Encodable {
     }
 }
 
-/// Assembles the `file` frame plaintext (what goes inside the v2 envelope, AAD "file"):
-///   u16 BE header-len ‖ header JSON utf8 ‖ raw file bytes
-/// Header v1 is `{"mime":"image/png"}` — JSON so future file transfer can add name/size.
-/// Byte-exact contract with the Kotlin receiver (`ClipForegroundService.applyFile`).
+/// Assembles + parses the `file` frame plaintext (what goes inside the v2 envelope, AAD "file"):
+///
+///     u16 BE header-len ‖ header JSON utf8 ‖ raw file bytes
+///
+/// **Byte-exact contract with the Kotlin `FileFrame.kt`.** The two are hand-mirrored, not
+/// generated; change both together (see the root CLAUDE.md invariant on the wire protocol).
+///
+/// Header fields are all optional but `mime`, and all additive to the original `{"mime":…}`
+/// shape, so an older peer that only reads `mime` still pastes an image correctly:
+///
+/// - `op`   — `data` (payload) or `ack` (receiver acknowledging one stored chunk). Default `data`.
+/// - `mime` — content type. Default `image/png`.
+/// - `name` — original file name, used by `disp: save`.
+/// - `disp` — `clip` (paste it) or `save` (write it to the download folder). Default `clip`.
+/// - `id` / `seq` / `n` — chunk group, 0-based index, total count. Absent = one whole file.
+///
+/// **Acks are flow control, not politeness.** The relay drops any peer buffering more than
+/// `maxPayloadBytes * 8` (8 MiB) as a slow consumer, so a phone that fired a 50 MB file's chunks
+/// back to back would disconnect *this* Mac partway through. Every stored chunk is acked and the
+/// sender keeps only a small window in flight. Layering extra ops onto an existing frame type,
+/// rather than adding a new one, is the same move the `sms` reply path makes.
 enum FileFrame {
-    static func payload(mime: String, bytes: Data) -> Data {
-        let header = Data("{\"mime\":\"\(mime)\"}".utf8)
-        var out = Data(capacity: 2 + header.count + bytes.count)
-        out.append(UInt8((header.count >> 8) & 0xFF))
-        out.append(UInt8(header.count & 0xFF))
-        out.append(header)
+    static let opData = "data"
+    static let opAck = "ack"
+    static let dispClip = "clip"
+    static let dispSave = "save"
+
+    /// Raw payload bytes per chunk. Byte-for-byte the phone's `FileFrame.CHUNK_RAW_BYTES`: the
+    /// relay caps a frame at 1 MiB (`MAX_PAYLOAD_BYTES`), and 640 KiB raw becomes ~853 KB of
+    /// base64 plus ~60 bytes of JSON — a comfortable margin. Bump this only together with the
+    /// relay's `MAX_PAYLOAD_BYTES` and both WebSocket `maximumMessageSize` settings.
+    static let chunkRawBytes = 640 * 1024
+
+    /// Refuse to start a transfer bigger than this. Mirrors the phone's `MAX_TRANSFER_BYTES`.
+    static let maxTransferBytes = 64 * 1024 * 1024
+
+    /// One decoded `file` frame.
+    struct Parsed {
+        let op: String
+        let mime: String
+        let name: String?
+        let disp: String
+        let id: String?
+        let seq: Int
+        let count: Int
+        let bytes: Data
+
+        /// True when this frame is the whole file (the pre-chunking shape, and any one-chunk file).
+        var isSingle: Bool { id == nil || count <= 1 }
+    }
+
+    /// Build a data frame. Chunk fields are omitted for a single-frame transfer, so the bytes stay
+    /// identical to what pre-chunking builds sent.
+    static func payload(
+        mime: String,
+        bytes: Data,
+        name: String? = nil,
+        disp: String = dispClip,
+        id: String? = nil,
+        seq: Int = 0,
+        count: Int = 1
+    ) -> Data {
+        var header: [String: Any] = ["mime": mime]
+        if let name { header["name"] = name }
+        if disp != dispClip { header["disp"] = disp }
+        if let id, count > 1 {
+            header["id"] = id
+            header["seq"] = seq
+            header["n"] = count
+        }
+        return frame(header: header, bytes: bytes)
+    }
+
+    /// Build a zero-payload `ack` frame for one stored chunk.
+    static func ack(id: String, seq: Int) -> Data {
+        frame(header: ["op": opAck, "id": id, "seq": seq], bytes: Data())
+    }
+
+    /// `JSONSerialization`, not string interpolation: a file name is user data and may contain
+    /// quotes or backslashes that would otherwise produce a header the Kotlin side can't parse.
+    private static func frame(header: [String: Any], bytes: Data) -> Data {
+        let headerData = (try? JSONSerialization.data(withJSONObject: header)) ?? Data("{}".utf8)
+        var out = Data(capacity: 2 + headerData.count + bytes.count)
+        out.append(UInt8((headerData.count >> 8) & 0xFF))
+        out.append(UInt8(headerData.count & 0xFF))
+        out.append(headerData)
         out.append(bytes)
         return out
     }
 
-    /// Split an inbound `file` plaintext back into its mime + raw bytes. nil if malformed.
-    static func parse(_ payload: Data) -> (mime: String, bytes: Data)? {
+    /// Split an inbound `file` plaintext back into its header + raw bytes. nil if malformed.
+    static func parse(_ payload: Data) -> Parsed? {
         guard payload.count >= 2 else { return nil }
         let base = payload.startIndex
         let headerLen = Int(payload[base]) << 8 | Int(payload[base + 1])
         guard payload.count >= 2 + headerLen else { return nil }
         let headerData = payload.subdata(in: (base + 2)..<(base + 2 + headerLen))
         let bytes = payload.subdata(in: (base + 2 + headerLen)..<payload.endIndex)
-        let mime = (try? JSONSerialization.jsonObject(with: headerData)) as? [String: Any]
-        return (mime?["mime"] as? String ?? "image/png", bytes)
+        let header = (try? JSONSerialization.jsonObject(with: headerData)) as? [String: Any] ?? [:]
+        let name = header["name"] as? String
+        return Parsed(
+            op: header["op"] as? String ?? opData,
+            mime: header["mime"] as? String ?? "image/png",
+            name: (name?.isEmpty == false) ? name : nil,
+            disp: header["disp"] as? String ?? dispClip,
+            id: header["id"] as? String,
+            seq: header["seq"] as? Int ?? 0,
+            count: header["n"] as? Int ?? 1,
+            bytes: bytes
+        )
     }
 }
 

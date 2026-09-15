@@ -42,6 +42,10 @@ struct DashboardView: View {
                 .ignoresSafeArea(.container, edges: .top)
             }
         }
+        // Drag any file onto the window and the whole dashboard becomes the drop target; the same
+        // overlay then carries the send percentage. The menu-bar panel gets the compact variant,
+        // so the affordance reads the same whether or not this window is open.
+        .phoneFileDrop(client: client)
         .preferredColorScheme(.dark)
     }
 

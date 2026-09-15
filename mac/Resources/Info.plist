@@ -22,6 +22,20 @@
 	     window leaves the app alive in the menu bar (see AppDelegate). -->
 	<key>LSUIElement</key>
 	<false/>
+	<!-- The Finder Share extension ("Send to Phone") is sandboxed and can't reach the phone
+	     itself, so it hands the chosen file's path back to this app as linktomac://send?path=…
+	     See ShareExtension/ShareViewController.swift and AppDelegate's open-URL handler. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.grkn.LinkToMac.url</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>linktomac</string>
+			</array>
+		</dict>
+	</array>
 	<!-- Bluetooth: scan for the phone's presence beacon to auto-lock when it leaves. -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>LinkToMac scans for your paired phone over Bluetooth to lock this Mac when you walk away.</string>

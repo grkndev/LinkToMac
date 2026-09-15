@@ -107,4 +107,9 @@ object ClipBus {
   /** Whether the Mac was last seen joined on the live link. Read by the manual-capture
    *  activities to tell the user whether their tap reached the Mac or only queued. */
   fun peerOnline(): Boolean = lastRelay?.get("peerOnline") == true
+
+  /** Whether the live link is LAN-direct rather than the relay. Read by the chunked file sender,
+   *  which paces itself for the relay's per-connection rate limit — a direct socket to the Mac
+   *  has no such limit, so pacing there would only slow a transfer down for nothing. */
+  fun onLan(): Boolean = lastRelay?.get("transport") == "lan"
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Labels for the two share-sheet entries. These are the ONLY activities in this module that
+  declare android:label: ProcessTextActivity and ClipboardReadActivity deliberately inherit the
+  per-variant application label so a dev install is told apart from a release one, but a share
+  target has to say what it does, not which app it belongs to — the sheet already badges every
+  entry with the app icon.
+-->
+<resources>
+  <string name="selfadb_share_clipboard">Send to Clipboard</string>
+  <string name="selfadb_share_file">Send as a File</string>
+</resources>

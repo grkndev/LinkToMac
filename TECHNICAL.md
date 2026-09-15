@@ -109,12 +109,26 @@ between them. It never stores anything and never inspects clipboard content.
   the relay forwards it verbatim. Like `stat`, the message type was an additive,
   backward-compatible protocol change (the relay just learned a new type to fan out).
 - `sms` carries an **opaque mirrored SMS batch/delta** (phone → Mac); same additive, opaque fan-out.
-- `file` carries an **opaque clipboard image** and is **bidirectional** (Mac↔phone); same additive,
-  opaque fan-out. Its plaintext is `u16 BE header-len ‖ header JSON (`{"mime":…}`) ‖ raw image bytes`
-  (raw bytes inside the AEAD envelope, so only the outer `ct` is base64 — no double-encoding). The
-  sender downscales / JPEG-re-encodes an oversize image to ~700 KB raw first (`ImagePrep.swift` on
-  the Mac, `ClipForegroundService.fitImage` on the phone) so the sealed + base64'd frame stays under
-  the 1 MiB `maxPayload`.
+- `file` carries **opaque clipboard images and opaque file transfers, both bidirectional**; same
+  additive, opaque fan-out. Its plaintext is
+  `u16 BE header-len ‖ header JSON ‖ raw bytes` (raw bytes inside the AEAD envelope, so only the
+  outer `ct` is base64 — no double-encoding). Header keys past `mime` are all optional and
+  additive, so a peer that only understands `mime` still pastes an image:
+  - `disp` — `clip` (paste it; the default) or `save` (write it to the Mac's download folder).
+  - `name` — the original file name, for `save`.
+  - `op` — `data` (default) or `ack`, the receiver acknowledging one stored chunk.
+  - `id` / `seq` / `n` — chunk group, 0-based index, total count. The header repeats in full on
+    every chunk, so chunks may arrive in any order.
+
+  A **clipboard** image is squeezed to fit one frame: the sender downscales / JPEG-re-encodes it to
+  ~700 KB raw (`ImagePrep.swift` on the Mac, `ClipForegroundService.fitImage` on the phone) so the
+  sealed + base64'd frame stays under the 1 MiB `maxPayload`. A **file** keeps its original bytes
+  and is split into 640 KiB chunks instead — which makes the two relay limits below load-bearing
+  rather than theoretical, since both drop the *connection* rather than the frame:
+  the sender keeps only 4 chunks unacked (the `ack` op is flow control, not politeness) and, on the
+  relay, paces itself to 8 frames/s against the 120-per-10 s rate limit. LAN-direct has neither
+  limit and is not paced. The receiver's reassembly buffer is bounded on every axis (2 concurrent
+  transfers, 64 MB each, 120 s idle sweep) because an inbound transfer is peer-controlled.
 - **Backpressure:** if a peer's `ws.bufferedAmount` exceeds `maxPayloadBytes * 8`, it is
   declared a slow consumer and dropped (close code `4003`) instead of buffering unbounded.
 - Logs are privacy-preserving: the `roomId` is redacted to a 6-char prefix, and only
@@ -540,7 +554,7 @@ roadmap-placeholder feature tiles.
 
 | File | Role |
 |---|---|
-| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note`/`sms` decode + inbound `file` (`writeRemoteImage` → pasteboard image), clip-history ring, notification ring, and message store (`conversations`); sends outbound `clip`/`stat`/**`file`** (Mac→phone clipboard images, gated by `syncImages`) |
+| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note`/`sms` decode + inbound `file` (`receiveRemoteFile` → pasteboard image, or a `disp:"save"` transfer reassembled by `FileInbox` and written by `FileDropStore`; chunks are acked back for flow control), clip-history ring, notification ring, and message store (`conversations`); sends outbound `clip`/`stat`/**`file`** (Mac→phone clipboard images, gated by `syncImages`) |
 | `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; `onRemoteStat`/`onRemoteNote`/`onRemoteSms`/`onRemoteFile` for the relay-less path; outbound `sendClip`/`sendStat`/`sendFile` |
 | `PasteboardWatcher.swift` | Polls `NSPasteboard.changeCount`; reports new text + image-only copies (outbound); `write`/`writeImage` apply inbound clips/images; echo suppression via `lastChangeCount` |
 | `BatteryMonitor.swift` | IOKit power-source poll → outbound `stat` (the Mac's own battery) |
@@ -609,7 +623,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name; Mac also ± BLE prox/rssi), bidirectional, E2E-encrypted, forwarded verbatim
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
 { "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // mirrored SMS batch/delta (phone → Mac), E2E-encrypted, forwarded verbatim
-{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // clipboard image (bidirectional): plaintext = u16 header-len ‖ header JSON ‖ raw bytes, E2E-encrypted, forwarded verbatim
+{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // clipboard image (bidirectional) or a file chunk / chunk-ack (phone → Mac): plaintext = u16 header-len ‖ header JSON ‖ raw bytes, E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
 // relay → client
@@ -620,7 +634,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name; Mac also ± BLE prox/rssi), relayed
 { "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
 { "t": "sms",    "nonce": "...", "ct": "..." }            // the peer's mirrored SMS batch/delta, relayed
-{ "t": "file",   "nonce": "...", "ct": "..." }            // the peer's clipboard image, relayed
+{ "t": "file",   "nonce": "...", "ct": "..." }            // the peer's clipboard image, file chunk, or chunk-ack, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
@@ -976,8 +990,9 @@ Android's *Pair device with pairing code* dialog and enter the 6-digit code once
 
 ## 13. Scope & roadmap
 
-v1 links **one phone and one Mac** and syncs **text + Mac→phone clipboard images** (the 1 MiB
-payload cap fits an image ~700 KB raw after base64; mirrored app icons are small base64 PNGs).
+v1 links **one phone and one Mac** and syncs **text + bidirectional clipboard images + phone→Mac
+files** (the 1 MiB payload cap fits an image ~700 KB raw after base64; mirrored app icons are small
+base64 PNGs; files are chunked, so the cap is not a size limit for them).
 Implemented: two-way text clipboard (end-to-end encrypted with ChaCha20-Poly1305), **bidirectional
 clipboard images** (`file`; §5, auto-fitted under the cap, Mac→phone applied to the Android
 clipboard as a FileProvider content URI, phone→Mac read by the shell daemon via a system Context
@@ -986,9 +1001,14 @@ and applied to `NSPasteboard`), remote lock, proximity auto-lock,
 auto-preferred over the relay on the same Wi-Fi), **bidirectional battery/identity telemetry**
 (`stat`, Mac↔phone), **one-way notification mirroring** (`note`, phone → Mac; §5.2, surfaced
 as a native banner + the dashboard's Notifications tab), and **one-way message (SMS) mirroring**
-(`sms`, phone → Mac; §5.3, read-only conversation threads in the dashboard's Messages tab). On the
-roadmap (`RoadMap.md`): screen mirroring, arbitrary (non-image) file transfer, replying to
-messages, and read-only access to gallery/calls from the Mac.
+(`sms`, phone → Mac; §5.3, read-only conversation threads in the dashboard's Messages tab) plus
+**replying to those messages** from the Mac, and **bidirectional file transfer** (`file` with `disp:"save"`,
+chunked + acked so the 1 MiB frame cap is not a size limit). Phone → Mac comes from the system
+share sheet (two targets: "Send to Clipboard" for images, "Send as a File" for anything) and lands
+in the folder chosen in the Mac's Settings ▸ Files. Mac → phone comes from dropping a file on the
+dashboard window or the menu-bar icon, or from Finder ▸ Share ▸ "Send to Phone", and lands in the
+phone's `Downloads/Link to Mac`. On the roadmap (`RoadMap.md`): screen mirroring, and read-only
+access to gallery/calls from the Mac.
 
 ---
 
@@ -1011,6 +1031,10 @@ mac/Sources/LinkToMac/
   BatteryMonitor.swift   IOKit power-source poll → outbound stat (Mac's own battery)
   ClipCodec.swift        E2E payload encryption (ChaCha20-Poly1305 / CryptoKit; String + Data variants)
   ImagePrep.swift        fit a copied image under the relay cap for the file frame
+  FileDrop.swift         FileDropStore (download folder + safe save), FileInbox (chunk reassembly), FileSender (chunked Mac→phone send)
+  FileDropZone.swift     the drop-to-send surface + .phoneFileDrop modifier (window + menu-bar panel)
+  StatusItemController.swift  hand-built NSStatusItem + popover; the menu-bar icon is a drag destination
+  ShareExtension/        Finder ▸ Share ▸ "Send to Phone" (.appex; hands the path over via linktomac://)
   MacNotifier.swift      native banner for mirrored notes (UNUserNotificationCenter + icon attachment)
   ProximityMonitor.swift BLE central, RSSI → lock
   ProximityConfig.swift  UUID derivation + tunables
@@ -1029,6 +1053,9 @@ mac/Sources/LinkToMac/
 mobile/modules/selfadb/android/.../selfadb/
   SelfAdbModule.kt          Expo module: autoStart/pair/relay/proximity APIs
   AdbManager.kt             libadb wrapper: pair/connect/discover/push/launch
+  FileInbox.kt              chunk reassembly (to a temp file) + FileSink: save into MediaStore Downloads
+  ShareActivity.kt          the two share-sheet targets (Send to Clipboard / Send as a File)
+  FileFrame.kt              file-frame plaintext: header JSON + chunking + acks (mirrors RelayProtocol.swift)
   ClipboardAgent (java)     → built to assets/clipboard-agent.dex (captures text + images; system Context for content:// URIs)
   ClipForegroundService.kt  START_STICKY host for bridge+connection+BLE; applyFile (inbound image → clipboard URI) + captureImage (outbound image → file frame)
   ClipBridge.kt             localhost NDJSON client to the daemon

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Direct Share declaration. This is what lets "Link to Mac" appear in the share sheet's TOP row,
+  next to Quick Share's nearby devices and WhatsApp/X contacts, instead of only in the app list
+  below it.
+
+  Two halves are required and they must agree:
+   1. this file, declaring which activity can receive a shared item of which mime type, under a
+      category name that is ours to invent, and
+   2. a dynamic ShortcutInfo pushed at runtime with setLongLived(true) and the SAME category
+      (ClipForegroundService.refreshShareShortcuts) — the shortcut is what actually draws the row
+      entry, this file only authorises it.
+
+  Placement in that row is the system's call, not ours: it ranks targets across all apps by usage,
+  so a freshly installed app can sit below the fold until it has been used a few times. One UI
+  draws its own sheet and ranks differently again.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+  <share-target android:targetClass="expo.modules.selfadb.ShareToClipboardActivity">
+    <data android:mimeType="image/*" />
+    <category android:name="expo.modules.selfadb.category.CLIPBOARD" />
+  </share-target>
+  <share-target android:targetClass="expo.modules.selfadb.ShareAsFileActivity">
+    <data android:mimeType="*/*" />
+    <category android:name="expo.modules.selfadb.category.FILE" />
+  </share-target>
+</shortcuts>

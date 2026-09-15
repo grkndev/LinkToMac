@@ -190,6 +190,25 @@ final class RelayClient {
     /// Watches the Mac clipboard; created on first connect, forwards copies to the peer.
     private var pasteboard: PasteboardWatcher?
 
+    /// Reassembles chunked inbound `file` transfers (the phone's "Send as a File" share target).
+    /// `@ObservationIgnored` because `@Observable` rewrites plain stored properties into computed
+    /// ones, which `lazy` (needed here for the `self` capture) can't be.
+    @ObservationIgnored private lazy var fileInbox = FileInbox { [weak self] msg in self?.log(msg) }
+
+    /// Streams a local file to the phone in chunks. Not `@MainActor` — it blocks on an ack window.
+    let fileSender = FileSender()
+
+    /// The file currently arriving from the phone, or nil. Counted in chunks — the receiver only
+    /// learns the real size when the last one lands.
+    var incomingFile: TransferProgress?
+
+    /// The file currently being sent to the phone, or nil. Drives the drop-zone progress UI.
+    var outgoingFile: TransferProgress?
+
+    /// Where a `disp: save` file lands. Owned here rather than injected so the LAN-direct path,
+    /// which reaches `receiveRemoteFile` without going through any view, writes to the same place.
+    let fileDrop = FileDropStore()
+
     /// Watches this Mac's battery; created on first connect, forwards level/charging to the peer.
     private var battery: BatteryMonitor?
 
@@ -370,6 +389,9 @@ final class RelayClient {
     /// to a transport the moment its peer connects (see `LinkToMacApp`).
     func currentStatPayload() -> String? {
         var parts: [String] = []
+        // This Mac's name. The phone uses it to label its Direct Share entries ("Save on <Mac>"),
+        // the way Quick Share names a device — it has no other way to learn what this Mac is called.
+        if let name = Self.macName { parts.append("\"name\":\(Self.jsonString(name))") }
         if let s = battery?.currentState() {
             parts.append("\"level\":\(s.level)")
             parts.append("\"charging\":\(s.charging)")
@@ -380,6 +402,22 @@ final class RelayClient {
         }
         guard !parts.isEmpty else { return nil }
         return "{" + parts.joined(separator: ",") + "}"
+    }
+
+    /// This Mac's user-visible name, as System Settings ▸ General ▸ About shows it. Computed once:
+    /// it can only change via a relaunch-worthy system setting.
+    private static let macName: String? = {
+        let name = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        return name.isEmpty ? nil : name
+    }()
+
+    /// JSON-escape a string for the hand-built `stat` payload (a Mac can be named `Ben"s`).
+    private static func jsonString(_ value: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [value]),
+              let array = String(data: data, encoding: .utf8),
+              array.count >= 2
+        else { return "\"\"" }
+        return String(array.dropFirst().dropLast()) // strip the [ ] JSONSerialization insists on
     }
 
     /// Record the latest BLE proximity reading (from `ProximityMonitor`, which scans the phone's
@@ -409,17 +447,129 @@ final class RelayClient {
         log("lan clip received (\(text.count) chars)")
     }
 
-    /// Write a clipboard image that arrived from the phone (relay or LAN — both call here).
-    /// Parses the `file` plaintext, puts the image on the pasteboard through the echo-suppressed
-    /// writer (so it isn't re-sent to the phone), and records a placeholder in clip history.
-    func writeRemoteImage(_ payload: Data) {
-        guard let (mime, bytes) = FileFrame.parse(payload) else {
+    /// Handle a `file` frame that arrived from the phone (relay or LAN — both call here).
+    ///
+    /// Three shapes land on this one entry point, because `file` carries them all the way the
+    /// `sms` channel carries replies: a whole clipboard image (the original shape), one chunk of a
+    /// larger file, and an ack for a chunk we sent. Chunks are acked as they are stored — that ack
+    /// is the sender's flow control, and without it the phone would outrun the relay's 8 MiB
+    /// per-peer buffer and get this Mac disconnected mid-transfer.
+    func receiveRemoteFile(_ payload: Data) {
+        guard let frame = FileFrame.parse(payload) else {
             log("file frame malformed")
             return
         }
-        pasteboard?.writeImage(bytes, mime: mime)
-        recordClip("[Image]", isImage: true)
-        log("image received (\(mime), \(bytes.count) bytes)")
+        // An ack advances the transfer this Mac is sending (`sendFileToPhone`).
+        if frame.op == FileFrame.opAck {
+            if let id = frame.id { fileSender.ack(id: id) }
+            return
+        }
+
+        // Ack on `id` alone, not on chunk count: a one-chunk "Send as a File" carries an id too,
+        // and the sender blocks on its receipt before reporting success.
+        if let id = frame.id { sendFileAck(id: id, seq: frame.seq) }
+        let assembled = fileInbox.accept(frame)
+        // Republish whatever the inbox now reports: a partial transfer drives the dashboard's
+        // "receiving" row, and a completed or rejected one clears it.
+        incomingFile = fileInbox.progress.map {
+            TransferProgress(name: $0.name, done: $0.received, total: $0.total)
+        }
+        guard let file = assembled else { return }
+
+        switch file.disp {
+        case FileFrame.dispSave:
+            saveIncomingFile(file)
+        default:
+            // Echo-suppressed writer, so the image isn't immediately re-sent to the phone.
+            pasteboard?.writeImage(file.bytes, mime: file.mime)
+            recordClip("[Image]", isImage: true)
+            log("image received (\(file.mime), \(file.bytes.count) bytes)")
+        }
+    }
+
+    /// Write a completed `disp: save` transfer into the configured download folder and tell the
+    /// user where it went — nothing about this arrives on the pasteboard, so a banner is the only
+    /// thing that makes the file discoverable.
+    private func saveIncomingFile(_ file: FileInbox.Assembled) {
+        do {
+            let url = try fileDrop.save(bytes: file.bytes, preferredName: file.name, mime: file.mime)
+            log("file saved: \(url.path) (\(file.bytes.count) bytes)")
+            Task { await MacNotifier.post(title: "Saved from your phone", body: url.lastPathComponent) }
+        } catch {
+            log("file save failed: \(error.localizedDescription)")
+            Task {
+                await MacNotifier.post(
+                    title: "Couldn't save file",
+                    body: file.name ?? "A file from your phone could not be written."
+                )
+            }
+        }
+    }
+
+    /// Send a local file to the phone, where it lands in Downloads/Link to Mac. The Mac→phone
+    /// mirror of the phone's "Send as a File" share target.
+    ///
+    /// Unlike every other outbound frame this picks **one** transport instead of fanning out to
+    /// both: a file is hundreds of frames, and pushing them at the relay as well when the phone is
+    /// actually on the LAN would burn the relay's rate limit for nothing (the phone keeps only one
+    /// link joined, so it would never see the duplicates anyway).
+    func sendFileToPhone(_ url: URL) {
+        guard !fileSender.isSending else {
+            log("file send skipped (another transfer is in flight)")
+            return
+        }
+        guard isLinked || lanPeerConnected else {
+            Task { await MacNotifier.post(title: "Phone isn't connected", body: url.lastPathComponent) }
+            return
+        }
+        let overLAN = lanPeerConnected
+        let name = url.lastPathComponent
+        outgoingFile = TransferProgress(name: name, done: 0, total: 0)
+        log("file -> phone: \(name) (\(overLAN ? "lan" : "relay"))")
+
+        fileSender.send(
+            url: url,
+            overLAN: overLAN,
+            emit: { [self] payload in
+                // DispatchQueue.main, not Task: this keeps chunks in order on the socket. (The
+                // receiver writes by `seq` and tolerates gaps, but there's no reason to create them.)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        if overLAN { self.onLocalFile?(payload) } else { self.sendFile(payload) }
+                    }
+                }
+            },
+            progress: { [self] sent, total in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self.outgoingFile = TransferProgress(name: name, done: sent, total: total)
+                    }
+                }
+            },
+            done: { [self] outcome in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self.outgoingFile = nil
+                        switch outcome {
+                        case .sent:
+                            self.log("file delivered to phone: \(name)")
+                            Task { await MacNotifier.post(title: "Sent to your phone", body: name) }
+                        case let .failed(reason):
+                            self.log("file send failed: \(reason)")
+                            Task { await MacNotifier.post(title: "Couldn't send \(name)", body: reason) }
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    /// Acknowledge one stored chunk, on both transports — `ConnectionManager` keeps exactly one
+    /// link joined at a time, so the phone receives this once, never twice.
+    private func sendFileAck(id: String, seq: Int) {
+        let payload = FileFrame.ack(id: id, seq: seq)
+        sendFile(payload)
+        onLocalFile?(payload)
     }
 
     /// Run a remote action that arrived over the LAN-direct transport (e.g. "lock").
@@ -895,9 +1045,10 @@ final class RelayClient {
                 log("sms decrypt failed (key mismatch or corrupt)")
             }
         case let .file(nonce, ct):
-            // A clipboard image from the phone. Same AEAD as clips; drop anything unauthenticated.
+            // A clipboard image, a file chunk, or a chunk ack from the phone. Same AEAD as clips;
+            // drop anything unauthenticated.
             if let payload = ClipCodec.decodeData(nonce: nonce, ct: ct, keyBase64: pairing.key, type: "file") {
-                writeRemoteImage(payload)
+                receiveRemoteFile(payload)
             } else {
                 log("file decrypt failed (key mismatch or corrupt)")
             }

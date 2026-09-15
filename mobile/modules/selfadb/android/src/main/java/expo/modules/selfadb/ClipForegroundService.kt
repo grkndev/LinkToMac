@@ -19,18 +19,30 @@ import android.graphics.BitmapFactory
 import android.graphics.drawable.Icon
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.net.Uri
 import android.util.Base64
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import expo.modules.selfadb.R
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 
 /**
  * What caught a clip. The shell daemon is the only source that sees a copy on its own; every
@@ -66,6 +78,21 @@ class ClipForegroundService : Service() {
   /** Reads + live-observes the SMS store, forwarding to the Mac over the `sms` channel. Started
    *  only when the user enabled message mirroring AND granted READ_SMS. */
   private var sms: SmsMirror? = null
+
+  /** The chunked `file` transfer currently in flight, so inbound [FileFrame.OP_ACK] frames can
+   *  find its window. Single-slot on purpose: [shareExec] runs one transfer at a time. */
+  @Volatile private var transfer: Transfer? = null
+
+  /** Reassembles chunked inbound `file` transfers from the Mac (streamed to a temp file, never
+   *  held whole in memory). */
+  private val fileInbox by lazy { FileInbox(File(cacheDir, INBOX_DIR)) { ClipBus.log(it) } }
+
+  /** Notification id for the next received file; incremented so arrivals stack. */
+  private var fileNotifId = FILE_NOTIF_ID_BASE
+
+  /** Serialises share-sheet sends off the main thread. One thread, so two shares can never
+   *  interleave their chunks on the socket or race for the same ack window. */
+  private val shareExec = Executors.newSingleThreadExecutor()
 
   /** Texts we recently wrote to the device clipboard, each stamped; their daemon echoes are
    *  swallowed. A time-bounded MAP (not a single slot): rapid Mac→phone clips A then B used to
@@ -167,6 +194,9 @@ class ClipForegroundService : Service() {
     maybeStartConnection()
     // Same for the BLE presence beacon (proximity auto-lock), if the user opted in.
     maybeStartAdvertising()
+    // Re-publish the share-sheet Direct Share targets (idempotent; the system drops dynamic
+    // shortcuts on some upgrade paths, and the Mac's name may have changed since last run).
+    refreshShareShortcuts()
     // And the SMS mirror (live observer), if enabled + permitted. Backfill runs on the peer-online edge.
     maybeStartSmsMirroring()
     // A manual capture rides in on the same intent, handled only after the setup above: the
@@ -176,6 +206,15 @@ class ClipForegroundService : Service() {
     if (intent?.action == ACTION_SUBMIT_CLIP) {
       intent.getStringExtra(EXTRA_TEXT)
         ?.let { ingestClip(it, System.currentTimeMillis().toDouble(), ClipSource.MANUAL) }
+    }
+    // A share-sheet send. Off the main thread (it reads a file and can block on acks for as
+    // long as the transfer takes) but never off the service, which outlives the activity.
+    if (intent?.action == ACTION_SUBMIT_SHARE) {
+      val path = intent.getStringExtra(EXTRA_PATH)
+      val name = intent.getStringExtra(EXTRA_NAME) ?: "shared"
+      val mime = intent.getStringExtra(EXTRA_MIME) ?: "application/octet-stream"
+      val disp = intent.getStringExtra(EXTRA_DISP) ?: FileFrame.DISP_CLIP
+      if (path != null) shareExec.execute { sendShared(path, name, mime, disp) }
     }
     return START_STICKY
   }
@@ -317,7 +356,7 @@ class ClipForegroundService : Service() {
         writeRemoteText(text)
         ClipBus.macClip(text, System.currentTimeMillis().toDouble())
       },
-      onStatReceived = { json -> ClipBus.macStat(json) },
+      onStatReceived = { json -> ClipBus.macStat(json); rememberMacName(json) },
       onFileReceived = { bytes -> applyFile(bytes) },
       onSmsReceived = { json -> handleInboundSms(json) },
       onStatus = { transport, status, peerOnline, error, attempt ->
@@ -378,44 +417,202 @@ class ClipForegroundService : Service() {
     putOnClipboard(text)
   }
 
-  /** Write a received image to cache and put it on the system clipboard as a FileProvider URI.
+  /** Handle an inbound `file` frame from the Mac. Four shapes arrive on this one entry point:
+   *  a whole clipboard image (the original shape), one chunk of a larger file, a one-frame file,
+   *  and an [FileFrame.OP_ACK] for a transfer *we* are sending.
+   *
+   *  Every frame carrying an `id` is acked as soon as it is stored — that ack is the Mac sender's
+   *  flow control, and without it a big file would outrun the relay's 8 MiB per-peer buffer and
+   *  get the phone disconnected mid-transfer. Clipboard images carry no `id` and aren't acked. */
+  private fun applyFile(bytes: ByteArray) {
+    try {
+      val frame = FileFrame.parse(bytes)
+      if (frame == null) { ClipBus.log("file: frame malformed"); return }
+
+      if (frame.op == FileFrame.OP_ACK) {
+        // Flow control for our own outbound transfer — see [sendAsFile].
+        val t = transfer
+        if (t != null && t.id == frame.id) t.window.release()
+        return
+      }
+
+      // Ack on `id` alone, not on chunk count: a one-chunk file transfer carries an id too, and
+      // the Mac blocks on its receipt before reporting success.
+      frame.id?.let { conn?.sendFile(FileFrame.ack(it, frame.seq)) }
+
+      if (!frame.isSingle) {
+        when (val result = fileInbox.accept(frame)) {
+          is FileInbox.Result.Buffered -> postTransferProgress(
+            notifId = TRANSFER_IN_NOTIF_ID,
+            title = "Receiving from your Mac",
+            name = frame.name ?: "File",
+            done = result.received,
+            total = result.total,
+          )
+          is FileInbox.Result.Rejected -> clearTransferProgress(TRANSFER_IN_NOTIF_ID)
+          is FileInbox.Result.Done -> {
+            clearTransferProgress(TRANSFER_IN_NOTIF_ID)
+            val done = result.completed
+            try {
+              if (done.disp == FileFrame.DISP_SAVE) {
+                saveIncomingFile(done.file, done.name, done.mime)
+              } else {
+                // Clipboard images are always fit into one frame by the sender, so a chunked one
+                // is a peer bug; reading it whole to paste it would be an unbounded allocation.
+                ClipBus.log("file: chunked clipboard images aren't supported (${done.file.length()} B)")
+              }
+            } finally {
+              done.file.delete()
+            }
+          }
+        }
+        return
+      }
+
+      if (frame.disp == FileFrame.DISP_SAVE) {
+        val staged = File(File(cacheDir, INBOX_DIR).apply { mkdirs() }, "in-${System.currentTimeMillis()}")
+        try {
+          staged.writeBytes(frame.bytes)
+          saveIncomingFile(staged, frame.name, frame.mime)
+        } finally {
+          staged.delete()
+        }
+      } else {
+        applyClipboardImage(frame.bytes, frame.mime)
+      }
+    } catch (e: Exception) {
+      ClipBus.log("file apply failed: ${e.message}")
+    }
+  }
+
+  /** Put a received image on the system clipboard as a FileProvider content URI.
+   *
    *  Goes through [ClipboardManager] directly (background clipboard *writes* are allowed; only
    *  reads are focus-gated) — NOT through the shell daemon, which is text-only and holds no
    *  grant to our provider. The daemon's clip-changed listener reads no text off a URI clip,
    *  so nothing echoes back to the Mac ([recentWrites] stays untouched). */
-  private fun applyFile(bytes: ByteArray) {
-    try {
-      if (bytes.size < 2) { ClipBus.log("file: frame too short"); return }
-      val headerLen = ((bytes[0].toInt() and 0xFF) shl 8) or (bytes[1].toInt() and 0xFF)
-      if (bytes.size <= 2 + headerLen) { ClipBus.log("file: bad header length"); return }
-      val header = JSONObject(String(bytes, 2, headerLen, Charsets.UTF_8))
-      val mime = header.optString("mime", "image/png")
-      val ext = if (mime == "image/jpeg") "jpg" else "png"
+  private fun applyClipboardImage(bytes: ByteArray, mime: String) {
+    val ext = if (mime == "image/jpeg") "jpg" else "png"
+    val dir = File(cacheDir, "clips").apply { mkdirs() }
+    // Reap stale clips by AGE, not wholesale: a paste target may still be streaming a
+    // previous image off its FileProvider URI (slow editor), and deleting it mid-decode
+    // breaks that read. 30 s comfortably outlives any real paste.
+    val reapCutoff = System.currentTimeMillis() - CLIP_FILE_REAP_MS
+    dir.listFiles()?.filter { it.lastModified() < reapCutoff }?.forEach { it.delete() }
+    // Fresh timestamped name so a paste target never serves a cached read of an old URI.
+    val file = File(dir, "clip-${System.currentTimeMillis()}.$ext")
+    file.outputStream().use { it.write(bytes) }
 
-      val dir = File(cacheDir, "clips").apply { mkdirs() }
-      // Reap stale clips by AGE, not wholesale: a paste target may still be streaming a
-      // previous image off its FileProvider URI (slow editor), and deleting it mid-decode
-      // breaks that read. 30 s comfortably outlives any real paste.
-      val reapCutoff = System.currentTimeMillis() - CLIP_FILE_REAP_MS
-      dir.listFiles()?.filter { it.lastModified() < reapCutoff }?.forEach { it.delete() }
-      // Fresh timestamped name so a paste target never serves a cached read of an old URI.
-      val file = File(dir, "clip-${System.currentTimeMillis()}.$ext")
-      file.outputStream().use { it.write(bytes, 2 + headerLen, bytes.size - 2 - headerLen) }
+    // Stamp the raw image bytes' hash BEFORE putting them on the clipboard: the daemon's
+    // clip-changed listener will re-read this exact file and try to forward it back to the Mac;
+    // [captureImage] consumes this stamp and drops that echo.
+    stampImageWrite(sha256(bytes))
 
-      // Stamp the raw image bytes' hash BEFORE putting them on the clipboard: the daemon's
-      // clip-changed listener will re-read this exact file and try to forward it back to the Mac;
-      // [captureImage] consumes this stamp and drops that echo.
-      val imageBytes = bytes.copyOfRange(2 + headerLen, bytes.size)
-      stampImageWrite(sha256(imageBytes))
+    val uri = FileProvider.getUriForFile(this, "$packageName.selfadb.fileprovider", file)
+    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newUri(contentResolver, "Image", uri))
+    ClipBus.macClip("[Image]", System.currentTimeMillis().toDouble())
+    ClipBus.log("file -> clipboard image ($mime, ${file.length()} B)")
+  }
 
-      val uri = FileProvider.getUriForFile(this, "$packageName.selfadb.fileprovider", file)
-      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-      clipboard.setPrimaryClip(ClipData.newUri(contentResolver, "Image", uri))
-      ClipBus.macClip("[Image]", System.currentTimeMillis().toDouble())
-      ClipBus.log("file -> clipboard image ($mime, ${file.length()} B)")
-    } catch (e: Exception) {
-      ClipBus.log("file apply failed: ${e.message}")
+  /** Write a completed `disp:"save"` transfer into shared Downloads and raise a notification —
+   *  nothing about this lands on the clipboard, so the notification is the only thing that makes
+   *  the file discoverable. Tapping it opens the file. */
+  private fun saveIncomingFile(source: File, name: String?, mime: String) {
+    val display = FileSink.sanitize(name, mime)
+    val uri = FileSink.saveToDownloads(this, source, name, mime)
+    if (uri == null) {
+      ClipBus.log("file: couldn't save $display")
+      postFileNotification("Couldn't save file", display, null, mime)
+      return
     }
+    ClipBus.log("file saved to Downloads: $display (${source.length()} B)")
+    postFileNotification("Saved from your Mac", display, uri, mime)
+  }
+
+  /** Last post time per progress notification, so a fast transfer doesn't hammer the notification
+   *  manager — it rate-limits updates, and at 640 KiB a chunk a LAN transfer can fire dozens a
+   *  second. Keyed by notification id; there is one per direction. */
+  private val lastProgressPost = HashMap<Int, Long>()
+
+  /**
+   * Show (or update) the progress bar for a transfer in flight. Throttled to
+   * [PROGRESS_THROTTLE_MS], except for the final step, which always posts so the bar visibly
+   * reaches the end instead of stopping at whatever the last throttled update showed.
+   *
+   * Its own low-importance channel: this is a running status, not an event, and it must never
+   * make a sound or a heads-up on every file.
+   */
+  private fun postTransferProgress(notifId: Int, title: String, name: String, done: Int, total: Int) {
+    val now = SystemClock.elapsedRealtime()
+    val complete = done >= total
+    if (!complete && now - (lastProgressPost[notifId] ?: 0L) < PROGRESS_THROTTLE_MS) return
+    lastProgressPost[notifId] = now
+
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      nm.createNotificationChannel(
+        NotificationChannel(CHANNEL_TRANSFER, "File transfers", NotificationManager.IMPORTANCE_LOW)
+      )
+    }
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(this, CHANNEL_TRANSFER)
+    } else {
+      @Suppress("DEPRECATION") Notification.Builder(this)
+    }
+    val percent = if (total > 0) done * 100 / total else 0
+    nm.notify(
+      notifId,
+      builder
+        .setContentTitle(title)
+        .setContentText(name)
+        .setSubText("$percent%")
+        .setSmallIcon(R.drawable.ic_stat_link)
+        .setProgress(total, done, false)
+        .setOnlyAlertOnce(true)
+        // NOT ongoing: a transfer that dies in a way we can't observe (process death mid-send)
+        // would otherwise leave an undismissable notification behind.
+        .setOngoing(false)
+        .build()
+    )
+  }
+
+  /** Take the progress bar down — on completion, on failure, and on a rejected chunk. */
+  private fun clearTransferProgress(notifId: Int) {
+    lastProgressPost.remove(notifId)
+    (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(notifId)
+  }
+
+  /** Heads-up for a file that arrived from the Mac. [uri] non-null makes the notification open it. */
+  private fun postFileNotification(title: String, body: String, uri: Uri?, mime: String) {
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      nm.createNotificationChannel(
+        NotificationChannel(CHANNEL_FILE, "Received files", NotificationManager.IMPORTANCE_DEFAULT)
+      )
+    }
+    val contentIntent = uri?.let {
+      val view = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(it, mime)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      PendingIntent.getActivity(
+        this, fileNotifId, view, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+    }
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(this, CHANNEL_FILE)
+    } else {
+      @Suppress("DEPRECATION") Notification.Builder(this)
+    }
+    val notification = builder
+      .setContentTitle(title)
+      .setContentText(body)
+      .setSmallIcon(R.drawable.ic_stat_link)
+      .setAutoCancel(true)
+      .apply { contentIntent?.let { setContentIntent(it) } }
+      .build()
+    // A fresh id per file so several arrivals stack instead of overwriting each other.
+    nm.notify(fileNotifId++, notification)
   }
 
   /** A clipboard image the daemon captured on the phone → forward to the Mac. Drops the echo of
@@ -430,9 +627,134 @@ class ClipForegroundService : Service() {
       val fit = fitImage(bytes, mime)
       if (fit == null) { ClipBus.log("image capture skipped (can't fit under the frame budget)"); return }
       ClipBus.log("image -> Mac (${fit.second}, ${fit.first.size} B)")
-      conn?.sendFile(buildFilePayload(fit.second, fit.first))
+      conn?.sendFile(FileFrame.encode(fit.second, fit.first))
     } catch (e: Exception) {
       ClipBus.log("image capture failed: ${e.message}")
+    }
+  }
+
+  // ---- Share-sheet sends (ShareActivity -> here) ----------------------------
+  // The activity has already copied the shared bytes into cacheDir/outbox (its URI grant dies
+  // with it), so this side only has a path. Runs on [shareExec] — a single thread, so two
+  // transfers can never interleave on one ack window or one socket.
+
+  /** Send a file the user picked from the share sheet, then delete the staged copy. Returns
+   *  through a toast either way: this is a fire-and-forget action with no app UI to update. */
+  private fun sendShared(path: String, name: String, mime: String, disp: String) {
+    val file = File(path)
+    try {
+      val link = conn
+      val result = when {
+        link == null || !ClipBus.peerOnline() -> NOT_CONNECTED
+        !file.isFile -> "Couldn't read $name"
+        disp == FileFrame.DISP_SAVE -> sendAsFile(link, file, name, mime)
+        else -> sendToClipboard(link, file, mime)
+      }
+      toastOnMain(result)
+    } catch (e: Exception) {
+      ClipBus.log("share send failed: ${e.message}")
+      toastOnMain("Couldn't send $name")
+    } finally {
+      file.delete()
+    }
+  }
+
+  /** Share → the Mac's clipboard: one frame, downscaled to fit, exactly like a copied image.
+   *  Losing resolution is correct here — the user asked to paste it, not to keep it. */
+  private fun sendToClipboard(link: ConnectionManager, file: File, mime: String): String {
+    // [fitImage] works on a whole ByteArray, so an enormous source would OOM before it ever
+    // got to sample it down. Files past this are a "Send as a File" job anyway.
+    if (file.length() > MAX_CLIPBOARD_SOURCE_BYTES) return "That image is too large to paste"
+    val fit = fitImage(file.readBytes(), mime) ?: return "Couldn't fit that image"
+    link.sendFile(FileFrame.encode(fit.second, fit.first))
+    ClipBus.log("share -> Mac clipboard (${fit.second}, ${fit.first.size} B)")
+    return "Sent to your Mac's clipboard"
+  }
+
+  /** Share → a file saved on the Mac, at original quality, in [FileFrame.CHUNK_RAW_BYTES] chunks.
+   *
+   *  Two independent relay limits shape this, and tripping either one drops the connection
+   *  rather than just the frame:
+   *
+   *   - **Buffer.** The relay hangs up on a peer buffering more than 8 MiB (`maxPayloadBytes * 8`),
+   *     so blasting every chunk at once would disconnect the Mac partway through. At most
+   *     [ACK_WINDOW] chunks stay unacked ([FileFrame.OP_ACK]), holding the relay near 3 MB.
+   *   - **Rate.** `RATE_LIMIT_MSGS` frames per `RATE_LIMIT_WINDOW_MS` (120 / 10 s), counted per
+   *     connection — and a big file is a lot of frames. [RELAY_CHUNK_INTERVAL_MS] keeps us well
+   *     under it. LAN-direct talks straight to the Mac with no such limit, so it isn't paced.
+   *
+   *  The final drain means the success toast is a real delivery receipt, not an optimistic
+   *  guess — the only send path here that can say that. */
+  private fun sendAsFile(link: ConnectionManager, file: File, name: String, mime: String): String {
+    val total = file.length()
+    if (total <= 0L) return "$name is empty"
+    if (total > FileFrame.MAX_TRANSFER_BYTES) return "$name is too large"
+    val count = ((total + FileFrame.CHUNK_RAW_BYTES - 1) / FileFrame.CHUNK_RAW_BYTES).toInt()
+    val id = UUID.randomUUID().toString().substring(0, 8)
+    val t = Transfer(id)
+    transfer = t
+    ClipBus.log("share -> Mac file: $name ($total B, $count chunk(s), id=$id)")
+    try {
+      val buf = ByteArray(FileFrame.CHUNK_RAW_BYTES)
+      var lastSentAt = 0L
+      file.inputStream().use { input ->
+        for (seq in 0 until count) {
+          if (!t.window.tryAcquire(ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            ClipBus.log("share: timed out waiting for ack ${seq - ACK_WINDOW} of $id")
+            return "Your Mac stopped responding"
+          }
+          val read = fill(input, buf)
+          if (read <= 0) return "Couldn't read $name"
+          // Re-read the transport each chunk: a LAN link can drop to the relay mid-transfer.
+          val pace = if (ClipBus.onLan()) 0L else RELAY_CHUNK_INTERVAL_MS
+          val wait = pace - (SystemClock.elapsedRealtime() - lastSentAt)
+          if (wait > 0) Thread.sleep(wait)
+          link.sendFile(
+            FileFrame.encode(mime, buf, 0, read, name, FileFrame.DISP_SAVE, id, seq, count)
+          )
+          lastSentAt = SystemClock.elapsedRealtime()
+          // Progress is counted in chunks *sent*, not acked: the ack window means the two differ
+          // by at most [ACK_WINDOW], which is invisible on a transfer of any real size — and the
+          // final drain below is what makes the completion honest.
+          postTransferProgress(TRANSFER_OUT_NOTIF_ID, "Sending to your Mac", name, seq + 1, count)
+        }
+      }
+      // Reclaim the whole window: every outstanding chunk has been acked once we can.
+      repeat(ACK_WINDOW) {
+        if (!t.window.tryAcquire(ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+          ClipBus.log("share: transfer $id never fully acked")
+          return "Your Mac stopped responding"
+        }
+      }
+      ClipBus.log("share: file $id delivered")
+      return "Saved $name on your Mac"
+    } finally {
+      transfer = null
+      clearTransferProgress(TRANSFER_OUT_NOTIF_ID)
+    }
+  }
+
+  /** Read until [buf] is full or the stream ends — `InputStream.read` is allowed to return
+   *  short, and `readNBytes` is API 33 (this module ships to 30). */
+  private fun fill(input: InputStream, buf: ByteArray): Int {
+    var n = 0
+    while (n < buf.size) {
+      val r = input.read(buf, n, buf.size - n)
+      if (r < 0) break
+      n += r
+    }
+    return n
+  }
+
+  /** One chunked `file` transfer in flight. [window] starts full; a send takes a permit and an
+   *  ack returns one, so at most [ACK_WINDOW] chunks are ever unacknowledged. */
+  private class Transfer(val id: String) {
+    val window = Semaphore(ACK_WINDOW)
+  }
+
+  private fun toastOnMain(msg: String) {
+    Handler(Looper.getMainLooper()).post {
+      Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
     }
   }
 
@@ -442,7 +764,7 @@ class ClipForegroundService : Service() {
   private fun fitImage(bytes: ByteArray, mime: String): Pair<ByteArray, String>? {
     // Already under budget and a format the receiver handles (png/jpeg) → send as-is, no re-encode.
     if (bytes.size <= RAW_IMAGE_BUDGET && (mime == "image/png" || mime == "image/jpeg")) return bytes to mime
-    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    val bmp = decodeBounded(bytes) ?: return null
     for ((scale, quality) in IMAGE_FIT_STEPS) {
       val scaled = if (scale < 1f) {
         Bitmap.createScaledBitmap(
@@ -461,16 +783,100 @@ class ClipForegroundService : Service() {
     return null
   }
 
-  /** Assemble the `file` frame plaintext (byte-exact contract with the Mac's `FileFrame`):
-   *  u16 BE header-len ‖ header JSON utf8 ‖ raw image bytes. */
-  private fun buildFilePayload(mime: String, bytes: ByteArray): ByteArray {
-    val header = "{\"mime\":\"$mime\"}".toByteArray(Charsets.UTF_8)
-    val out = ByteArrayOutputStream(2 + header.size + bytes.size)
-    out.write((header.size shr 8) and 0xFF)
-    out.write(header.size and 0xFF)
-    out.write(header)
-    out.write(bytes)
-    return out.toByteArray()
+  /** Decode capped at [MAX_DECODE_PIXELS] via `inSampleSize`. A full-resolution decode is fine
+   *  for the screenshots the clipboard path sees, but the share sheet hands us camera photos —
+   *  a 50 MP frame is ~200 MB as ARGB_8888 and takes the foreground service down with it. */
+  private fun decodeBounded(bytes: ByteArray): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth.toLong() * bounds.outHeight / (sample.toLong() * sample) > MAX_DECODE_PIXELS) {
+      sample *= 2
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
+      inSampleSize = sample
+    })
+  }
+
+  // ---- Direct Share (the share sheet's top row) ----------------------------
+
+  /**
+   * Publish the two share targets as long-lived dynamic shortcuts. `res/xml/selfadb_shortcuts.xml`
+   * only *authorises* a target; the shortcut pushed here is what actually draws the entry in the
+   * share sheet's top row, alongside Quick Share's nearby devices and WhatsApp's contacts.
+   *
+   * Excluded from the launcher surface: these exist to be shared *to*, and adding two entries to
+   * the app's long-press menu that do nothing but open the app would be noise.
+   *
+   * Idempotent — re-pushing the same id updates it — so it runs on every start and again whenever
+   * the Mac's name arrives or changes.
+   */
+  private fun refreshShareShortcuts() {
+    try {
+      val mac = getMacName(this)
+      val shortcuts = listOf(
+        shareShortcut(
+          id = SHORTCUT_CLIPBOARD,
+          short = "Clipboard",
+          long = if (mac != null) "Clipboard on $mac" else "Send to your Mac's clipboard",
+          icon = R.drawable.ic_share_clipboard,
+          category = CATEGORY_CLIPBOARD,
+          target = ShareToClipboardActivity::class.java,
+        ),
+        shareShortcut(
+          id = SHORTCUT_FILE,
+          short = "Save file",
+          long = if (mac != null) "Save on $mac" else "Save a file on your Mac",
+          icon = R.drawable.ic_share_file,
+          category = CATEGORY_FILE,
+          target = ShareAsFileActivity::class.java,
+        ),
+      )
+      // The result matters: this returns false (no throw) when the push is rejected — the
+      // per-app quota is full, or the system is rate-limiting a background caller.
+      val ok = ShortcutManagerCompat.addDynamicShortcuts(this, shortcuts)
+      ClipBus.log(
+        "share shortcuts: published=$ok, max=${ShortcutManagerCompat.getMaxShortcutCountPerActivity(this)}" +
+          ", rateLimited=${ShortcutManagerCompat.isRateLimitingActive(this)}"
+      )
+    } catch (e: Exception) {
+      // Never fatal: OEM launchers have their own shortcut quotas and some reject the push.
+      ClipBus.log("share shortcuts not published: ${e.message}")
+    }
+  }
+
+  private fun shareShortcut(
+    id: String,
+    short: String,
+    long: String,
+    icon: Int,
+    category: String,
+    target: Class<*>,
+  ): ShortcutInfoCompat =
+    ShortcutInfoCompat.Builder(this, id)
+      .setShortLabel(short)
+      .setLongLabel(long)
+      .setLongLived(true)
+      .setIcon(IconCompat.createWithResource(this, icon))
+      .setCategories(setOf(category))
+      // Required by the builder even though Direct Share replaces it with the real share intent.
+      .setIntent(Intent(this, target).setAction(Intent.ACTION_DEFAULT))
+      .setExcludedFromSurfaces(ShortcutInfoCompat.SURFACE_LAUNCHER)
+      .build()
+
+  /** Note the Mac's name off its `stat` frame, so the Direct Share entries can say whose Mac this
+   *  is instead of a generic "your Mac". Persisted (the shortcuts outlive the process) and only
+   *  re-pushed when it actually changed — a `stat` arrives on every battery tick. */
+  private fun rememberMacName(json: String) {
+    val name = try {
+      JSONObject(json).optString("name").takeIf { it.isNotBlank() }
+    } catch (e: Exception) {
+      null
+    } ?: return
+    if (name == getMacName(this)) return
+    getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit().putString(KEY_MAC_NAME, name).apply()
+    refreshShareShortcuts()
   }
 
   // ---- Telemetry (battery + name -> Mac) -----------------------------------
@@ -620,6 +1026,7 @@ class ClipForegroundService : Service() {
   }
 
   override fun onDestroy() {
+    shareExec.shutdownNow()
     unregisterBatteryReceiver()
     conn?.shutdown()
     conn = null
@@ -796,8 +1203,23 @@ class ClipForegroundService : Service() {
     private const val CHANNEL = "linktomac"
     private const val CHANNEL_HIDDEN = "linktomac_hidden"
     private const val CHANNEL_SMS_ALERT = "linktomac_sms_alert"
+    private const val CHANNEL_FILE = "linktomac_file"
+    /** Separate from [CHANNEL_FILE]: progress is a running status, not an event, so it gets its
+     *  own LOW-importance channel and never alerts. */
+    private const val CHANNEL_TRANSFER = "linktomac_transfer"
+    /** cacheDir subfolder holding in-flight + just-completed inbound transfers. */
+    private const val INBOX_DIR = "inbox"
     private const val NOTIF_ID = 1001
     private const val SMS_ALERT_NOTIF_ID = 1002
+    /** First id for received-file notifications; each arrival takes the next one. */
+    private const val FILE_NOTIF_ID_BASE = 2000
+    /** Fixed ids for the two progress bars (one transfer per direction at a time: outbound is
+     *  serialised on [shareExec], inbound is realistically one file). */
+    private const val TRANSFER_OUT_NOTIF_ID = 1003
+    private const val TRANSFER_IN_NOTIF_ID = 1004
+    /** Minimum gap between progress updates. The notification manager rate-limits, and a LAN
+     *  transfer can complete dozens of chunks a second. */
+    private const val PROGRESS_THROTTLE_MS = 400L
     /** PendingIntent request code for the notification's "Send clipboard" action. */
     private const val REQ_SEND_CLIPBOARD = 1
     private const val EXTRA_PORT = "port"
@@ -805,6 +1227,13 @@ class ClipForegroundService : Service() {
     /** Start-intent action carrying a manually captured clip (see [submitClip]). */
     private const val ACTION_SUBMIT_CLIP = "expo.modules.selfadb.SUBMIT_CLIP"
     private const val EXTRA_TEXT = "text"
+
+    /** Start-intent action carrying a share-sheet send (see [submitShare]). */
+    private const val ACTION_SUBMIT_SHARE = "expo.modules.selfadb.SUBMIT_SHARE"
+    private const val EXTRA_PATH = "path"
+    private const val EXTRA_NAME = "name"
+    private const val EXTRA_MIME = "mime"
+    private const val EXTRA_DISP = "disp"
 
     /**
      * Hand a manually captured clip to the service, starting it if the process came back
@@ -816,6 +1245,22 @@ class ClipForegroundService : Service() {
       val intent = Intent(ctx, ClipForegroundService::class.java)
         .setAction(ACTION_SUBMIT_CLIP)
         .putExtra(EXTRA_TEXT, text)
+      ContextCompat.startForegroundService(ctx, intent)
+    }
+
+    /**
+     * Hand a share-sheet payload to the service. [path] is a file the caller already staged in
+     * our own cache — [ShareActivity] has to copy it there anyway (its URI grant dies with the
+     * activity), and a path survives the Binder transaction limit that the bytes would not.
+     * The service deletes it when the send finishes, however it finishes.
+     */
+    fun submitShare(ctx: Context, path: String, name: String, mime: String, disp: String) {
+      val intent = Intent(ctx, ClipForegroundService::class.java)
+        .setAction(ACTION_SUBMIT_SHARE)
+        .putExtra(EXTRA_PATH, path)
+        .putExtra(EXTRA_NAME, name)
+        .putExtra(EXTRA_MIME, mime)
+        .putExtra(EXTRA_DISP, disp)
       ContextCompat.startForegroundService(ctx, intent)
     }
     private const val PREFS = "linktomac_relay"
@@ -830,6 +1275,8 @@ class ClipForegroundService : Service() {
     private const val KEY_SMS_FORWARDING = "smsForwarding"
     private const val KEY_SEND_IMAGES = "sendImages"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
+    /** The Mac's device name, learned from its `stat` frames — see [rememberMacName]. */
+    private const val KEY_MAC_NAME = "macName"
     private const val KEY_DAEMON_SECRET = "daemonSecret"
     private const val KEY_CLIP_PORT = "clipPort"
     /** How long a write stamp lives before it can no longer suppress an echo. */
@@ -837,13 +1284,52 @@ class ClipForegroundService : Service() {
     /** Raw image budget before sealing: ~700 KB → ~960 KB frame after base64, under the relay's
      *  1 MiB cap. Same budget as the Mac's `ImagePrep`; bump both with `MAX_PAYLOAD_BYTES`. */
     private const val RAW_IMAGE_BUDGET = 700 * 1024
-    /** (scale, JPEG quality) ladder for fitting an oversize image; first output under budget wins. */
-    private val IMAGE_FIT_STEPS = listOf(1.0f to 0.8f, 0.7f to 0.7f, 0.5f to 0.5f)
+    /** (scale, JPEG quality) ladder for fitting an oversize image; first output under budget wins.
+     *  The last two steps exist for the share sheet: a full-frame camera photo is still well over
+     *  budget at half scale, and stopping there would reject the most common thing a user shares. */
+    private val IMAGE_FIT_STEPS =
+      listOf(1.0f to 0.8f, 0.7f to 0.7f, 0.5f to 0.5f, 0.35f to 0.5f, 0.25f to 0.4f)
+
+    /** Pixel ceiling for [decodeBounded]: 4 MP is ~16 MB as ARGB_8888, plenty for something that
+     *  is about to be squeezed under [RAW_IMAGE_BUDGET] anyway. */
+    private const val MAX_DECODE_PIXELS = 4L * 1024 * 1024
+
+    /** Biggest source file the clipboard path will read whole (it decodes from a ByteArray).
+     *  Anything larger belongs on the "Send as a File" path, which streams. */
+    private const val MAX_CLIPBOARD_SOURCE_BYTES = 32L * 1024 * 1024
+
+    /** Chunks allowed in flight unacknowledged. At ~853 KB on the wire each, four keeps the
+     *  relay's per-peer buffer near 3 MB — comfortably under the 8 MiB at which it hangs up. */
+    private const val ACK_WINDOW = 4
+
+    /** How long one chunk may go unacknowledged before the transfer is declared dead. Generous:
+     *  it covers a relay reconnect, not just a slow link. */
+    private const val ACK_TIMEOUT_MS = 30_000L
+
+    /** Minimum gap between chunk sends ON THE RELAY: 8 frames/s against the relay's 120-per-10 s
+     *  per-connection limit, leaving headroom for `stat`/ping traffic and for the Mac's ack
+     *  stream, which is counted against *its* connection at the same rate. Coupled to the relay's
+     *  `RATE_LIMIT_MSGS`/`RATE_LIMIT_WINDOW_MS` — revisit this if either moves. It costs nothing
+     *  real: 8 x 640 KiB is ~5 MB/s, far above any relay link. */
+    private const val RELAY_CHUNK_INTERVAL_MS = 125L
+
+    private const val NOT_CONNECTED = "Your Mac isn't connected"
+
+    // Direct Share ids + categories. The categories must match res/xml/selfadb_shortcuts.xml
+    // exactly or the system refuses to use the shortcut as a share target.
+    private const val SHORTCUT_CLIPBOARD = "share-clipboard"
+    private const val SHORTCUT_FILE = "share-file"
+    private const val CATEGORY_CLIPBOARD = "expo.modules.selfadb.category.CLIPBOARD"
+    private const val CATEGORY_FILE = "expo.modules.selfadb.category.FILE"
     const val DEFAULT_PORT = 53123
 
     /** The daemon port this install actually runs on (per-variant; JS passes it to autoStart).
      *  Persisted in PREFS_UI so START_STICKY restarts and adb-free liveness checks agree with
      *  the JS-chosen port instead of assuming [DEFAULT_PORT]. */
+    /** The paired Mac's name, or null before its first `stat` arrives. */
+    fun getMacName(ctx: Context): String? =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).getString(KEY_MAC_NAME, null)
+
     fun getClipPort(ctx: Context): Int =
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
         .getInt(KEY_CLIP_PORT, DEFAULT_PORT)

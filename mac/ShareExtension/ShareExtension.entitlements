@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  REQUIRED, not optional. macOS refuses to register an app extension that isn't sandboxed:
+	  without this, `pluginkit -a` and `lsregister -f` both silently fail to pick the .appex up and
+	  it never appears in the Finder Share menu. (The containing app stays unsandboxed — only the
+	  extension has to be.)
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Read the file the user shared. The item arrives with an implicit sandbox extension, but
+	     this is the entitlement that makes a user-chosen file readable in the general case. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+</dict>
+</plist>

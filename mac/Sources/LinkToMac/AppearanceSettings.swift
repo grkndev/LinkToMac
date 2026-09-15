@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// UserDefaults keys for the Mac appearance prefs. Plain (non-isolated) so the `MenuBarExtra`'s
-/// `@AppStorage` in `LinkToMacApp` can share the exact key the store writes.
+/// UserDefaults keys for the Mac appearance prefs. Plain (non-isolated) so anything reading them
+/// outside this store shares the exact key it writes.
 enum AppearanceKeys {
     static let dock = "showInDock"
     static let menuBar = "showInMenuBar"
@@ -24,8 +24,8 @@ final class AppearanceStore {
         }
     }
 
-    /// Menu-bar item. The `MenuBarExtra` reads the same UserDefaults key via `@AppStorage`, so the
-    /// item inserts/removes reactively when this flips.
+    /// Menu-bar item. `StatusItemController` tracks this property (`withObservationTracking`) and
+    /// adds/removes its `NSStatusItem` when it flips.
     var showInMenuBar: Bool {
         didSet {
             UserDefaults.standard.set(showInMenuBar, forKey: AppearanceKeys.menuBar)

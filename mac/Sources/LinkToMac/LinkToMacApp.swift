@@ -5,25 +5,15 @@ import Sparkle
 @main
 struct LinkToMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    /// Drives `MenuBarExtra` insertion. Shares the exact UserDefaults key `AppearanceStore` writes,
-    /// so toggling "Show in Menu Bar" in Settings inserts/removes the item reactively.
-    @AppStorage(AppearanceKeys.menuBar) private var showInMenuBar = true
 
     var body: some Scene {
-        // Window-style menu bar extra: the dropdown is a soft native popover panel, which
-        // (unlike a .menu) can host real switches and a designed layout. See `MenuPanel`.
-        MenuBarExtra(isInserted: $showInMenuBar) {
-            MenuPanel(
-                client: delegate.client,
-                onOpenWindow: { delegate.showDashboardWindow() },
-            )
-        } label: {
-            // The app mark as a template image (monochrome; the system tints it for the menu bar).
-            // Dimmed when the phone isn't linked, so it doubles as an at-a-glance status cue.
-            Image("MenuBarIcon")
-                .opacity(delegate.client.isLinked ? 1 : 0.45)
-        }
-        .menuBarExtraStyle(.window)
+        // The menu-bar item is an `NSStatusItem` owned by the AppDelegate (`StatusItemController`),
+        // NOT a `MenuBarExtra`: it has to accept dragged files so a file can be sent to the phone
+        // with the dashboard closed, and MenuBarExtra exposes no hook to register dragged types on.
+        // SwiftUI still requires a Scene, so this is an empty Settings scene with its menu item
+        // removed — every real setting lives in the dashboard window.
+        Settings { EmptyView() }
+            .commands { CommandGroup(replacing: .appSettings) {} }
     }
 }
 
@@ -44,6 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the same network connects straight to us; rebuilt by `applyLanSettings()` when the port or
     /// the enabled toggle changes. Reads the pairing fresh on each handshake.
     private var lan: LanServer?
+    /// The menu-bar item + its panel. Owns the `NSStatusItem`, so it can be a drop target.
+    private lazy var statusItem = StatusItemController(
+        client: client,
+        appearance: appearance,
+        onOpenWindow: { [weak self] in self?.showDashboardWindow() }
+    )
     /// The main dashboard window. Built lazily and reused (the app is now a regular Dock app, so
     /// the window is the primary surface; the menu-bar extra is the quick-glance companion).
     private var dashboardWindow: NSWindow?
@@ -65,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.onPairingChanged = { [weak self] in self?.applyLanSettings() }
         applyLanSettings()
         appearance.applyDockPolicy() // honour the persisted "Show in Dock" pref at launch
+        statusItem.start()           // and the persisted "Show in Menu Bar" pref
         // Don't steal focus here: at launch (esp. as a background "Start at login" item) the
         // user may already be mid-task in another app — order the window front without activating.
         showDashboardWindow(activate: false)
@@ -77,6 +74,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Keep the app alive when the dashboard window is closed — it still lives in the menu bar.
     /// Quit only via the menu or ⌘Q.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Handle `linktomac://send?path=…` — the Finder Share extension handing over a file it can't
+    /// send itself (it's sandboxed; this app is not, so the path is readable as-is).
+    ///
+    /// The path arrives from our own extension, but it is still just a string from outside the
+    /// process, so it is checked for being a real file before anything is read.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "linktomac" && url.host == "send" {
+            guard let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "path" })?.value,
+                  !path.isEmpty
+            else { continue }
+            let file = URL(fileURLWithPath: path)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue
+            else {
+                NSLog("[LinkToMac] share extension handed over a path that isn't a file")
+                continue
+            }
+            client.sendFileToPhone(file)
+        }
+    }
 
     /// Clicking the Dock icon (with the window closed) reopens the dashboard.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -99,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         server.onRemoteStat = { json in Task { @MainActor in client.writeRemoteStat(json) } }
         server.onRemoteNote = { json in Task { @MainActor in client.writeRemoteNote(json) } }
         server.onRemoteSms = { json in Task { @MainActor in client.writeRemoteSms(json) } }
-        server.onRemoteFile = { payload in Task { @MainActor in client.writeRemoteImage(payload) } }
+        server.onRemoteFile = { payload in Task { @MainActor in client.receiveRemoteFile(payload) } }
         // `weak server` so the callback doesn't retain the server it's installed on. On connect,
         // push the current battery immediately so the phone shows it without waiting for the poll.
         server.onPeerChange = { [weak server] connected in
