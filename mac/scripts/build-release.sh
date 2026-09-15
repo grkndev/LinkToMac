@@ -5,8 +5,13 @@
 #
 #   ./scripts/build-release.sh              # build + DMG + appcast (local only)
 #   ./scripts/build-release.sh --publish    # also: gh release create/upload to GitHub
+#   ./scripts/build-release.sh --publish --no-notes   # publish with a placeholder body
 #   → mac/build/release/LinkToMac-<version>.dmg
 #   → mac/build/release/appcast.xml
+#
+# Release notes live in `release-notes/v<version>.md` at the repo root (they cover BOTH apps, not
+# just the Mac). Publishing without one is refused up front — 0.9.0 shipped with a "LinkToMac 0.9.0"
+# placeholder body because nothing stopped it, and the notes had to be pasted in afterwards.
 #
 # The app is ad-hoc signed (no Apple Developer team; matches project.yml). It is therefore
 # NOT notarized: on another Mac, Gatekeeper quarantines a downloaded copy. First launch must be
@@ -29,7 +34,32 @@ REPO=grkndev/LinkToMac
 DOWNLOAD_BASE="https://github.com/$REPO/releases/download"
 
 PUBLISH=0
-[ "${1:-}" = "--publish" ] && PUBLISH=1
+REQUIRE_NOTES=1
+for arg in "$@"; do
+  case "$arg" in
+    --publish)  PUBLISH=1 ;;
+    --no-notes) REQUIRE_NOTES=0 ;;
+    *) echo "error: unknown argument '$arg' (expected --publish and/or --no-notes)" >&2; exit 1 ;;
+  esac
+done
+
+# Resolve the version from project.yml rather than the built bundle, so a missing release-notes
+# file fails NOW instead of after a full Release build + DMG + Sparkle signing.
+NOTES_DIR=../release-notes
+PLANNED_VERSION=$(awk -F'"' '/MARKETING_VERSION:/ {print $2; exit}' project.yml)
+NOTES_FILE="$NOTES_DIR/v$PLANNED_VERSION.md"
+if [ "$PUBLISH" -eq 1 ] && [ "$REQUIRE_NOTES" -eq 1 ] && [ ! -s "$NOTES_FILE" ]; then
+  cat >&2 <<EOF
+error: no release notes for v$PLANNED_VERSION
+
+  Write them here, then re-run:
+    $(cd .. && pwd)/release-notes/v$PLANNED_VERSION.md
+
+  They are the release body on GitHub and cover BOTH apps. Past releases are the
+  format to follow. To publish anyway with a placeholder body: --no-notes
+EOF
+  exit 1
+fi
 
 echo "==> xcodegen generate"
 xcodegen generate
@@ -112,11 +142,22 @@ echo "==> appcast: $OUT/appcast.xml"
 if [ "$PUBLISH" -eq 1 ]; then
   command -v gh >/dev/null || { echo "error: gh CLI not found (brew install gh)" >&2; exit 1; }
   echo "==> publishing GitHub release v$VERSION"
+  # Re-resolve against the built version; it should equal PLANNED_VERSION, and if it somehow
+  # doesn't, the notes that were validated up front aren't the ones we'd be shipping.
+  NOTES_FILE="$NOTES_DIR/v$VERSION.md"
+  if [ -s "$NOTES_FILE" ]; then
+    NOTES_ARGS=(--notes-file "$NOTES_FILE")
+  else
+    NOTES_ARGS=(--notes "LinkToMac $VERSION")
+  fi
   if gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
     gh release upload "v$VERSION" "$DMG" "$OUT/appcast.xml" --repo "$REPO" --clobber
+    # A re-publish refreshes the body too, so fixing a typo in the notes doesn't mean editing
+    # the release by hand.
+    gh release edit "v$VERSION" --repo "$REPO" "${NOTES_ARGS[@]}"
   else
     gh release create "v$VERSION" "$DMG" "$OUT/appcast.xml" --repo "$REPO" \
-      --title "LinkToMac $VERSION" --notes "LinkToMac $VERSION"
+      --title "LinkToMac $VERSION" "${NOTES_ARGS[@]}"
   fi
   echo "==> published: https://github.com/$REPO/releases/tag/v$VERSION"
 else
