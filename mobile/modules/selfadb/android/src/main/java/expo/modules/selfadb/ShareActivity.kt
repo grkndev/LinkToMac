@@ -100,17 +100,29 @@ abstract class ShareActivity : Activity() {
     Thread {
       val staged = ArrayList<File>()
       try {
-        val names = ArrayList<String>()
-        val mimes = ArrayList<String>()
+        val refs = ArrayList<ShareRef>()
         for ((uri, meta) in picked) {
-          staged += stage(uri)
-          names += meta.name
-          mimes += contentResolver.getType(uri) ?: intent.type ?: "application/octet-stream"
+          // Small files are copied into our cache while this activity's grant is alive (the proven
+          // path). A large one is NOT: copying a gigabyte before sending would need a gigabyte of
+          // free space and minutes of waiting, so the service streams it through a grant it
+          // receives on the start intent instead. The clipboard entry always stages (images only).
+          val copy = if (disposition == FileFrame.DISP_CLIP || meta.size < 0 || meta.size <= STAGE_MAX_BYTES) {
+            stage(uri).also { staged += it }
+          } else {
+            null
+          }
+          refs += ShareRef(
+            path = copy?.absolutePath ?: "",
+            uri = uri,
+            name = meta.name,
+            mime = contentResolver.getType(uri) ?: intent.type ?: "application/octet-stream",
+            size = if (copy != null) copy.length() else meta.size,
+          )
         }
         // Can be refused with ForegroundServiceStartNotAllowedException if this activity died
         // while we were copying — Android 12+ only permits a foreground start. Inside the try so
         // that lands as a toast rather than an uncaught exception on this thread.
-        ClipForegroundService.submitShare(this, staged.map { it.absolutePath }, names, mimes, disposition)
+        ClipForegroundService.submitShare(this, refs, disposition)
       } catch (e: Exception) {
         ClipBus.log("share: send not started: ${e.message}")
         staged.forEach { it.delete() } // nothing will pick them up now; don't leave copies behind
@@ -189,6 +201,9 @@ abstract class ShareActivity : Activity() {
 
   private companion object {
     const val OUTBOX = "outbox"
+
+    /** Files up to this size are staged in the cache (while our URI grant is alive); bigger ones are streamed. */
+    const val STAGE_MAX_BYTES = 64L * 1024 * 1024
     const val STAGE_REAP_MS = 5 * 60 * 1000L
     const val SENT = "Sent to your Mac"
     const val NOT_CONNECTED = "Your Mac isn't connected"

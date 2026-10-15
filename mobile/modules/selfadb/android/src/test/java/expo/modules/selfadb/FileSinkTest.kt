@@ -51,3 +51,31 @@ class FileSinkTest {
     assertEquals("", FileSink.sanitizeDir(""))
   }
 }
+
+class TransferIdTest {
+  @Test fun theSameFileAlwaysGetsTheSameId() {
+    val a = TransferId.of("a.bin", 100, 1_000, "Trip")
+    assertEquals(a, TransferId.of("a.bin", 100, 1_000, "Trip"))
+    assertEquals(8, a.length)
+  }
+
+  @Test fun anyChangeToTheFileChangesTheId() {
+    val base = TransferId.of("a.bin", 100, 1_000, "Trip")
+    assertTrue(base != TransferId.of("a.bin", 101, 1_000, "Trip")) // size
+    assertTrue(base != TransferId.of("a.bin", 100, 1_001, "Trip")) // mtime
+    assertTrue(base != TransferId.of("b.bin", 100, 1_000, "Trip")) // name
+    assertTrue(base != TransferId.of("a.bin", 100, 1_000, null)) // folder
+  }
+
+  @Test fun skipFullyConsumesExactlyTheRequestedBytes() {
+    val data = ByteArray(300_000) { it.toByte() }
+    val input = java.io.ByteArrayInputStream(data)
+    assertEquals(200_000L, input.skipFully(200_000))
+    assertEquals(data[200_000], input.read().toByte())
+  }
+
+  @Test fun skipFullyStopsAtTheEndOfTheStream() {
+    val input = java.io.ByteArrayInputStream(ByteArray(10))
+    assertEquals(10L, input.skipFully(1_000))
+  }
+}
