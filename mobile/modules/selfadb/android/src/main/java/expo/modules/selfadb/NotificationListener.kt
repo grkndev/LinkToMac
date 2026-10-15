@@ -66,10 +66,19 @@ class NotificationListener : NotificationListenerService() {
     }
   }
 
+  /**
+   * True for this app's notifications AND the sibling variant's. The dev build (`….dev`) and the
+   * release build can be installed side by side, and each one's listener used to mirror the
+   * other's progress / "Saved from…" notifications to the Mac (the release app logged
+   * `note dropped (service down): com.grkndev.linktomac.dev`). Both ids share a base.
+   */
+  private fun isOurs(pkg: String): Boolean =
+    pkg.removeSuffix(".dev") == packageName.removeSuffix(".dev")
+
   override fun onNotificationPosted(sbn: StatusBarNotification?) {
     sbn ?: return
     if (!ClipForegroundService.getNotificationForwarding(this)) return
-    if (sbn.packageName == packageName) return // our own foreground-service notification
+    if (isOurs(sbn.packageName)) return // our own FGS / transfer notifications, or the sibling variant's
     // Per-app filter (Settings ▸ Notifications): "include" mirrors only the selected apps,
     // "exclude" (default) mirrors everything except the deselected ones. Removals are NOT
     // filtered — a dismissal must still clear a Mac copy mirrored before a filter change.
@@ -121,7 +130,7 @@ class NotificationListener : NotificationListenerService() {
   override fun onNotificationRemoved(sbn: StatusBarNotification?) {
     sbn ?: return
     if (!ClipForegroundService.getNotificationForwarding(this)) return
-    if (sbn.packageName == packageName) return
+    if (isOurs(sbn.packageName)) return
     val key = sbn.key
     post {
       val json = JSONObject().put("op", "remove").put("key", key)
