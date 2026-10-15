@@ -125,6 +125,18 @@ between them. It never stores anything and never inspects clipboard content.
     file, because `id` is what makes the receiver ack. The header repeats in full on every chunk,
     so chunks may arrive in any order.
 
+  The frame format is pinned by **`protocol-vectors/file-frame.json`**, which both the Swift
+  (`mac/Tests/FileFrameVectorTests.swift`) and Kotlin (`FileFrameVectorTest`) codecs must pass — the
+  two are mirrored by hand and have drifted before. Change the vectors and both codecs together.
+
+  **Cancel** is one-sided: stopping a transfer (the Mac drop zone's Cancel, the phone notification's
+  Cancel) just stops sending. There is deliberately no `cancel` op on the wire — an *old* peer parses
+  an unknown `op` as a data chunk, so adding one would corrupt transfers with older apps. The
+  receiver drops the partial file with its 120 s idle sweep.
+
+  Files that arrive in a burst raise **one** updating notification on each side ("N files" /
+  "N files in Photos"), not one per file.
+
   The receipt is honest: a chunk is acked once stored, and the **last** chunk only after the file is
   written (Downloads on the phone, the download folder on the Mac), so a delivery report means the
   file exists. The sender's flow-control window is a counter behind a condition variable that
