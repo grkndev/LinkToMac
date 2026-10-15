@@ -8,6 +8,19 @@ export function preview(text: string, max: number): string {
   return truncate(text.replace(/\s+/g, ' ').trim(), max);
 }
 
+/** `1.2 MB` / `340 KB` / `12 B` — a file size for a list row (binary units, like the system's file manager). */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
 /** "now" / "5m" / "2h" / "3d", else a short date. */
 export function formatRelative(ts: number): string {
   const diff = Date.now() - ts;
