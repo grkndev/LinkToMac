@@ -202,8 +202,21 @@ final class RelayClient {
     /// learns the real size when the last one lands.
     var incomingFile: TransferProgress?
 
-    /// The file currently being sent to the phone, or nil. Drives the drop-zone progress UI.
-    var outgoingFile: TransferProgress?
+    /// The batch currently being sent to the phone (one file or many), or nil. Drives the
+    /// drop-zone progress UI: one bar for the whole batch, labelled with the file in flight.
+    var outgoingBatch: BatchProgress?
+
+    /// Reasons files were left out of the batch (empty, too large, unreadable), held until the
+    /// batch ends so they land in its single summary notification instead of one banner each.
+    @ObservationIgnored private var batchProblems: [String] = []
+
+    /// Keeps frames on the relay socket in the order they were queued: one `Task` per frame
+    /// otherwise runs in no particular order.
+    @ObservationIgnored private var fileSendChain: Task<Void, Never>?
+
+    /// Periodically sweeps abandoned inbound transfers while one is showing, so the "receiving"
+    /// row can't outlive a phone that went away.
+    @ObservationIgnored private var incomingSweeper: Task<Void, Never>?
 
     /// Where a `disp: save` file lands. Owned here rather than injected so the LAN-direct path,
     /// which reaches `receiveRemoteFile` without going through any view, writes to the same place.
@@ -314,7 +327,17 @@ final class RelayClient {
             log("encrypt failed (bad pairing key); not sending file")
             return
         }
-        Task { [weak self] in try? await self?.send(.file(nonce: nonce, ct: ct)) }
+        let previous = fileSendChain
+        fileSendChain = Task { [weak self] in
+            await previous?.value
+            do {
+                try await self?.send(.file(nonce: nonce, ct: ct))
+            } catch {
+                // The socket refused the frame: tell a transfer waiting on acks now, rather than
+                // letting it sit out the ack timeout for chunks that never left.
+                self?.fileSender.failActive("Lost the connection to your phone")
+            }
+        }
     }
 
     /// Encrypt + send a telemetry payload (e.g. battery) to the peer. Same fail-closed AEAD as
@@ -449,125 +472,238 @@ final class RelayClient {
 
     /// Handle a `file` frame that arrived from the phone (relay or LAN — both call here).
     ///
-    /// Three shapes land on this one entry point, because `file` carries them all the way the
+    /// Four shapes land on this one entry point, because `file` carries them all the way the
     /// `sms` channel carries replies: a whole clipboard image (the original shape), one chunk of a
-    /// larger file, and an ack for a chunk we sent. Chunks are acked as they are stored — that ack
-    /// is the sender's flow control, and without it the phone would outrun the relay's 8 MiB
-    /// per-peer buffer and get this Mac disconnected mid-transfer.
+    /// larger file, and an `ack` / `nack` for a chunk we sent.
+    ///
+    /// **A chunk is acked once it is stored, and the last one once the file is saved.** The ack is
+    /// the sender's flow control (without it the phone would outrun the relay's 8 MiB per-peer
+    /// buffer and get this Mac disconnected) and, for the final chunk, its delivery receipt — so a
+    /// file that couldn't be written is *nacked*, and the phone says so instead of "Saved".
     func receiveRemoteFile(_ payload: Data) {
         guard let frame = FileFrame.parse(payload) else {
             log("file frame malformed")
             return
         }
-        // An ack advances the transfer this Mac is sending (`sendFileToPhone`).
-        if frame.op == FileFrame.opAck {
-            if let id = frame.id { fileSender.ack(id: id) }
+        // Replies to the transfer this Mac is sending (`sendFilesToPhone`).
+        switch frame.op {
+        case FileFrame.opAck:
+            if let id = frame.id { fileSender.ack(id: id, seq: frame.seq) }
             return
+        case FileFrame.opNack:
+            if let id = frame.id { fileSender.nack(id: id, reason: frame.reason) }
+            return
+        default:
+            break
         }
 
-        // Ack on `id` alone, not on chunk count: a one-chunk "Send as a File" carries an id too,
-        // and the sender blocks on its receipt before reporting success.
-        if let id = frame.id { sendFileAck(id: id, seq: frame.seq) }
-        let assembled = fileInbox.accept(frame)
-        // Republish whatever the inbox now reports: a partial transfer drives the dashboard's
-        // "receiving" row, and a completed or rejected one clears it.
+        let result = fileInbox.accept(frame)
+        publishIncoming()
+        switch result {
+        case .buffered:
+            replyAck(frame)
+        case .rejected:
+            replyNack(frame, "The Mac couldn't accept it")
+        case let .done(file):
+            switch file.disp {
+            case FileFrame.dispSave:
+                saveIncomingFile(file, frame: frame)
+            default:
+                // Echo-suppressed writer, so the image isn't immediately re-sent to the phone.
+                pasteboard?.writeImage(file.bytes, mime: file.mime)
+                recordClip("[Image]", isImage: true)
+                log("image received (\(file.mime), \(file.bytes.count) bytes)")
+                replyAck(frame)
+            }
+        }
+    }
+
+    /// Mirror the inbox's progress into the observable `incomingFile`, and keep a sweeper running
+    /// for as long as something is arriving.
+    private func publishIncoming() {
         incomingFile = fileInbox.progress.map {
             TransferProgress(name: $0.name, done: $0.received, total: $0.total)
         }
-        guard let file = assembled else { return }
-
-        switch file.disp {
-        case FileFrame.dispSave:
-            saveIncomingFile(file)
-        default:
-            // Echo-suppressed writer, so the image isn't immediately re-sent to the phone.
-            pasteboard?.writeImage(file.bytes, mime: file.mime)
-            recordClip("[Image]", isImage: true)
-            log("image received (\(file.mime), \(file.bytes.count) bytes)")
+        guard incomingFile != nil, incomingSweeper == nil else { return }
+        incomingSweeper = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard let self else { return }
+                self.fileInbox.sweep()
+                self.incomingFile = self.fileInbox.progress.map {
+                    TransferProgress(name: $0.name, done: $0.received, total: $0.total)
+                }
+                if self.incomingFile == nil {
+                    self.incomingSweeper = nil
+                    return
+                }
+            }
         }
     }
 
     /// Write a completed `disp: save` transfer into the configured download folder and tell the
     /// user where it went — nothing about this arrives on the pasteboard, so a banner is the only
-    /// thing that makes the file discoverable.
-    private func saveIncomingFile(_ file: FileInbox.Assembled) {
-        do {
-            let url = try fileDrop.save(bytes: file.bytes, preferredName: file.name, mime: file.mime)
-            log("file saved: \(url.path) (\(file.bytes.count) bytes)")
-            Task { await MacNotifier.post(title: "Saved from your phone", body: url.lastPathComponent) }
-        } catch {
-            log("file save failed: \(error.localizedDescription)")
-            Task {
-                await MacNotifier.post(
-                    title: "Couldn't save file",
-                    body: file.name ?? "A file from your phone could not be written."
-                )
+    /// thing that makes the file discoverable. The write happens off the main actor (a 64 MB file
+    /// would freeze the UI), and the ack waits for it.
+    private func saveIncomingFile(_ file: FileInbox.Assembled, frame: FileFrame.Parsed) {
+        let folder = fileDrop.folder
+        Task { [weak self] in
+            let outcome = await Task.detached(priority: .userInitiated) {
+                Swift.Result { try FileDropStore.write(bytes: file.bytes, to: folder, preferredName: file.name, mime: file.mime) }
+            }.value
+            guard let self else { return }
+            switch outcome {
+            case let .success(url):
+                self.log("file saved: \(url.path) (\(file.bytes.count) bytes)")
+                self.replyAck(frame)
+                Task { await MacNotifier.post(title: "Saved from your phone", body: url.lastPathComponent) }
+            case let .failure(error):
+                self.log("file save failed: \(error.localizedDescription)")
+                self.replyNack(frame, "The Mac couldn't write the file")
+                Task {
+                    await MacNotifier.post(
+                        title: "Couldn't save file",
+                        body: file.name ?? "A file from your phone could not be written."
+                    )
+                }
             }
         }
     }
 
-    /// Send a local file to the phone, where it lands in Downloads/Link to Mac. The Mac→phone
-    /// mirror of the phone's "Send as a File" share target.
+    /// Send a batch of local files and folders to the phone, where they land in
+    /// Downloads/Link to Mac. The Mac→phone mirror of the phone's "Send as a File" share target.
     ///
-    /// Unlike every other outbound frame this picks **one** transport instead of fanning out to
-    /// both: a file is hundreds of frames, and pushing them at the relay as well when the phone is
-    /// actually on the LAN would burn the relay's rate limit for nothing (the phone keeps only one
-    /// link joined, so it would never see the duplicates anyway).
-    func sendFileToPhone(_ url: URL) {
-        guard !fileSender.isSending else {
-            log("file send skipped (another transfer is in flight)")
+    /// Unlike every other outbound frame this picks **one** transport per chunk instead of fanning
+    /// out to both: a file is hundreds of frames, and pushing them at the relay as well when the
+    /// phone is actually on the LAN would burn the relay's rate limit for nothing (the phone keeps
+    /// only one link joined, so it would never see the duplicates anyway).
+    ///
+    /// Folders are walked off the main actor (`FileBatchPlanner`) and keep their structure on the
+    /// phone via the `dir` header. A drop that lands while a batch is running joins it.
+    func sendFilesToPhone(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        guard isLinked else {
+            let what = urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) items"
+            Task { await MacNotifier.post(title: "Phone isn't connected", body: what) }
             return
         }
-        guard isLinked || lanPeerConnected else {
-            Task { await MacNotifier.post(title: "Phone isn't connected", body: url.lastPathComponent) }
+        if outgoingBatch == nil {
+            let name = urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) items"
+            outgoingBatch = .starting(name: name, count: urls.count)
+        }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let plan = FileBatchPlanner.plan(urls: urls)
+            await self?.startBatch(plan)
+        }
+    }
+
+    /// Abandon the batch in flight (the drop zone's Cancel).
+    func cancelOutgoing() { fileSender.cancel() }
+
+    private func startBatch(_ plan: FileBatchPlanner.Plan) {
+        batchProblems += plan.problems
+        guard !plan.items.isEmpty else {
+            if !fileSender.isBusy {
+                outgoingBatch = nil
+                notifyNothingSent()
+            }
             return
         }
-        let overLAN = lanPeerConnected
-        let name = url.lastPathComponent
-        outgoingFile = TransferProgress(name: name, done: 0, total: 0)
-        log("file -> phone: \(name) (\(overLAN ? "lan" : "relay"))")
+        log("files -> phone: \(plan.items.count) file(s) (\(lanPeerConnected ? "lan" : "relay"))")
 
         fileSender.send(
-            url: url,
-            overLAN: overLAN,
-            emit: { [self] payload in
-                // DispatchQueue.main, not Task: this keeps chunks in order on the socket. (The
-                // receiver writes by `seq` and tolerates gaps, but there's no reason to create them.)
-                DispatchQueue.main.async {
+            items: plan.items,
+            transport: { [weak self] payload in
+                // main.sync, not async: the route is the answer, and blocking this sender queue
+                // until the frame is handed to a socket is the backpressure we want. Main never
+                // waits on this queue (acks only take a lock), so it cannot deadlock.
+                DispatchQueue.main.sync {
                     MainActor.assumeIsolated {
-                        if overLAN { self.onLocalFile?(payload) } else { self.sendFile(payload) }
-                    }
-                }
-            },
-            progress: { [self] sent, total in
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        self.outgoingFile = TransferProgress(name: name, done: sent, total: total)
-                    }
-                }
-            },
-            done: { [self] outcome in
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        self.outgoingFile = nil
-                        switch outcome {
-                        case .sent:
-                            self.log("file delivered to phone: \(name)")
-                            Task { await MacNotifier.post(title: "Sent to your phone", body: name) }
-                        case let .failed(reason):
-                            self.log("file send failed: \(reason)")
-                            Task { await MacNotifier.post(title: "Couldn't send \(name)", body: reason) }
+                        guard let self else { return nil }
+                        if self.lanPeerConnected {
+                            self.onLocalFile?(payload)
+                            return .lan
                         }
+                        if self.peerOnline {
+                            self.sendFile(payload)
+                            return .relay
+                        }
+                        return nil
                     }
+                }
+            },
+            progress: { [weak self] progress in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.outgoingBatch = progress }
+                }
+            },
+            done: { [weak self] result in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.finishBatch(result) }
                 }
             }
         )
     }
 
-    /// Acknowledge one stored chunk, on both transports — `ConnectionManager` keeps exactly one
-    /// link joined at a time, so the phone receives this once, never twice.
-    private func sendFileAck(id: String, seq: Int) {
-        let payload = FileFrame.ack(id: id, seq: seq)
+    private func finishBatch(_ result: BatchResult) {
+        outgoingBatch = nil
+        let problems = batchProblems
+        batchProblems = []
+        log("file batch done: \(result.sent.count) sent, \(result.failures.count) failed, \(result.notSent) not sent")
+
+        let total = result.sent.count + result.failures.count + result.notSent
+        let title: String
+        var body: String
+        if result.cancelled {
+            title = "Sending cancelled"
+            body = "\(result.sent.count) of \(total) sent"
+        } else if result.failures.isEmpty && result.notSent == 0 {
+            if result.sent.count == 1 {
+                title = "Sent to your phone"
+                body = result.sent[0]
+            } else {
+                title = "\(result.sent.count) files sent to your phone"
+                let shown = result.sent.prefix(3).joined(separator: ", ")
+                let more = result.sent.count - 3
+                body = more > 0 ? "\(shown) and \(more) more" : shown
+            }
+        } else if total == 1, let failure = result.failures.first {
+            title = "Couldn't send \(failure.name)"
+            body = failure.reason
+        } else {
+            title = result.sent.isEmpty ? "Couldn't send files" : "\(result.sent.count) of \(total) sent"
+            body = result.failures.first.map { "\($0.name): \($0.reason)" } ?? "The connection to your phone was lost"
+        }
+        if let first = problems.first, !result.cancelled {
+            body += problems.count == 1 ? " · \(first)" : " · \(first) (+\(problems.count - 1) more)"
+        }
+        Task { await MacNotifier.post(title: title, body: body) }
+    }
+
+    /// Everything dropped was unusable (empty, too large, unreadable) — say why instead of
+    /// silently doing nothing.
+    private func notifyNothingSent() {
+        let problems = batchProblems
+        batchProblems = []
+        guard let first = problems.first else { return }
+        let body = problems.count == 1 ? first : "\(first) (+\(problems.count - 1) more)"
+        Task { await MacNotifier.post(title: "Nothing to send", body: body) }
+    }
+
+    /// Acknowledge a stored chunk — and only chunks of a transfer that carries an `id`; clipboard
+    /// images aren't acked. Sent on both transports: `ConnectionManager` keeps exactly one link
+    /// joined at a time, so the phone receives it once, never twice.
+    private func replyAck(_ frame: FileFrame.Parsed) {
+        guard let id = frame.id else { return }
+        let payload = FileFrame.ack(id: id, seq: frame.seq)
+        sendFile(payload)
+        onLocalFile?(payload)
+    }
+
+    /// Tell the sender this chunk (and so the file) was not stored, so it stops now.
+    private func replyNack(_ frame: FileFrame.Parsed, _ reason: String) {
+        guard let id = frame.id else { return }
+        let payload = FileFrame.nack(id: id, seq: frame.seq, reason: reason)
         sendFile(payload)
         onLocalFile?(payload)
     }

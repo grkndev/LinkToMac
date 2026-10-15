@@ -67,11 +67,16 @@ enum ClientMessage: Encodable {
 /// Header fields are all optional but `mime`, and all additive to the original `{"mime":…}`
 /// shape, so an older peer that only reads `mime` still pastes an image correctly:
 ///
-/// - `op`   — `data` (payload) or `ack` (receiver acknowledging one stored chunk). Default `data`.
+/// - `op`   — `data` (payload), `ack` (receiver stored one chunk) or `nack` (receiver could not
+///            store it). Default `data`.
 /// - `mime` — content type. Default `image/png`.
 /// - `name` — original file name, used by `disp: save`.
 /// - `disp` — `clip` (paste it) or `save` (write it to the download folder). Default `clip`.
-/// - `id` / `seq` / `n` — chunk group, 0-based index, total count. Absent = one whole file.
+/// - `id` / `seq` / `n` — chunk group, 0-based index, total count. Absent = one whole file. An
+///            `id` is written for a one-chunk file too: it is what makes the receiver ack, and a
+///            "send as a file" transfer wants that receipt at any size.
+/// - `dir`  — relative folder (`Photos/2024`) the file sits in, for `disp: save` of a dropped
+///            folder. Absent = the download folder itself. An older peer ignores it and saves flat.
 ///
 /// **Acks are flow control, not politeness.** The relay drops any peer buffering more than
 /// `maxPayloadBytes * 8` (8 MiB) as a slow consumer, so a phone that fired a 50 MB file's chunks
@@ -81,6 +86,7 @@ enum ClientMessage: Encodable {
 enum FileFrame {
     static let opData = "data"
     static let opAck = "ack"
+    static let opNack = "nack"
     static let dispClip = "clip"
     static let dispSave = "save"
 
@@ -98,22 +104,29 @@ enum FileFrame {
         let op: String
         let mime: String
         let name: String?
+        let dir: String?
         let disp: String
         let id: String?
         let seq: Int
         let count: Int
         let bytes: Data
+        /// Why a `nack` was sent, when the receiver said.
+        let reason: String?
 
         /// True when this frame is the whole file (the pre-chunking shape, and any one-chunk file).
         var isSingle: Bool { id == nil || count <= 1 }
     }
 
-    /// Build a data frame. Chunk fields are omitted for a single-frame transfer, so the bytes stay
-    /// identical to what pre-chunking builds sent.
+    /// The header length is a u16, so it can never exceed this.
+    static let maxHeaderBytes = 0xFFFF
+
+    /// Build a data frame. Chunk fields are omitted only when no `id` was assigned (a clipboard
+    /// image), so those bytes stay identical to what pre-chunking builds sent.
     static func payload(
         mime: String,
         bytes: Data,
         name: String? = nil,
+        dir: String? = nil,
         disp: String = dispClip,
         id: String? = nil,
         seq: Int = 0,
@@ -121,13 +134,14 @@ enum FileFrame {
     ) -> Data {
         var header: [String: Any] = ["mime": mime]
         if let name { header["name"] = name }
+        if let dir, !dir.isEmpty { header["dir"] = dir }
         if disp != dispClip { header["disp"] = disp }
-        if let id, count > 1 {
+        if let id {
             header["id"] = id
             header["seq"] = seq
             header["n"] = count
         }
-        return frame(header: header, bytes: bytes)
+        return frame(header: fitted(header), bytes: bytes)
     }
 
     /// Build a zero-payload `ack` frame for one stored chunk.
@@ -135,10 +149,40 @@ enum FileFrame {
         frame(header: ["op": opAck, "id": id, "seq": seq], bytes: Data())
     }
 
+    /// Build a zero-payload `nack` frame: the receiver could not store `id`/`seq`.
+    static func nack(id: String, seq: Int, reason: String? = nil) -> Data {
+        var header: [String: Any] = ["op": opNack, "id": id, "seq": seq]
+        if let reason { header["err"] = String(reason.prefix(200)) }
+        return frame(header: header, bytes: Data())
+    }
+
+    /// Keep a header under the u16 limit. A file name and folder path are user data of unbounded
+    /// length, and an over-long header would otherwise be truncated by the length prefix into
+    /// something the receiver can't parse. Shed the folder first (the file still arrives, flat),
+    /// then shorten the name.
+    private static func fitted(_ header: [String: Any]) -> [String: Any] {
+        var h = header
+        func size() -> Int { (try? JSONSerialization.data(withJSONObject: h).count) ?? 0 }
+        if size() <= maxHeaderBytes { return h }
+        h["dir"] = nil
+        if size() <= maxHeaderBytes { return h }
+        if let name = h["name"] as? String {
+            var short = name
+            while size() > maxHeaderBytes, short.count > 16 {
+                short = String(short.prefix(short.count / 2))
+                h["name"] = short
+            }
+        }
+        return h
+    }
+
     /// `JSONSerialization`, not string interpolation: a file name is user data and may contain
     /// quotes or backslashes that would otherwise produce a header the Kotlin side can't parse.
     private static func frame(header: [String: Any], bytes: Data) -> Data {
-        let headerData = (try? JSONSerialization.data(withJSONObject: header)) ?? Data("{}".utf8)
+        var headerData = (try? JSONSerialization.data(withJSONObject: header)) ?? Data("{}".utf8)
+        // Unreachable for headers built by `payload` (it fits them first); an empty header is
+        // the safe floor rather than a length prefix that wraps.
+        if headerData.count > maxHeaderBytes { headerData = Data("{}".utf8) }
         var out = Data(capacity: 2 + headerData.count + bytes.count)
         out.append(UInt8((headerData.count >> 8) & 0xFF))
         out.append(UInt8(headerData.count & 0xFF))
@@ -157,15 +201,18 @@ enum FileFrame {
         let bytes = payload.subdata(in: (base + 2 + headerLen)..<payload.endIndex)
         let header = (try? JSONSerialization.jsonObject(with: headerData)) as? [String: Any] ?? [:]
         let name = header["name"] as? String
+        let dir = header["dir"] as? String
         return Parsed(
             op: header["op"] as? String ?? opData,
             mime: header["mime"] as? String ?? "image/png",
             name: (name?.isEmpty == false) ? name : nil,
+            dir: (dir?.isEmpty == false) ? dir : nil,
             disp: header["disp"] as? String ?? dispClip,
             id: header["id"] as? String,
             seq: header["seq"] as? Int ?? 0,
             count: header["n"] as? Int ?? 1,
-            bytes: bytes
+            bytes: bytes,
+            reason: header["err"] as? String
         )
     }
 }
