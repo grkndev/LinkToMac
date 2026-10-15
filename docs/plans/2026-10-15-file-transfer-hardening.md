@@ -1,10 +1,13 @@
 # Dosya gönderimi: hata analizi ve iyileştirme planı
 
-> **Durum (2026-10-15):** P0 ve P1 ile P2'nin büyük kısmı uygulandı (Mac: `153dd79`, Android: `b1d3967`).
-> Uygulama sırasında ayrılan kararlar: test hedefi eklendi (`LinkToMacTests`), klasörler `dir`
-> başlığıyla yapıyı koruyarak gidiyor, çoklu dosyada tek progress bar + tek özet bildirimi var.
-> Kapsam dışı kalanlar: file-promise sürüklemeleri (Mail eki, Fotoğraflar) çözülemiyor ama artık
-> bildiriliyor; telefondan gelen klasörler (`dir`) Mac'te henüz yazılmıyor (telefon göndermiyor).
+> **Durum (2026-10-15):** Plandaki her şey uygulandı ve yayınlandı (0.10.0 ve 0.11.0).
+> P0 ve P1 ile P2'nin büyük kısmı 0.10.0'da (Mac: `153dd79`, Android: `b1d3967`); sonrasında
+> Files ekranı, 1 GB sınırı, kaldığı yerden devam, telefondan klasör gönderimi (Mac artık `dir`
+> başlığını yazıyor) ve bildirimden iptal 0.11.0'da geldi. Uygulama sırasında ayrılan kararlar:
+> test hedefi eklendi (`LinkToMacTests`), klasörler `dir` başlığıyla yapıyı koruyarak gidiyor,
+> çoklu dosyada tek progress bar + tek özet bildirimi var. Kapsam dışı kalan tek şey: file-promise
+> sürüklemeleri (Mail eki, Fotoğraflar) çözülemiyor ama artık bildiriliyor. Güncel protokol:
+> `TECHNICAL.md` §5.4.
 
 Tarih: 2026-10-15 · Kapsam: Mac→telefon sürükle-bırak (`FileSender`, `FileDropZone`,
 `StatusItemController`), telefon→Mac alma (`FileInbox`), Android paylaşım/alma tarafı.

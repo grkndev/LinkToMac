@@ -1,111 +1,104 @@
-# selfadb — Step 3 spike
+# selfadb — the Android native module
 
-Prove **app-internal self-ADB on Android 14**: from inside the app, spake2-pair
-with the device's own `adbd`, TLS-connect, push a dex, launch it via
-`app_process` as **shell UID**, and receive **one clipboard event** back over an
-on-device localhost socket.
+The native half of the Link to macOS phone app: an Expo module (Android only) that owns
+everything which must keep working **without the JS runtime** — the foreground service, the
+relay/LAN link, the E2E codec, clipboard capture, notification/SMS mirroring and file transfer.
+`src/SelfAdb.ts` / `src/SelfAdb.types.ts` are the typed JS surface; the Kotlin lives in
+`android/src/main/java/expo/modules/selfadb/`.
 
-If this works, the whole Link-to-macOS architecture stands. If `libadb-android`
-can't do A14 TLS+pairing, fall back to bundling a real `adb` binary (LADB style).
+Fine-grained notes: [`../../CLAUDE.md`](../../CLAUDE.md) (file roles, gotchas, the capture state
+machine). Internals and the wire protocol: [`../../../TECHNICAL.md`](../../../TECHNICAL.md) §3
+(Android), §5 (protocol, incl. §5.4 files).
+
+## What "selfadb" means
+
+The module can pair with the device's **own** `adbd` (Wireless Debugging, TLS + SPAKE2 via
+`libadb-android`), push a dex and launch it through `app_process` as **shell UID**. That
+privileged daemon (`ClipboardAgent`) is the only way to read the clipboard in the background
+(AOSP focus-gates reads for normal apps). It is a **capability, not a precondition**: without
+it the app still does the relay/LAN link, remote lock, telemetry, notification + SMS mirroring,
+file transfer and Mac→phone clipboard; capture degrades to the manual paths (the
+text-selection toolbar entry and the notification's "Send clipboard").
 
 ## Pieces
 
 | File | Role |
-|------|------|
-| `../../native-src/clipboard-agent/ClipboardAgent.java` | Privileged runnable: clipboard read/write + localhost NDJSON socket server |
-| `../../native-src/clipboard-agent/build-dex.sh` | `javac` → `d8` → drops `clipboard-agent.dex` into this module's assets |
-| `android/.../AdbManager.kt` | **libadb-android wrapper** — pair / connect / exec / pushAsset (⚠️ main VERIFY surface) |
-| `android/.../ClipBridge.kt` | On-device localhost client to the jar; emits clip events |
-| `android/.../SelfAdbModule.kt` | Expo module: `pair / connect / deployAndRun / writeClipboard / stop` + events |
-| `../../src/app/spike.tsx` | Test screen at route `/spike` to drive the flow by hand |
+|---|---|
+| `SelfAdbModule.kt` | The Expo module: JS↔native control plane (all `AsyncFunction`s + `Events`). Only alive while JS is. |
+| `ClipForegroundService.kt` | `START_STICKY` foreground service. Owns the bridge, connection, BLE, telemetry, and the **file send pipeline**; restarts and reconnects with no JS (config lives in `SharedPreferences`). |
+| `AdbManager.kt` | `libadb-android` wrapper: pair / connect / mDNS discovery / push / launch (supervisor-wrapped) / kill. Key + cert in `filesDir`. |
+| `ClipBridge.kt` | Localhost NDJSON client to the daemon (`127.0.0.1:<per-variant port>`), authenticated with a per-install secret. |
+| `ClipBus.kt` | Process-wide service↔module bridge: ring buffers (logs, Mac clips), last relay/stat. |
+| `ClipCodec.kt` | ChaCha20-Poly1305 **v2 envelope** (AAD = frame type, timestamp, replay cache). Byte-compatible with the Mac's `ClipCodec.swift`. |
+| `ConnectionManager.kt` | LAN-preferred / relay-fallback arbiter; exactly one live link; short outbound queue while none is joined. |
+| `RelayClient.kt` / `LanClient.kt` | OkHttp WebSocket to the relay / straight to the Mac (HMAC handshake). |
+| `LanDiscovery.kt` | `NsdManager` mDNS discovery of the Mac. |
+| `BleAdvertiser.kt` | BLE presence beacon (the Mac scans and measures distance). |
+| `ProcessTextActivity.kt` / `ClipboardReadActivity.kt` | Manual capture paths (selection toolbar; notification action). |
+| `NotificationListener.kt` | Mirrors notifications to the Mac (skips both Link to Mac variants' own notifications). |
+| `SmsMirror.kt` | Reads the SMS store, resolves contacts, forwards `sms` frames; sends replies via `SmsManager`. |
+| `FileFrame.kt` | The `file` frame plaintext (`u16 header-len ‖ header JSON ‖ bytes`), mirror of the Mac's `FileFrame`. |
+| `FileInbox.kt` | Reassembles inbound chunked transfers into a temp file; `FileSink` writes the result to `Downloads/Link to Mac` via `MediaStore`. |
+| `SendItem.kt` | One outgoing file (staged `File` or content `Uri`) and the deterministic transfer id used for resume. |
+| `FolderWalker.kt` | Walks a picked folder tree (`DocumentsContract`) into `SendItem`s with relative `dir`s. |
+| `FileHistory.kt` | Bounded JSON history of transfers (`filesDir/file-history.json`) behind the Files screen. |
+| `ShareActivity.kt` | The system share-sheet entries ("Send to Clipboard", "Send as a File"). |
+| `PickActivity.kt` | Invisible picker host for "Send files" / "Send folder" (persistable read grants). |
+| `assets/clipboard-agent.dex` | The prebuilt privileged daemon (built from `../../native-src/clipboard-agent/`). |
 
-Data path: **adb only launches the jar**. Clipboard data flows over the
-localhost socket (127.0.0.1:clipPort), not over adb.
+Data path: **adb only launches the daemon.** Clipboard data flows over the localhost socket,
+never over adb.
 
-## Build & run
+## Building
 
 ```bash
-# 1) build the dex (needs a local Android SDK with build-tools + a platform)
-cd mobile
-bash native-src/clipboard-agent/build-dex.sh # -> modules/selfadb/android/src/main/assets/clipboard-agent.dex
+# From mobile/: the dev client with native code (installs the .dev variant)
+bun run android                              # = APP_VARIANT=development expo run:android
 
-# 2) verify libadb-android coordinates in modules/selfadb/android/build.gradle
-#    (see VERIFY list below) then prebuild + build the dev client
-npx expo prebuild -p android
-npx expo run:android                         # installs the dev client with native code
+# Rebuild the daemon dex ONLY when ClipboardAgent.java changes (output is committed)
+cd native-src/clipboard-agent && ./build-dex.sh
 ```
 
-On the phone:
-1. Settings → Developer options → **Wireless debugging → ON**
-2. **Pair device with pairing code** → enter the shown `IP:PORT` + 6-digit code on `/spike` → **Pair**
-3. Wireless debugging main screen → enter the shown `IP:PORT` (different port) → **Connect**
-4. **Deploy & Run** → copy any text on the phone → it appears under **Last clip**
-5. Type text + **Write** → it lands in the phone clipboard (paste anywhere to confirm)
+## Tests
 
-## VERIFY against libadb-android (status)
+Plain JVM unit tests (no device) cover the file frame, the inbox/sink, the history store
+and the folder walker. The file-frame and folder-path vectors in
+[`../../../protocol-vectors/`](../../../protocol-vectors) are shared with the Mac's Swift tests,
+so the two hand-mirrored implementations can't drift.
 
-Confirmed against <https://github.com/MuntashirAkon/libadb-android> (v3.1.1 README):
+```bash
+cd mobile/android && ./gradlew :selfadb:testDebugUnitTest
+```
 
-- [x] Coordinates: **JitPack** `com.github.MuntashirAkon:libadb-android:3.1.1`
-      + `com.github.MuntashirAkon:sun-security-android:1.1`
-      + `org.conscrypt:conscrypt-android:2.5.3` (Maven Central).
-- [x] `AbsAdbConnectionManager` overrides: `getPrivateKey / getCertificate / getDeviceName`.
-- [x] `setApi(Build.VERSION.SDK_INT)` in the constructor (TLS path).
-- [x] Signatures: `pair(host,port,code)`, `connect(host,port)`, `openStream(String)`.
-- [x] `AdbStream`: `openInputStream()` / `openOutputStream()`.
+## Daemon behaviour
 
-Still to confirm at runtime (the actual spike):
-
-- [ ] `openStream("exec:cat > file")` streams **raw binary** cleanly. If `exec:`
-      isn't supported, fall back to `shell:` + base64 (`base64 -d > file`).
-- [ ] Optional but recommended dep for hidden-API headroom:
-      `org.lsposed.hiddenapibypass:hiddenapibypass:6.1`.
-- [x] Self-signed cert: **BouncyCastle** (`bcpkix-jdk18on`/`bcprov-jdk18on`) —
-      Kotlin can't see `sun.security.x509.*`, so we generate the cert with BC.
-- [ ] Whether the device actually accepts the in-app pairing + TLS connect on A14.
-
-## Daemon behaviour (confirmed)
-
-`deployAndRun` launches ClipboardAgent **detached** (`setsid` + `nohup`) and **wrapped in a
-shell-UID supervisor loop** (issue #31), so it keeps running after:
+`deployAndRun` launches `ClipboardAgent` **detached** (`setsid` + `nohup`) and **wrapped in a
+shell-UID supervisor loop**, so it keeps running after:
 
 - the adb connection drops,
-- **Wireless debugging is turned off**,
+- Wireless debugging is turned off,
 - the app is killed,
-- **lmkd/One UI kills the daemon under memory pressure** — the tiny supervisor respawns it
-  in ~3 s with the same port + secret (no ADB, no Wi-Fi; exponential backoff on fast deaths,
-  gives up after 10 in a row).
+- lmkd/One UI kills it under memory pressure — the supervisor respawns it in ~3 s with the
+  same port and secret (no ADB, no Wi-Fi; exponential back-off on fast deaths, gives up after
+  10 in a row).
 
-Only a **reboot or `killDaemon()`** stops the pair for good (`killDaemon` is two-stage:
-supervisor first, then the daemon by exact cmdline). The clipboard data flows
-over the localhost socket (`127.0.0.1:53123`) — adb is needed **only** to launch
-(or relaunch) the daemon, not during steady-state sync.
+Only a **reboot or `killDaemon()`** stops it for good (`killDaemon` is two-stage: supervisor
+first, then the daemon by exact command line). A reboot also turns Wireless Debugging off and
+Samsung may drop adbd's key trust, so re-arming means pairing again.
 
-`deployAndRun` is idempotent: if the daemon is already alive (socket open) it
-skips push+launch and just reconnects the bridge — so **no adb is needed** when
-the app restarts and the daemon is still up. `stop()` detaches the bridge but
-leaves the daemon running; `killDaemon()` (needs adb) terminates it.
+`deployAndRun` is idempotent: if the daemon is already alive it skips push + launch and just
+reattaches the bridge. `stop()` detaches the bridge but leaves the daemon running.
 
-> Reboot wipes the daemon **and** turns Wireless debugging off → re-arm needed
-> (re-enable wireless debugging, connect, deployAndRun). Same limit as Shizuku.
+Each app variant (`.dev` and release) runs its daemon on its own port so both can be installed
+side by side.
 
-## Foreground service (done)
+## Module API groups
 
-`ClipForegroundService` (specialUse, START_STICKY) owns the `ClipBridge`, so the
-clipboard pipeline keeps running when the app is **swiped away** — the system
-restarts it and it reconnects to the still-running daemon on `:53123`. Captured
-clips go to `ClipBus` → UI (when alive) + logcat (`adb logcat -s LinkToMac`).
-
-The **relay client + E2E** is the next thing to add — it goes in this service
-(`onClip` TODO), so clips are forwarded to the Mac even with the app fully closed.
-
-> Android 13+: grant the notification permission to see the ongoing notification.
-> The service runs either way; verify survival via `adb logcat -s LinkToMac`.
-
-## Known follow-ups
-
-- mDNS (`NsdManager`) auto-discovery of `_adb-tls-pairing._tcp` / `_adb-tls-connect._tcp`
-  so the user doesn't type IP:PORT, and to survive port changes on reboot.
-- **Relay leg in the service:** WS client + secretbox E2E (Parts 3–5 of `workflow.md`).
-- Local socket auth token (stop other apps writing to the jar port).
-- POST_NOTIFICATIONS runtime request + battery-optimization exemption prompt.
+Boot/ADB (`autoStart`, `pairAuto`, `connect`, `deployAndRun`, `killDaemon`, `restartDaemon`,
+`readDaemonLog`, `cancelAdb`, …), relay (`setRelay`, `clearRelay`, `sendCommand`,
+`relayGetStatus`, `writeClipboard`), proximity, notification and SMS mirroring (with
+`granted | denied | blocked` permission results), diagnostics (`getLogs`, `getMacStat`,
+`getClipHistory`), and files (`getFileHistory`, `clearFileHistory`, `openFile`, `pickFiles`,
+`pickFolder`, `retryFileSend`, `cancelFileSend`, `openAppSettings`). Events: `onClip`,
+`onMacClip`, `onMacStat`, `onLog`, `onStatus`, `onRelay`, `onFileTransfer`. The authoritative
+typed list is `src/SelfAdb.ts`.

@@ -1,19 +1,26 @@
 ### Completed
-- [X] Clipboard sync
-- [x] Lock your mac from Android
-- [x] Auto-Lock your mac when Android moves out of range
-- [x] LAN-Direct Mode
-- [x] Show battery percent on Android App
-- [x] Notifications sync (Android → mac, with native banners)
+- [X] Clipboard sync (text, both ways, end-to-end encrypted)
+- [x] Clipboard images (both ways — a copied image on either device lands on the other's clipboard; auto-fitted under the 1 MiB relay frame cap; phone capture uses the shell daemon + a system Context to read the `content://` URI, guarded against reading on another app's behalf)
+- [x] Lock your Mac from Android
+- [x] Auto-lock your Mac when Android moves out of range (BLE; lock-only — macOS can't auto-unlock)
+- [x] LAN-Direct Mode (phone ↔ Mac with no relay on the same Wi-Fi, automatic relay fallback)
+- [x] Show battery percent on both sides (Mac → phone Home, phone battery + name → Mac dashboard)
 - [x] Live BLE distance to the paired device on both dashboards
-- [x] Read Messages on mac (Android → mac SMS mirroring — conversation threads in the Messages tab; read-only, replying is still upcoming)
-- [x] File transfer: clipboard images (bidirectional — a copied image on either device lands on the other's clipboard; auto-fitted under the 1 MiB relay frame cap; phone capture uses the shell daemon + a system Context to read the content:// URI)
-- [x] Reply to Messages from mac (1:1 threads — an inline composer on the Mac sends over the relay/LAN, the phone transmits a real SMS via SmsManager and acks back; group threads stay read-only for now)
-- [x] File transfer: share sheet (Android → Mac) — two share targets, "Send to Clipboard" (images, downscaled to paste) and "Send as a File" (any type, original quality, chunked + acked, saved to a folder chosen on the Mac), plus Direct Share entries in the sheet's top row. No app UI opens; a toast reports the outcome.
-- [x] File transfer: Mac → phone — drag a file onto the dashboard window or the menu-bar icon. Chunked + acked like the phone→Mac direction, with a live percentage; lands in the phone's Downloads/Link to Mac with a tap-to-open notification.
+- [x] Notifications sync (Android → Mac, native banners, per-app filter)
+- [x] Messages on the Mac (Android SMS mirrored as conversation threads) and **replying** from the Mac (1:1 threads — the phone sends a real SMS via `SmsManager` and acks back; group threads stay read-only)
+- [x] Works without ADB — automatic clipboard capture is the only thing that needs Wireless Debugging; the text-selection menu and the notification's "Send clipboard" cover copying when it's off
+- [x] Files, both ways — phone share sheet ("Send to Clipboard" / "Send as a File", several at once, Direct Share entries), and drag-and-drop onto the Mac's window or menu-bar icon. Chunked + acked, honest delivery receipts, cancel from either side
+- [x] Folders, both ways — a dropped / picked folder keeps its structure on the other side (`dir`)
+- [x] Files up to **1 GB** (streamed to disk on both receivers, no memory spike) and **resume** — send the same file again after a cut-off and only the rest goes
+- [x] A **Files screen** on the phone — send files / a folder from inside the app, a persisted history of everything sent and received, tap to open, retry a failed send, cancel from the notification or the screen
+- [x] Updates — Sparkle on the Mac; the Android app finds new releases on GitHub
+- [x] Shared protocol test vectors + Swift and Kotlin test suites, so the hand-mirrored wire formats can't silently drift
 ### Upcoming
 - [ ] Finder ▸ Share ▸ "Send to Phone" — the extension is written and ships in the bundle, but macOS (amfid) refuses to run an **ad-hoc signed** app extension: `AppleMobileFileIntegrityError -423`. It registers and appears in the Share menu, then its context is torn down before `viewDidLoad`. Unblocked only by signing with a real Developer ID, or by replacing it with an `NSServices` entry (which the app provides itself, so it never hits that gate).
+- [ ] Drag from Mail / Photos / Safari's download list onto the Mac — they hand over a *file promise*, not a file URL, so the drop is reported as unsupported today; resolving promises (`NSFilePromiseReceiver`) would fix it.
+- [ ] Send folders from the phone's **share sheet** — Android's share sheet never offers a folder, so today a folder goes through the Files screen's picker only.
+- [ ] Gate (or remove) the Mac's `linktomac://send` URL scheme — any local app or page can ask it to send a file to the paired phone; it exists only for the inert Share extension.
 - [ ] FCM push-wake for minimum background battery — while the Mac is offline, drop the persistent relay socket (no idle ping all day) and let a high-priority push wake the phone when the Mac reconnects. Only way to reach ~0 idle battery; relay-path only (not LAN). Big lift: GMS/FCM dependency + the relay must be able to push.
-- [ ] Mirror your Android screen to mac
-- [ ] Access Phone Gallery from mac
-- [ ] Make Call from mac (Review your call history, search contacts, or dial to make calls—from your mac.)
+- [ ] Mirror your Android screen to Mac
+- [ ] Access Phone Gallery from Mac
+- [ ] Make Call from Mac (Review your call history, search contacts, or dial to make calls—from your Mac.)

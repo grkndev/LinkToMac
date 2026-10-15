@@ -1,9 +1,14 @@
 # Link to macOS — Technical Reference
 
 This document covers **how the system actually works** under the hood: the four
-processes, the wire protocols between them, the data paths (clipboard, remote lock,
-battery telemetry, proximity), and the platform tricks that make a background
-clipboard sync possible on a stock Android phone.
+processes, the wire protocols between them, the data paths (clipboard, files and folders,
+remote lock, telemetry, notification and message mirroring, proximity), and the platform
+tricks that make a background clipboard sync possible on a stock Android phone.
+
+The per-directory guides (`mac/CLAUDE.md`, `mobile/CLAUDE.md`, `server/CLAUDE.md`) carry the
+file-by-file detail; this document is the *why* and the cross-component contracts. The wire
+formats that are mirrored by hand in two languages are additionally pinned by shared test
+vectors in [`protocol-vectors/`](protocol-vectors/README.md).
 
 It is the engineering companion to the user-facing [`README.md`](README.md). Where the
 README says *"the Android app reads the clipboard through its own ADB"*, this document
@@ -25,13 +30,13 @@ fourth is a stock-Android system service the Android app talks to through a tric
 ```
   ANDROID (phone)                         CLOUD                  macOS
   ┌────────────────────────────────┐                     ┌───────────────────────────┐
-  │ Expo / React Native app (JS)   │                     │ SwiftUI menu-bar agent    │
-  │   • UI, pairing, settings      │                     │   • NSPasteboard poll     │
-  │   • drives native via Expo     │                     │   • URLSession WS client  │
-  │     module (control plane)     │                     │   • CoreBluetooth central │
+  │ Expo / React Native app (JS)   │                     │ SwiftUI menu-bar + window │
+  │   • UI, pairing, settings,     │                     │   • NSPasteboard poll     │
+  │     Files screen               │                     │   • LAN WS server (NWList)│
+  │   • drives native via Expo     │                     │   • CoreBluetooth central │
   │ ┌────────────────────────────┐ │   ┌─────────────┐   │   • SACLockScreen / QR    │
-  │ │ Foreground Service (Kotlin)│ │   │  Node `ws`  │   │   • Keychain, login item  │
-  │ │  • OkHttp WS → relay ──────┼─┼──►│   relay     │◄──┼── URLSessionWebSocketTask │
+  │ │ Foreground Service (Kotlin)│ │   │  Node `ws`  │   │   • Keychain, Sparkle     │
+  │ │  • OkHttp WS → relay ──────┼─┼──►│   relay     │◄──┼── • URLSession WS client  │
   │ │  • ClipBridge (localhost)  │ │   │ (room route)│   └───────────┬───────────────┘
   │ │  • BleAdvertiser           │ │   └─────────────┘               │
   │ └─────────┬──────────────────┘ │   forwards opaque               │
@@ -51,26 +56,29 @@ fourth is a stock-Android system service the Android app talks to through a tric
 
 | Path | Transport | Touches the relay? | Direction |
 |---|---|---|---|
-| **Clipboard sync** | WebSocket `clip` frames | Yes — *or* LAN-direct (§5.1) | Both ways |
+| **Clipboard sync** | WebSocket `clip` frames (images: `file`) | Yes — *or* LAN-direct (§5.1) | Both ways |
+| **Files and folders** | WebSocket `file` frames, chunked + acked (§5.4) | Yes — *or* LAN-direct (§5.1) | Both ways |
 | **Remote lock** | WebSocket `cmd` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Both ways (Mac↔Phone) |
 | **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
-| **Message (SMS) mirroring** | WebSocket `sms` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
+| **Message (SMS) mirroring + replies** | WebSocket `sms` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac (mirror); Mac → phone (reply request), phone → Mac (ack) |
+| **App updates** | Sparkle appcast (Mac) / GitHub "latest release" API (Android) | No — GitHub | GitHub → app |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
 | **Proximity distance** | BLE measure → `stat` frame | Yes — *or* LAN-direct (§5.1) | Mac measures → Phone shows |
 
-The clipboard, lock, battery, notification, and message paths share one connection per device — the
-relay, or, on the same network, a **direct link to the Mac** with no relay (§5.1). The proximity path
-is completely independent — it works with no internet at all.
+The clipboard, file, lock, telemetry, notification, and message paths share one connection per
+device — the relay, or, on the same network, a **direct link to the Mac** with no relay (§5.1). The
+proximity path is completely independent — it works with no internet at all.
 
 ### Tech stack
 
 | Component | Language / runtime | Key dependencies |
 |---|---|---|
 | `server/` | Node ≥ 20, TypeScript (ESM) | `ws`, `pino`, `dotenv` |
-| `mac/` | Swift 6 (strict concurrency), SwiftUI | AppKit, CoreBluetooth, CryptoKit, Security, ServiceManagement — all system frameworks, **no third-party deps** |
-| `mobile/` (JS) | Expo SDK 56, React Native 0.85, Expo Router, React 19 | `expo-secure-store`, `expo-camera`, `react-native-keyboard-controller`, `uniwind` |
+| `mac/` | Swift 6 (strict concurrency), SwiftUI + AppKit | AppKit, Network (`NWListener`), CoreBluetooth, CryptoKit, Security, ServiceManagement, UserNotifications, IOKit — system frameworks; the **only third-party dependency is Sparkle** (auto-update) |
+| `mobile/` (JS) | Expo SDK 56, React Native 0.85, Expo Router, React 19 | `@expo/ui` (Jetpack Compose), `expo-secure-store`, `expo-camera`, `expo-updates`, `react-native-keyboard-controller`, `uniwind` |
 | `mobile/modules/selfadb` (native) | Kotlin (Expo Module) | `libadb-android` 3.1.1, BouncyCastle, Conscrypt, OkHttp 4.12 |
+| tests | swift-testing (`mac/Tests`), JUnit 4 (`…/selfadb/android/src/test`) | `protocol-vectors/` run by both |
 | `clipboard-agent` | Java → dex | none (reflects into framework `IClipboard`) |
 
 ---
@@ -109,72 +117,12 @@ between them. It never stores anything and never inspects clipboard content.
   the relay forwards it verbatim. Like `stat`, the message type was an additive,
   backward-compatible protocol change (the relay just learned a new type to fan out).
 - `sms` carries an **opaque mirrored SMS batch/delta** (phone → Mac); same additive, opaque fan-out.
-- `file` carries **opaque clipboard images and opaque file transfers, both bidirectional**; same
-  additive, opaque fan-out. Its plaintext is
-  `u16 BE header-len ‖ header JSON ‖ raw bytes` (raw bytes inside the AEAD envelope, so only the
-  outer `ct` is base64 — no double-encoding). Header keys past `mime` are all optional and
-  additive, so a peer that only understands `mime` still pastes an image:
-  - `disp` — `clip` (paste it; the default) or `save` (write it to the Mac's download folder).
-  - `name` — the original file name, for `save`.
-  - `dir` — relative folder (`Photos/2024`) the file sat in when a folder was sent. The receiver
-    treats it as untrusted (drops `.`/`..`/empty parts, strips separators, bounds depth) and
-    saves under it; an old peer ignores it and saves flat.
-  - `op` — `data` (default), `ack` (the receiver stored one chunk) or `nack` (it could not; an
-    optional `err` says why, and the sender stops at once).
-  - `id` / `seq` / `n` — chunk group, 0-based index, total count; written even for a one-chunk
-    file, because `id` is what makes the receiver ack. The header repeats in full on every chunk,
-    so chunks may arrive in any order.
-
-  The frame format is pinned by **`protocol-vectors/file-frame.json`**, which both the Swift
-  (`mac/Tests/FileFrameVectorTests.swift`) and Kotlin (`FileFrameVectorTest`) codecs must pass — the
-  two are mirrored by hand and have drifted before. Change the vectors and both codecs together.
-
-  **Cancel** is one-sided: stopping a transfer (the Mac drop zone's Cancel, the phone notification's
-  Cancel) just stops sending. There is deliberately no `cancel` op on the wire — an *old* peer parses
-  an unknown `op` as a data chunk, so adding one would corrupt transfers with older apps. The
-  receiver simply stops hearing from the sender and drops the partial when it expires (below).
-
-  **Resume.** An `ack` may carry `have` — how many leading chunks `[0, have)` the receiver already
-  holds. The transfer id is **deterministic** (first 8 hex of SHA-256 of `name|size|mtime|dir`, on
-  both senders), so sending the *same file again* reuses it: the receiver recognises the partial,
-  every ack reports `have`, and the sender seeks past those chunks (clamped so the last chunk always
-  goes — it is what completes the file and earns the final ack). Only the few chunks that were in
-  the ack window when it stopped are re-sent. No UI is needed: re-share or re-drop the file (the
-  phone's Files screen also has Retry for sends picked in the app). A receiver keeps a half-received
-  transfer for **10 min**; one idle for 2 min stops showing as "receiving" and may be evicted to make
-  room for a new transfer (a live one never is). An edited file changes size or mtime and so starts
-  fresh; an edit preserving both can't be told apart. Old peers ignore `have` and re-send everything,
-  which is correct, just slower.
-
-  **Size and memory.** The cap is **1 GiB per file** on both sides (they must match). Both receivers
-  stream chunks into a temp file at `seq × chunk size` and then move it into place, so a gigabyte
-  costs one chunk of RAM, not two gigabytes; the phone sends a large share-sheet file straight from
-  its content URI (read grant on the start intent) instead of copying it into the cache first. Time
-  (≈ 3–4 min per GiB over the paced relay) and free space are the real limits.
-
-  **Folders.** `dir` carries the relative path; both receivers recreate the tree under the download
-  folder after sanitising it with twin functions pinned by `protocol-vectors/dir-sanitize.json`.
-
-  Files that arrive in a burst raise **one** updating notification on each side ("N files" /
-  "N files in Photos"), not one per file.
-
-  The receipt is honest: a chunk is acked once stored, and the **last** chunk only after the file is
-  written (Downloads on the phone, the download folder on the Mac), so a delivery report means the
-  file exists. The sender's flow-control window is a counter behind a condition variable that
-  can be *failed* — a `nack`, a dead link or a cancel wakes the waiting sender immediately.
-  (It was a `DispatchSemaphore`; one abandoned below its initial value kills the process, which
-  is how a timed-out transfer used to crash the next drop.)
-
-  A **clipboard** image is squeezed to fit one frame: the sender downscales / JPEG-re-encodes it to
-  ~700 KB raw (`ImagePrep.swift` on the Mac, `ClipForegroundService.fitImage` on the phone) so the
-  sealed + base64'd frame stays under the 1 MiB `maxPayload`. A **file** keeps its original bytes
-  and is split into 640 KiB chunks instead — which makes the two relay limits below load-bearing
-  rather than theoretical, since both drop the *connection* rather than the frame:
-  the sender keeps only 4 chunks unacked (the `ack` op is flow control, not politeness) and, on the
-  relay, paces itself to 8 frames/s against the 120-per-10 s rate limit. LAN-direct has neither
-  limit and is not paced. The receiver is bounded on every axis (2 concurrent transfers, 1 GiB each,
-  chunks no longer than the chunk size, a 10 min retention) because an inbound transfer is
-  peer-controlled.
+- `file` carries **opaque clipboard images and opaque file/folder transfers, both bidirectional**:
+  the same additive, opaque fan-out. The relay never sees a name, a size or a byte of a file; what
+  matters to it is that frames are ≤ 1 MiB (`maxPayloadBytes`), that a peer buffering more than
+  `maxPayloadBytes * 8` is dropped, and that a connection is limited to 120 frames / 10 s — which is
+  why the senders chunk, window and pace (§5.4). The plaintext format, chunking, acks, resume and
+  the folder/size rules are specified in §5.4.
 - **Backpressure:** if a peer's `ws.bufferedAmount` exceeds `maxPayloadBytes * 8`, it is
   declared a slow consumer and dropped (close code `4003`) instead of buffering unbounded.
 - Logs are privacy-preserving: the `roomId` is redacted to a 6-char prefix, and only
@@ -202,7 +150,7 @@ and **publishes no host port**, so only the reverse proxy can reach it.
 
 > **Runtime-configured endpoint (no baked-in secrets).** The relay address, port, TLS, and
 > password are entered at runtime and carried in the pairing QR — nothing is injected at build
-> time. The Mac stores them via **Server Settings…** (`ServerSettings.swift`: UserDefaults +
+> time. The Mac stores them via **Settings ▸ Relay Server** (`ServerSettings.swift`: UserDefaults +
 > Keychain) and embeds them in the QR; the phone reads them from the QR (or **Settings → Relay
 > server**) into a `ServerConfig` (`server-config.ts`, SecureStore). A `secure` flag selects
 > `ws://` vs `wss://`. Only the server still keeps an env file (`server/.env`) for its
@@ -387,7 +335,8 @@ the pair for good. Three contracts around it (all verified on-device):
   never-binding crash-loop (bad dex) shows as ECONNREFUSED — not accept-then-drop — and the
   same heartbeat→redeploy self-heal clears the crash-looping supervisor too (its kill is part
   of every launch).
-- **`ClipForegroundService`** owns the bridge, the relay WS client, and the BLE advertiser. It
+- **`ClipForegroundService`** owns the bridge, the link to the Mac (`ConnectionManager` → relay
+  and/or LAN), the BLE advertiser, the SMS mirror, and the whole file-send pipeline (§3.8). It
   runs as a **`START_STICKY` foreground service** with type `specialUse|connectedDevice`
   (Android 14+ requires a declared type). Because it's `START_STICKY`, the system restarts it
   with a null intent after a kill, and `onStartCommand` re-reads persisted config
@@ -440,7 +389,9 @@ the pair for good. Three contracts around it (all verified on-device):
   exponential backoff capped at 30 s.
   All state runs on a single-thread executor; late OkHttp callbacks after shutdown are dropped
   rather than crashing (a `RejectedExecutionException` guard — this was a real "crash on pause"
-  bug). It sends `clip` and `cmd` frames and applies received clips through the service.
+  bug). It sends `clip`, `cmd`, `stat`, `note`, `sms` and `file` frames and hands every received one
+  to the service (clips, `file` chunks/acks, `sms` reply requests). `LanClient.kt` is its
+  LAN-direct twin (§5.1); `ConnectionManager.kt` keeps exactly one of them joined.
 - **`BleAdvertiser.kt`** advertises a **non-connectable** BLE beacon whose only payload is a
   128-bit service UUID derived from the pairing room (see §8). Balanced advertise mode, medium
   TX power. Presence *is* the entire signal — there's no connection or data exchange.
@@ -576,67 +527,132 @@ within milliseconds of the JS timeout instead of however long is left on its own
 
 The Expo module only exists while the JS runtime is alive; the foreground service outlives it.
 **`ClipBus`** is the process-wide bridge: the service always posts events here, and the module
-attaches/detaches its `onClip` / `onMacClip` / `onMacStat` / `onLog` / `onRelay` callbacks in
-`OnCreate`/`OnDestroy`. It also holds bounded ring buffers — 400 log lines and 100 Mac-clip
+attaches/detaches its `onClip` / `onMacClip` / `onMacStat` / `onLog` / `onRelay` /
+`onFileTransfer` callbacks in `OnCreate`/`OnDestroy`. It also holds bounded ring buffers — 400 log lines and 100 Mac-clip
 entries — so the Logs and Clipboard-History screens can show events that happened *before* the
 JS runtime attached (e.g. an FGS reconnect while the app was swiped away). `lastRelay` and
 `lastStat` let a late-attaching UI query the current relay status and Mac battery immediately.
 
+### 3.8 File transfer on Android (`ClipForegroundService`, `SendItem`, `FileInbox`, `FileHistory`)
+
+The wire side is §5.4; this is how the phone implements it. Everything runs in the foreground
+service, so a transfer outlives the JS runtime and the activity that started it.
+
+**Ways in.** Four entry points, all ending in `ClipForegroundService.sendShared`:
+- **Share sheet** — `ShareActivity` (two targets: `ShareToClipboardActivity` for `image/*`,
+  `ShareAsFileActivity` for `*/*` *and* `ACTION_SEND_MULTIPLE`). It can't read a URI after it
+  finishes, so a file ≤ 64 MB is **staged** into `cacheDir/outbox` while its grant is alive; a larger
+  one is **not copied** — its content URI travels on the start intent with `ClipData` +
+  `FLAG_GRANT_READ_URI_PERMISSION` and the service streams it. A share with no stream (a link, a text
+  block) is sent as a plain clip.
+- **Files screen** — `PickActivity` (invisible, not exported) shows `ACTION_OPEN_DOCUMENT` (multiple)
+  or `ACTION_OPEN_DOCUMENT_TREE`, takes a **persistent** read grant, and hands the URIs to the service
+  (`submitPick`). The persistent grant is what makes **Retry** possible.
+- **Retry** (`retrySend`) — rebuilds the item from the history row's saved `source` URI. It reuses the
+  failed row and, because the transfer id is deterministic, resumes (§5.4).
+- **Cancel** — the progress notification's action, or the Files screen's in-progress row, both end in
+  `cancelShare()`.
+
+**`SendItem`** is what the pipeline sends: a stream opener plus `name`/`size`/`mtime`/`dir`, built from a
+staged copy, from a content URI, or from a folder walk. `FolderWalker` flattens a picked tree
+(`DocumentsContract`, behind a small `DocTree` interface so a fake can unit-test it): hidden entries
+skipped, empty/oversized files, an empty folder and a tree past 1,000 files reported rather than
+dropped, depth-capped. `TransferId.of(name, size, mtime, dir)` is the deterministic id.
+
+**The send loop** (`sendAllAsFiles` → `sendAsFile`) runs on one `shareExec` thread, so two sends can
+never interleave on one ack window. Per file it holds an ack window of 4 (a `Semaphore`), paces itself at
+`RELAY_CHUNK_INTERVAL_MS` = 125 ms **only on the relay** (re-read per chunk via `ClipBus.onLan()`), skips
+the chunks the Mac reports it already has (`Transfer.have`, `InputStream.skipFully`), and honours a nack
+or a cancel by over-releasing the semaphore so a sender blocked on the window or the final drain wakes at
+once. One progress notification covers the whole batch (`Sending 2/5`, `name.ext (50%)`, bar = batch
+chunks) and one toast closes it; a dead link (`MAC_STOPPED`) ends the batch, a nack only skips that file.
+
+**Receiving.** `applyFile` handles every inbound `file` frame: a clipboard image goes to the clipboard as
+a FileProvider URI (§3.4); a chunk goes to `FileInbox`, which writes it into a temp file at
+`seq × 640 KiB` (`RandomAccessFile`) — never a map of chunks — and reports `have`. A chunk is acked once
+stored and the last one only after `FileSink.saveToDownloads` wrote the file into `MediaStore.Downloads`
+under `Link to Mac/<dir>` (no runtime permission on API 29+); a refused or unwritable file is nacked.
+`FileSink.sanitize` / `sanitizeDir` treat the peer's name and folder path as untrusted. A burst of
+received files raises **one** updating notification (`postReceivedNotification`).
+
+**History.** `FileHistoryStore` (a bounded 200-row JSON file in `filesDir`, plain Kotlin so it is
+unit-tested) records one row per file — `queued → active → done / failed / cancelled` for sends, `done` /
+`failed` with the MediaStore URI for receives — and `FileHistory` emits every change as the
+`onFileTransfer` event. Only a status change is written; a progress tick stays in memory; a row still
+`queued`/`active` when the file is loaded belonged to a dead process and is marked `failed`
+("Interrupted"). The JS side (`use-file-history.ts`, `files.tsx`) seeds from `getFileHistory()` and applies
+the events.
+
+**Two installs side by side.** The dev (`….dev`) and release builds can coexist (separate daemon ports);
+`NotificationListener.isOurs` makes each skip *both* packages' notifications, or each would mirror the
+other's transfer notifications to the Mac.
+
 ---
 
-## 4. macOS: the menu-bar agent (`mac/`)
+## 4. macOS: the menu-bar app (`mac/`)
 
-A SwiftUI `MenuBarExtra` (`.window` style, so the dropdown is a real panel with switches, not
-a plain menu) **plus a separate dashboard window** opened from it. No Dock icon. Swift 6 with
-complete strict concurrency; everything observable is `@MainActor`-isolated and async loops hop
-back to the main actor on each step. **Zero third-party dependencies except Sparkle** (auto-update)
-— otherwise only system frameworks. Built reproducibly from `project.yml` via XcodeGen, ad-hoc
-signed (`CODE_SIGN_IDENTITY: "-"`, hardened runtime off) so it runs locally without a Developer
-team.
+A SwiftUI app with **two surfaces**: a menu-bar item and a **dashboard window**. The menu-bar item is
+hand-built on `NSStatusItem` + `NSPopover` (`StatusItemController`) rather than SwiftUI's
+`MenuBarExtra`, because the icon has to be a **drag destination** (drop a file on it and the panel
+opens with a drop zone) and `MenuBarExtra` exposes no access to its status item; the popover still
+hosts the same SwiftUI `MenuPanel`. By default it is a regular Dock app, and both surfaces are
+runtime-toggleable (Settings ▸ Appearance: *Show in Dock* flips `.regular` ↔ `.accessory`, *Show in Menu
+Bar* adds/removes the status item; `AppearanceStore` keeps at least one visible). Closing the dashboard
+leaves the app alive; a Dock click reopens it. The window is a fixed 1280×760 with a chromeless title
+bar. Swift 6 with complete strict concurrency; everything observable is `@MainActor`-isolated and async
+loops hop back to the main actor on each step. **The only third-party dependency is Sparkle**
+(auto-update); everything else is system frameworks. Built reproducibly from `project.yml` via XcodeGen
+and ad-hoc signed (`CODE_SIGN_IDENTITY: "-"`, hardened runtime off) so it runs locally without a
+Developer team — which is also why the Finder Share extension cannot run (`amfid` refuses an ad-hoc
+signed app extension; see `RoadMap.md`).
 
-The UI is **Material 3-flavoured** (mirroring the mobile app): the menu-bar dropdown is a compact
-phone-identity card (phone render + name + live status dot + tonal transport/battery chips), and
-the dashboard window hosts the phone panel, clip history, a Notifications tab, and
-roadmap-placeholder feature tiles.
+The UI is **Material 3-flavoured** (mirroring the mobile app): the popover is a compact phone-identity
+card (phone render, name, live status dot, tonal transport/battery chips), and the dashboard hosts the
+phone panel, a Notifications / Messages tab strip, clip history and Settings.
 
 | File | Role |
 |---|---|
-| `RelayClient.swift` | `URLSessionWebSocketTask` to the relay; join, ping/pong, presence, reconnect; owns the pasteboard + battery monitor, the inbound `stat`/`note`/`sms` decode + inbound `file` (`receiveRemoteFile` → pasteboard image, or a `disp:"save"` transfer reassembled by `FileInbox` and written by `FileDropStore`; chunks are acked back for flow control), clip-history ring, notification ring, and message store (`conversations`); sends outbound `clip`/`stat`/**`file`** (Mac→phone clipboard images, gated by `syncImages`) |
-| `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; `onRemoteStat`/`onRemoteNote`/`onRemoteSms`/`onRemoteFile` for the relay-less path; outbound `sendClip`/`sendStat`/`sendFile` |
-| `PasteboardWatcher.swift` | Polls `NSPasteboard.changeCount`; reports new text + image-only copies (outbound); `write`/`writeImage` apply inbound clips/images; echo suppression via `lastChangeCount` |
-| `BatteryMonitor.swift` | IOKit power-source poll → outbound `stat` (the Mac's own battery) |
-| `ClipCodec.swift` | E2E payload encryption — ChaCha20-Poly1305 (CryptoKit); String + raw-`Data` (`encodeData`/`decodeData`) variants |
-| `ImagePrep.swift` | Fits a copied image under the relay frame cap (pass-through small PNG, else downscale + JPEG) for the `file` frame |
-| `MacNotifier.swift` | Raises native banners for mirrored notifications (`UNUserNotificationCenter`; icon as a best-effort attachment with a text-only fallback) |
-| `ProximityMonitor.swift` | CoreBluetooth central; RSSI → lock decision |
-| `ScreenLock.swift` | Locks the screen |
-| `Pairing.swift` | Room/key generation, Keychain, QR rendering (v3 also embeds the server + LAN config) |
-| `ServerSettings.swift` | Runtime relay endpoint store — host/port/TLS in `UserDefaults`, password in Keychain |
+| `LinkToMacApp.swift` | `@main` + `AppDelegate`: owns `RelayClient`, `LanServer`, `ProximityMonitor`, `AppearanceStore`, the Sparkle updater and the dashboard window; handles `linktomac://send?path=…` |
+| `StatusItemController.swift` | The `NSStatusItem` + popover; a transparent overlay makes the status button a drag destination |
+| `RelayClient.swift` | The hub (§4.1): relay WebSocket, pasteboard + battery owners, inbound decode of `stat`/`note`/`sms`/`file`, the clip/notification/message stores, outbound `clip`/`stat`/`sms`/`file` |
+| `RelayProtocol.swift` | `ClientMessage`/`ServerMessage` (mirror of `server/src/protocol.ts`) and the **`FileFrame`** codec (§5.4) |
+| `LanServer.swift` | LAN-direct WS server (`NWListener`) + Bonjour + HMAC handshake; the relay-less twin of the relay path |
+| `Config.swift` / `ServerSettings.swift` | Runtime relay endpoint (host/port/TLS in `UserDefaults`, password in Keychain) |
+| `ClipCodec.swift` | E2E payload encryption — ChaCha20-Poly1305 (CryptoKit); String + raw-`Data` variants |
+| `PasteboardWatcher.swift` / `ImagePrep.swift` | Pasteboard poll + echo stamp (§4.2); fits a copied image under the frame cap |
+| `BatteryMonitor.swift` | IOKit power-source poll → outbound `stat` |
+| `FileTransfer.swift` | Sender and planner (§4.4): `FileSender`, `AckWindow`, `FileBatchPlanner`, `BatchProgress`, `BurstCounter` — Foundation only, so the test target compiles it |
+| `FileDrop.swift` | `FileDropStore` (download folder, safe save/move) and `FileInbox` (disk-backed chunk reassembly) |
+| `FileDropZone.swift` | The "drop to send" surface and the `.phoneFileDrop` modifier (dashboard window + popover) |
+| `MacNotifier.swift` | Native banners (`UNUserNotificationCenter`), with a foreground delegate and replace-by-identifier |
+| `ProximityMonitor.swift` / `ProximityConfig.swift` | CoreBluetooth central, RSSI → lock decision (§8); UUID derivation |
+| `ScreenLock.swift` | Locks the screen (§4.3) |
+| `Pairing.swift` / `PairingView.swift` | Room/key generation, Keychain, the v3 QR |
 | `LoginItem.swift` | `SMAppService` auto-start at login |
-| `MenuPanel.swift` / `PairingView.swift` | Menu-bar UI (phone-identity card, last-copy glance, Pairing QR, Server Settings) |
-| `DashboardWindow.swift` / `DashboardComponents.swift` | Dashboard window shell + shared M3 components |
-| `PhonePanel.swift` | Phone identity: name, connection status, transport + battery chips (hidden when nil) |
-| `ClipHistoryScreen.swift` | Clip history grouped by recency, tap-to-recopy, clear |
-| `FeaturePanel.swift` | Right-column tabs — the **Notifications** tab renders the live note ring, the **Messages** tab renders `conversations` (thread list → chat bubbles); Calls/Photos are placeholders |
-| `SettingsScreen.swift` / `AppearanceSettings.swift` / `AboutView.swift` / `RelayScreen.swift` / `ServerSettingsView.swift` | Settings, appearance, about, relay, and "Server Settings…" surfaces |
+| `MenuPanel.swift`, `DashboardWindow.swift`, `PhonePanel.swift`, `FeaturePanel.swift`, `ClipHistoryScreen.swift` | The popover and the dashboard: phone identity, Notifications/Messages tabs (the Messages tab has the reply composer), clip history |
+| `SettingsScreen.swift`, `AppearanceSettings.swift`, `RelayScreen.swift`, `ServerSettingsView.swift`, `AboutView.swift`, `DashboardComponents.swift`, `PanelComponents.swift` | Settings, appearance, relay, about, shared M3 components |
+| `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — **inert**: it is sandboxed (so it hands the path over via `linktomac://`) and ad-hoc signing can't run it |
 
 ### 4.1 RelayClient (Swift)
 
 `@Observable`, `@MainActor`. Uses a monotonic **`generation` counter** so that loops belonging
 to a replaced socket bail out instead of corrupting current state — important since
-receive/heartbeat run as detached `Task`s. App-level ping every 25 s; exponential backoff
-reconnect capped at 30 s. Joins as `"mac"`. On a received `clip` it writes to the pasteboard (and
-appends to an in-memory clip-history ring the dashboard reads); on a `cmd` it dispatches to a
-handler (currently only `"lock"`). It also **reports the Mac's battery** as `stat` frames
-(`BatteryMonitor.swift`, IOKit power sources): pushed the moment a peer connects and whenever the
-level/charging state changes; a desktop Mac with no battery sends nothing. **Inbound** `stat` is
-decoded into `phoneBatteryLevel`/`phoneCharging`/`phoneName` for the dashboard's PhonePanel (the
-Mac no longer displays *its own* battery to itself — you're already on the Mac). Inbound `note`
-frames are upserted by key into the notification ring and raised as banners (§5.2). A persisted
-`sendToAndroid` flag is the Mac-side equivalent of the phone's pause toggle. The endpoint comes
-from `ServerSettingsStore`, so it stays **idle until configured** rather than dialing a
-placeholder; `reconnect()` re-dials on a Server Settings change, and `wss://` is used when the
-`secure` flag is set. Unpair clears the clip-history and notification rings.
+receive/heartbeat run as detached `Task`s. App-level ping every 25 s with a 50 s no-inbound-frame
+"pong timeout" that tears down a half-open socket (after sleep/wake or a NAT timeout, *sending*
+proves nothing — only receiving does); exponential backoff reconnect capped at 30 s. Joins as `"mac"`.
+On a received `clip` it writes to the pasteboard (and appends to an in-memory clip-history ring the
+dashboard reads); on a `cmd` it dispatches to a handler (currently only `"lock"`). It also **reports the
+Mac's battery** as `stat` frames (`BatteryMonitor.swift`, IOKit power sources) merged with the BLE
+proximity reading (§8): pushed the moment a peer connects and whenever either changes; a desktop Mac with
+no battery sends only proximity. **Inbound** `stat` is decoded into `phoneBatteryLevel`/`phoneCharging`/
+`phoneName` for the PhonePanel. Inbound `note` frames are upserted by key into the notification ring and
+raised as banners (§5.2); inbound `sms` frames feed the message store and resolve reply acks (§5.3);
+inbound `file` frames go through `receiveRemoteFile` (§4.4). Two persisted outbound gates
+(`sendToAndroid`, `syncImages`, Settings ▸ Clipboard) are the Mac-side switches for one-way flows — the
+phone no longer has any. The endpoint comes from `ServerSettingsStore`, so it stays **idle until
+configured** rather than dialing a placeholder; `reconnect()` re-dials on a relay-settings change, and
+`wss://` is used when the `secure` flag is set. Unpair clears the clip-history, notification and message
+stores.
 
 ### 4.2 Clipboard watching + echo suppression
 
@@ -654,6 +670,45 @@ no entitlement, which is fine because the app isn't sandboxed and the hardened r
 If the symbol can't be resolved on a future macOS, it falls back to
 `CGSession -suspend` (drops to the login window).
 
+### 4.4 File transfer on the Mac (`FileTransfer.swift`, `FileDrop.swift`, `FileDropZone.swift`)
+
+The wire side is §5.4; this is how the Mac implements it.
+
+**Ways in.** Every one hands *all* the dropped items to `RelayClient.sendFilesToPhone(_:)` at once: the
+dashboard window and popover (`.phoneFileDrop`: an `.onDrop` that resolves **every** provider through a
+lock-guarded box, reporting items that carry no file URL — Mail/Photos "file promises" — instead of
+ignoring them), the menu-bar icon (`StatusDropView.performDragOperation`, file URLs only), and a
+`linktomac://send?path=…` URL (the inert Share extension, or `open` from a shell). A folder is allowed.
+
+**Planning.** `FileBatchPlanner.plan` flattens the drop off the main actor: folders are walked with
+`FileManager.enumerator` (hidden files and nested symlinks skipped, packages sent as trees, at most 1,000
+files), each file keeps its folder path as `dir`, and empty / oversized / unreadable things become
+`problems` for the summary instead of vanishing.
+
+**Sending.** `FileSender` is **not** `@MainActor` — it blocks on an ack window — and works through a batch
+one file at a time on a private serial queue; a drop that arrives mid-batch **joins** it, so there is one
+bar and one summary however many drags it took. Per chunk it asks a `Transport` closure to emit on the link
+that is up *right now* (LAN, else relay, else the transfer ends at once instead of waiting out a timeout),
+paces relay chunks at 125 ms, and uses `AckWindow` — a per-chunk set behind an `NSCondition` — for flow
+control. **It replaced a `DispatchSemaphore`:** libdispatch kills the process when a semaphore is
+deallocated below its initial value, and a transfer that ended short of its acks (timeout, nack, dead
+link) left exactly that behind; the next send crashed the app. The window can also be *failed*, so a nack,
+a lost link or a cancel wakes a blocked sender immediately. A refused file (nack) doesn't stop the batch; a
+dead link or a silent phone does, because every remaining file would wait out the same 30 s. The id is
+deterministic and the loop skips what the phone reports having (`have`) — see §5.4.
+
+**UI.** One determinate bar over the batch's bytes (`BatchProgress.overallFraction`), the file in flight
+labelled `name.ext (50%)`, a `3 / 5` counter and a Cancel button; one summary banner at the end.
+
+**Receiving.** `receiveRemoteFile` parses the frame and routes it: `ack`/`nack` to the sender; a chunk to
+`FileInbox`, which writes it into a temp file at `seq × chunkRawBytes` (a one-frame file or clipboard image
+stays in memory), reports `have`, evicts a stale partial when full, and deletes temp files on completion,
+reject, sweep (a 15 s timer while a transfer shows) and at launch. The finished file is **moved** into place
+by `FileDropStore.moveIn` off the main actor — recreating the sender's folder under the download folder
+from the sanitised `dir` and never overwriting (a clash becomes `photo 2.jpg`) — and only then is the
+last chunk acked; a failure nacks. A burst raises one updating banner (`BurstCounter` + a fixed
+notification identifier).
+
 ---
 
 ## 5. Wire protocol (relay)
@@ -669,8 +724,8 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // action E2E-encrypted, forwarded verbatim
 { "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name; Mac also ± BLE prox/rssi), bidirectional, E2E-encrypted, forwarded verbatim
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
-{ "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // mirrored SMS batch/delta (phone → Mac), E2E-encrypted, forwarded verbatim
-{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // clipboard image (bidirectional) or a file chunk / chunk-ack (phone → Mac): plaintext = u16 header-len ‖ header JSON ‖ raw bytes, E2E-encrypted, forwarded verbatim
+{ "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // phone → Mac: mirrored SMS batch/delta, reply ack; Mac → phone: reply request. E2E-encrypted, forwarded verbatim
+{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // both ways: clipboard image, file chunk, chunk ack/nack. plaintext = u16 header-len ‖ header JSON ‖ raw bytes (§5.4), E2E-encrypted, forwarded verbatim
 { "t": "ping" }
 
 // relay → client
@@ -680,8 +735,8 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "cmd",    "nonce": "...", "ct": "..." }            // the peer's command, relayed
 { "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name; Mac also ± BLE prox/rssi), relayed
 { "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
-{ "t": "sms",    "nonce": "...", "ct": "..." }            // the peer's mirrored SMS batch/delta, relayed
-{ "t": "file",   "nonce": "...", "ct": "..." }            // the peer's clipboard image, file chunk, or chunk-ack, relayed
+{ "t": "sms",    "nonce": "...", "ct": "..." }            // the peer's mirrored SMS batch/delta, reply request or reply ack, relayed
+{ "t": "file",   "nonce": "...", "ct": "..." }            // the peer's clipboard image, file chunk, or chunk ack/nack, relayed
 { "t": "error",  "code": "room-full" | "bad-join" | "not-joined" | "rate-limit"
                        | "join-timeout" | "bad-message", "message": "..." }
 { "t": "pong" }
@@ -696,7 +751,8 @@ On the same network the phone can skip the relay entirely and talk **straight to
 roles invert: the **Mac becomes the WebSocket server** (`LanServer.swift`, `Network.framework`
 `NWListener` + `NWProtocolWebSocket` — all system frameworks, no third-party deps) and the phone
 is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on the LAN), but
-`clip`/`cmd`/`stat`/`note`/`sms`/`file` stay E2E-encrypted, so a sniffer sees only opaque ciphertext.
+`clip`/`cmd`/`stat`/`note`/`sms`/`file` stay E2E-encrypted, so a sniffer sees only opaque ciphertext. (LAN has no
+  relay-side frame cap or rate limit, so files are not paced there — §5.4.)
 
 - **Discovery (hybrid).** The Mac advertises Bonjour `_linktomac._tcp` on its LAN port (default
   **53124**) with TXT `rid = base64url(SHA256(room))[:16]` + `name`. The phone recomputes the same
@@ -753,14 +809,14 @@ dashboard's Notifications tab (`FeaturePanel`, with the app icon as each row's b
 `note`) and can be paused phone-side (`setNotificationForwarding`, persisted) without revoking the
 system access grant. Cleared on unpair.
 
-### 5.3 Message mirroring (`sms`, phone → Mac)
+### 5.3 Message mirroring and replies (`sms`)
 
 The phone reads its **SMS store** and shows it as real conversation threads on the Mac's Messages
 tab. The reader, `SmsMirror.kt`, is **owned by the `ClipForegroundService`** (not a system service),
 so it survives a JS swipe like the notification listener. It needs two **dangerous runtime
 permissions** — `READ_SMS` (the texts) and `READ_CONTACTS` (resolve sender names) — granted from the
 app's settings via `SelfAdbModule.requestSmsAccess`. `READ_SMS` is Play-restricted, but the app is
-**sideloaded** (EAS `preview` APK), so the policy doesn't apply. SMS-only for v1 (no MMS/RCS).
+**sideloaded** (EAS `preview` APK), so the policy doesn't apply. SMS only (no MMS/RCS).
 
 Two paths, both gated by the grant + the **Mirror messages** toggle (`getSmsForwarding`, PREFS_UI,
 default on; the soft pause that doesn't revoke the OS permission):
@@ -792,9 +848,121 @@ The decrypted plaintext:
 The Mac (`RelayClient.applySms`) upserts each message by `id` into an in-memory store (cap 500), and
 `conversations` groups them by `thread` (newest activity first) for `FeaturePanel`'s Messages tab —
 a thread list that drills into a chat-bubble view (outgoing trailing/`primaryContainer`, incoming
-leading/`surfaceContainerHigh`). Mirroring is **one-way and read-only** (the Mac never sends `sms`;
-replying from the Mac is roadmap). No delete/edit handling in v1 (SMS deletions are rare). Cleared on
-unpair.
+leading/`surfaceContainerHigh`). No delete/edit handling (SMS deletions are rare). Cleared on unpair.
+
+**Replying (Mac → phone), 1:1 threads only.** The `sms` frame type carries the reverse direction as
+extra ops — the same move the `file` ack/nack makes, rather than a new frame type:
+
+```jsonc
+// Mac → phone: a reply request
+{ "op": "send", "corr": "<uuid>", "addr": "+90555…", "body": "on my way" }
+// phone → Mac: the outcome, on the same channel
+{ "op": "sent",   "corr": "<uuid>", "id": 4712 }        // id only if the phone could record it
+{ "op": "failed", "corr": "<uuid>", "error": "…" }
+```
+
+The Mac's inline composer (`RelayClient.sendReply`) appends an optimistic `.sending` placeholder (a
+synthetic negative `id`, tracked by `corr`; **15 s timeout → `.failed`**) and the phone's ack resolves it
+(`applySmsAck`), rewriting the placeholder's `id` to the real SMS-store id when the phone reports one so the
+later genuine mirror delta upserts over it instead of duplicating. The phone sends with
+`SmsManager.sendMultipartTextMessage` (`SmsMirror.sendReply`), resolving the result from a sent-intent
+receiver. It needs the separate **`SEND_SMS`** runtime grant (requested lazily — not bundled with the
+mirroring grant). Because the app is not the default SMS handler it generally can't write its own sent
+message into the SMS store, so `id` is often absent and the Mac keeps its placeholder as the only record of
+that reply. If `SEND_SMS` is missing, the phone raises a one-time notification
+(`postSmsSendPermissionAlert`) and Settings shows a **Grant SMS Send Access** row.
+
+**Granting on a sideloaded APK.** Both SMS requests go through `SelfAdbModule.requestWithSettingsFallback`,
+which resolves `granted | denied | blocked`. `blocked` means Android refused in under 600 ms — it declined
+to prompt, a person can't tap "Don't allow" that fast. That is the sideloaded-APK case: the first request
+is blocked as a restricted setting, the user allows it under App info, comes back, and the system *still*
+shows no dialog, so the button used to look dead. On `blocked`, Settings shows an alert with the steps
+(⋮ → *Allow restricted settings*, then *Permissions → SMS → Allow*) and an "Open App info" button, and the
+grant rows carry the same hint until the permission is held.
+
+### 5.4 File transfer (`file`, both directions)
+
+One frame type carries four things: a **clipboard image**, a **chunk of a file**, and a chunk's **ack** or
+**nack**. The plaintext inside the v2 envelope (AAD `"file"`) is
+
+```
+u16 BE header-len ‖ header JSON (utf-8) ‖ raw bytes      // raw bytes inside the AEAD, so only the outer `ct` is base64
+```
+
+Header keys past `mime` are all optional and additive, so a peer that understands only `mime` still pastes an
+image:
+
+| key | meaning | absent means |
+|---|---|---|
+| `op` | `data` (payload), `ack` (receiver stored one chunk), `nack` (it could not) | `data` |
+| `mime` | content type | `image/png` |
+| `name` | original file name, for `disp:"save"` | receiver invents one |
+| `dir` | relative folder (`Photos/2024`) the file sat in when a folder was sent | the download folder itself |
+| `disp` | `clip` (paste it) or `save` (write it to the download folder) | `clip` |
+| `id` / `seq` / `n` | transfer id, 0-based chunk index, chunk count; written **even for a one-chunk file** — `id` is what makes the receiver ack | a clipboard image |
+| `err` | on a `nack`: why (free text) | no reason |
+| `have` | on an `ack`: leading chunks `[0, have)` already stored (resume) | no resume info |
+
+The header repeats in full on every chunk, so chunks may arrive in any order. A header must fit its u16
+length: a long `name`/`dir` is shortened (the folder is shed first) rather than wrapped. **The format is
+pinned by `protocol-vectors/file-frame.json`**, which the Swift (`FileFrameVectorTests`) and Kotlin
+(`FileFrameVectorTest`) codecs must both pass — they are mirrored by hand and drifted once already (Swift
+omitted `id` on one-chunk files, so the phone never acked anything small and every such send timed out).
+Change the vectors and both codecs together.
+
+**Clipboard image vs. file.** A clipboard image is squeezed to fit one frame (`ImagePrep.swift` on the Mac,
+`ClipForegroundService.fitImage` on the phone: downscale + JPEG to ~700 KB raw) so the sealed + base64'd
+frame stays under the 1 MiB `maxPayload`, and carries no `id` (so it is never acked). A **file** keeps its
+original bytes and is split into **640 KiB chunks**.
+
+**Flow control and pacing.** Two relay limits are load-bearing, because each drops the *connection*, not the
+frame: the 8 MiB per-peer send buffer and the 120-frames-per-10 s rate limit. So a sender keeps only **4
+chunks unacked** (the ack is flow control, not politeness) and, **on the relay only**, spaces chunks 125 ms
+apart (~5 MB/s). LAN-direct has neither limit and is not paced. A chunk unacked for 30 s fails the transfer.
+
+**Honest receipts.** A chunk is acked once it is stored, and the **last** chunk only after the file has been
+written to its final place, so "sent" means the file exists on the other device. A file that can't be
+written (full disk, a refused write, a cap) is **nacked**, and the sender fails that file immediately with
+the reason instead of waiting out the timeout. The sender's window can be failed from outside (nack, lost
+link, cancel), which wakes it at once.
+
+**Resume.** The transfer id is **deterministic** — the first 8 hex of SHA-256 of `name|size|mtime|dir` — on
+both senders, so sending the *same file again* reuses it. The receiver recognises the partial, every ack
+reports `have`, and the sender seeks past those chunks (clamped so the last chunk always goes: it is what
+completes the file and earns the final ack). Only the few chunks that were in the ack window when it
+stopped are re-sent. No UI is needed — re-drop on the Mac, re-share on the phone, or Retry in the phone's
+Files screen. A receiver keeps a half-received transfer for **10 min**; one idle for 2 min stops showing as
+"receiving" and may be evicted to make room for a new transfer (a live one never is). An edited file changes
+size or mtime and so starts fresh (an edit preserving both can't be told apart). An old peer ignores `have`
+and re-sends everything — correct, just slower. Resume needs the *receiver* to still hold the partial, so it
+survives a dropped link or a cancel, not a restart of the receiving app.
+
+**Size and memory.** The cap is **1 GiB per file** (`FileFrame.maxTransferBytes` / `MAX_TRANSFER_BYTES` —
+they must match). Both receivers stream each chunk into a temp file at `seq × chunk size` and move the
+finished file into place, so a gigabyte costs one chunk of RAM instead of two gigabytes (holding chunks in a
+dictionary is what used to cap files at 64 MB). The phone also sends a large share-sheet file straight from
+its content URI instead of copying it into its cache first. Time (≈ 3–4 min per GiB over the paced relay)
+and free space are the real limits.
+
+**Folders.** `dir` carries the relative path; both receivers recreate the tree under the download folder.
+The path is untrusted input: the twin sanitisers (`FileDropStore.sanitizeDir` in Swift, `FileSink.sanitizeDir`
+in Kotlin) split on `/` and `\`, drop empty / `.` / `..` parts, replace `:`, cap a part at 100 characters and
+the path at 8 levels, so it can't escape the folder — pinned by `protocol-vectors/dir-sanitize.json`. A
+sender walks at most 1,000 files per folder and skips hidden entries and nested symlinks.
+
+**Cancel** is one-sided: the Mac drop zone's Cancel and the phone notification's Cancel just stop sending.
+There is deliberately no `cancel` op: an *old* peer parses an unknown `op` as a data chunk, so adding one
+would corrupt transfers with older apps. The receiver stops hearing from the sender and drops the partial
+when it expires.
+
+**Receiver bounds** (an inbound transfer is peer-controlled): 2 concurrent transfers, 1 GiB each, no chunk
+longer than the chunk size, a temp file name that can't be steered by the (untrusted) id (the phone sanitises
+the id into the name; the Mac uses a random one), a 10 min retention, and a purge of leftover temp files at
+startup.
+
+**Notifications.** A burst of received files raises **one** updating notification on each side (the first is
+named, later ones turn it into "N files" / "N files in Photos"), not one per file; sends raise one progress
+notification / bar for the whole batch and one summary.
 
 ---
 
@@ -850,8 +1018,8 @@ the sender, so only local write-backs need suppressing).
 4. The Mac **decrypts** `ct` and routes `cmd("lock")` to `ScreenLock.lock()`; a frame that fails
    to authenticate (forged / wrong key) is dropped.
 
-The lock path is intentionally kept **off the clipboard path** and the `pause sending` toggle
-doesn't affect it. Because the action is opaque ciphertext end to end, adding new remote commands
+The lock path is intentionally kept **off the clipboard path**: no clipboard gate (the Mac's
+*Send copies to Android*, for instance) affects it. Because the action is opaque ciphertext end to end, adding new remote commands
 is a client-only change.
 
 ---
@@ -910,17 +1078,17 @@ generates:
 - `room` — base64 of 32 random bytes; the relay bearer / room id.
 - `key` — base64 of 32 random bytes; the E2E secret the `ClipCodec` (ChaCha20-Poly1305) keys on.
 
-Both are stored in the macOS **Keychain** (generic-password item). The Mac shows a **v2** QR
-encoding `{"v":2,"room":"…","key":"…","name":"<computer name>","host":"…","port":…,
-"secure":true,"token":"…"}` via CoreImage's `CIQRCodeGenerator` (`Pairing.swift`) — it carries
-both the pairing *and* the relay endpoint + password, so one scan fully configures the phone.
-(Legacy v1 QRs without the server fields are still accepted; the phone then keeps its existing
-server config.)
+Both are stored in the macOS **Keychain** (generic-password item). The Mac shows a **v3** QR
+encoding `{"v":3,"room":"…","key":"…","name":"<computer name>","host":"…","port":…,
+"secure":true,"token":"…","lport":53124,"lan":true}` via CoreImage's `CIQRCodeGenerator`
+(`Pairing.swift`) — it carries the pairing, the relay endpoint + password, *and* the LAN-direct
+parameters (§5.1), so one scan fully configures the phone. (Older v1/v2 QRs are still accepted; a v1
+has no server fields, so the phone then keeps its existing server config.)
 
-The phone scans it with `expo-camera`, validates it (`parsePairingQR`), and stores the pairing
-plus the server config in two **`expo-secure-store`** entries (Android Keystore-backed). The
+The phone scans it with `expo-camera`, validates it (`parsePairingQR`; v1, v2 and v3 are accepted), and
+stores the pairing plus the server config in two **`expo-secure-store`** entries (Android Keystore-backed). The
 derived URL (`ws(s)://host:port/ws`) + token + room/key are then pushed into the native service
-via `setRelay`, which persists them to `SharedPreferences` so the `START_STICKY` service can
+via `setRelay` (relay URL + token + room/key + the LAN host/port), which persists them to `SharedPreferences` so the `START_STICKY` service can
 reconnect without JS.
 
 **Unpair** on the Mac deletes the Keychain item, mints a fresh room/key, and reconnects into
@@ -961,6 +1129,16 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 - Secrets live in the platform secure stores (Keychain / Keystore-backed SecureStore).
 - Proximity is BLE-only and never touches the network.
 - Remote lock uses no entitlement and can't *unlock*.
+- **Everything a peer sends is validated before it touches the disk or the UI.** A received file name is
+  reduced to a safe last path component (`sanitize`), a folder path is sanitised by twin functions
+  pinned by shared vectors (no `..`, no separators, bounded depth/length — §5.4), the transfer id never
+  becomes a path, sizes and chunk lengths are capped (1 GiB, ≤ one chunk), and a received file is
+  never overwritten. The shell daemon refuses to read a clipboard-image URI its setter couldn't read
+  itself (confused-deputy guard, §3.4).
+- **Updates are signed.** The Mac's Sparkle appcast entries carry an EdDSA signature
+  (`SUPublicEDKey` in `Info.plist`; the private half lives in the release machine's login Keychain).
+  The Android app only *finds* a newer release (the GitHub "latest release" API) and sends the user to
+  download the APK; it installs nothing itself.
 
 **What does NOT hold yet (be explicit about this):**
 
@@ -973,18 +1151,26 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   TLS on. `ws://` remains available for a trusted LAN. The relay password still benefits from the
   TLS tunnel; **`cmd` is now E2E-encrypted (AEAD) regardless of transport**, so a forged or
   replayed command fails the Poly1305 tag and is dropped even on plaintext `ws://`. The same
-  holds for `stat` battery telemetry and `note` mirrored notifications — opaque ciphertext on
-  every transport.
+  holds for `stat` telemetry, `note` mirrored notifications, `sms` messages and replies, and `file`
+  clipboard images and files — opaque ciphertext on every transport.
 - 🟢 **LAN-direct needs no relay or TLS to stay confidential.** In relay-less LAN mode (§5.1)
-  the transport is plain `ws://`, but `clip`/`cmd`/`stat`/`note` remain ChaCha20-Poly1305-encrypted
+  the transport is plain `ws://`, but `clip`/`cmd`/`stat`/`note`/`sms`/`file` remain ChaCha20-Poly1305-encrypted
   and the socket is gated by an HMAC challenge-response over the pairing key — so a stranger on the LAN
   can neither read traffic nor occupy the peer slot. The unencrypted `room`/`rid` it could
   observe are non-secret routing ids.
 - 🟢 **No secrets baked into the build.** The relay address, password, and TLS setting are
-  configured at runtime (Mac **Server Settings…** → `UserDefaults`/Keychain; phone **Settings →
+  configured at runtime (Mac **Settings ▸ Relay Server** → `UserDefaults`/Keychain; phone **Settings →
   Relay server** / pairing QR → SecureStore). Only `server/.env` holds the server's
   `RELAY_AUTH_TOKEN`. Rotating the password means updating `server/.env` and re-scanning the QR
   (or re-entering it in the app); nothing sensitive sits in tracked source.
+- 🟡 **The Mac's `linktomac://send?path=…` URL scheme can be invoked by any local app or web page**
+  (it exists for the inert Share extension, §4). It checks the path exists but not who asked, so a page
+  could make the Mac send a chosen file *to the paired phone* — never anywhere else, but still a
+  surprise on the phone. Gating it (a confirmation, or removing the scheme until the extension can run)
+  is open.
+- 🟡 **The Mac app is ad-hoc signed, not notarized.** First launch on another Mac needs right-click → Open;
+  Sparkle updates are EdDSA-verified, but Gatekeeper never vets the app. This is also why the Finder
+  Share extension cannot run (`amfid` refuses an ad-hoc signed app extension).
 - 🟠 **Wireless Debugging is a device-wide loosening.** Any client on the network holding an
   authorized key can reach adbd. Mitigation here is that it's your own device and the only
   trusted key lives in the app; the app turns Wireless Debugging back *off* after deploying.
@@ -1001,7 +1187,11 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 | Relay WS drops | Both clients reconnect with exponential backoff (cap 30 s) |
 | Phone reboot | Wireless Debugging usually off → app self-enables it (if it holds `WRITE_SECURE_SETTINGS`), mDNS-reconnects, relaunches the daemon, turns WD back off |
 | adbd forgot the key (Samsung) | `connect` throws `AdbPairingRequiredException` → routed to `need-pair` for a fresh code |
-| Mac sleep/wake | `URLSession` task fails → generation-guarded reconnect |
+| Mac sleep/wake | `URLSession` task fails (or the 50 s no-inbound-frame timeout fires on a half-open socket) → generation-guarded reconnect |
+| A file transfer is interrupted (link drop, cancel, a timeout) | The sender fails that file — at once on a nack, a lost link or a cancel, after 30 s of unacked chunks otherwise. The receiver keeps the partial for 10 min; sending the same file again **resumes** (§5.4) |
+| Phone service killed mid-transfer | `START_STICKY` restarts it; the Files-screen row that was `active` is shown as "Interrupted"; the Mac keeps its partial for a resume |
+| Mac app quit mid-transfer | The phone keeps its partial (in memory) for 10 min; re-dropping the file resumes it |
+| An update is out | Mac: Sparkle checks the appcast; Android: the app compares the installed version with the GitHub latest release and links the APK |
 | Mac crash | `SMAppService` login item relaunches at next login |
 
 ---
@@ -1014,7 +1204,7 @@ fresh checkout builds and runs with nothing to fill in — you just enter the se
 | Component | Config | Where |
 |---|---|---|
 | Relay | `server/.env` (gitignored, from `server/.env.example`) | `RELAY_AUTH_TOKEN` (the relay password, `openssl rand -hex 32`), `HOST`, `PORT` |
-| Mac | **Server Settings…** window | host/port/TLS in `UserDefaults`, password in Keychain (`ServerSettings.swift`) |
+| Mac | **Settings ▸ Relay Server** (dashboard) | host/port/TLS in `UserDefaults`, password in Keychain (`ServerSettings.swift`) |
 | Android | **Settings → Relay server**, or the pairing QR | `ServerConfig` in SecureStore (`server-config.ts`) |
 
 The Mac embeds its endpoint + password in the pairing QR, so scanning it configures the phone
@@ -1022,12 +1212,29 @@ in one step. The relay's `RELAY_AUTH_TOKEN` must match the password you set on t
 
 | Component | Command |
 |---|---|
-| Relay | `cd server && cp .env.example .env && npm install && npm run dev` (or `docker compose up -d`) |
-| Mac | `cd mac && xcodegen generate && open LinkToMac.xcodeproj` → Run, then set **Server Settings…** |
-| Android | `cd mobile && bun install && npx expo run:android` (custom native module → **no Expo Go**) |
+| Relay | `cd server && cp .env.example .env && npm install && npm run dev` (or `docker compose up -d`); `npm run typecheck`; `npm run smoke` (against a running dev server) |
+| Mac | `cd mac && xcodegen generate && open LinkToMac.xcodeproj` → Run, then set **Settings ▸ Relay Server** (the `.xcodeproj` is generated and gitignored) |
+| Mac tests | `cd mac && xcodegen generate && xcodebuild -project LinkToMac.xcodeproj -scheme LinkToMac -destination 'platform=macOS' test` (swift-testing, no host app) |
+| Android (dev) | `cd mobile && bun install && bun run android` — builds the **`.dev`** variant (own app id, own daemon port 53125) so it coexists with a release install; custom native module → **no Expo Go** |
+| Android tests | `cd mobile/android && ./gradlew :selfadb:testDebugUnitTest` (JUnit + the real `org.json`; first run needs network); `cd mobile && npx tsc --noEmit && npx expo lint` |
 | Clipboard agent | rebuild dex with `native-src/clipboard-agent/build-dex.sh` only if `ClipboardAgent.java` changes |
 
-First run: enter your relay in the Mac's **Server Settings…**, show the pairing QR, scan it on
+There is no CI: `protocol-vectors/` (run by both the Swift and the Kotlin suite), the Mac and Android
+test suites, `tsc` and `expo lint` are run by hand before a change merges. The cross-language contracts
+(`ClipCodec`, `FileFrame`, the BLE UUID, `dir` sanitising) are the reason both test suites exist.
+
+**Releasing.** One GitHub release carries both apps. Bump `MARKETING_VERSION` and
+`CURRENT_PROJECT_VERSION` in `mac/project.yml` (Sparkle decides "is there an update?" by the build number)
+and `VERSION` in `mobile/app.config.ts` (the Android `versionCode` is `YYMMDDNNN` from the build date —
+set `BUILD_NUMBER=2` for a second build the same day, or the new APK has the same `versionCode`). Write
+`release-notes/v<version>.md` (it becomes the release body; the publish script refuses without it). Build
+the APK with `eas build --platform android --profile preview --local` (the `preview` profile *is* the
+public release channel). `cd mac && ./scripts/build-release.sh --publish` builds the universal DMG,
+EdDSA-signs it, writes the appcast and creates the GitHub release; then attach the APK
+(`gh release upload`). Native changes mean a new APK — a JS-only change could go out as an EAS Update on
+the same `runtimeVersion`, but nothing that touches `modules/selfadb` can.
+
+First run: enter your relay in the Mac's **Settings ▸ Relay Server** (or stay LAN-only), show the pairing QR, scan it on
 the phone (the QR carries the server config, so the phone is configured in one scan), then open
 Android's *Pair device with pairing code* dialog and enter the 6-digit code once.
 
@@ -1035,94 +1242,116 @@ Android's *Pair device with pairing code* dialog and enter the 6-digit code once
 
 ## 13. Scope & roadmap
 
-v1 links **one phone and one Mac** and syncs **text + bidirectional clipboard images + phone→Mac
-files** (the 1 MiB payload cap fits an image ~700 KB raw after base64; mirrored app icons are small
-base64 PNGs; files are chunked, so the cap is not a size limit for them).
-Implemented: two-way text clipboard (end-to-end encrypted with ChaCha20-Poly1305), **bidirectional
-clipboard images** (`file`; §5, auto-fitted under the cap, Mac→phone applied to the Android
-clipboard as a FileProvider content URI, phone→Mac read by the shell daemon via a system Context
-and applied to `NSPasteboard`), remote lock, proximity auto-lock,
-**relay-less LAN-direct** mode (§5.1 — phone ↔ Mac over the local network with no relay,
-auto-preferred over the relay on the same Wi-Fi), **bidirectional battery/identity telemetry**
-(`stat`, Mac↔phone), **one-way notification mirroring** (`note`, phone → Mac; §5.2, surfaced
-as a native banner + the dashboard's Notifications tab), and **one-way message (SMS) mirroring**
-(`sms`, phone → Mac; §5.3, read-only conversation threads in the dashboard's Messages tab) plus
-**replying to those messages** from the Mac, and **bidirectional file transfer** (`file` with `disp:"save"`,
-chunked + acked so the 1 MiB frame cap is not a size limit). Phone → Mac comes from the system
-share sheet (two targets: "Send to Clipboard" for images, "Send as a File" for anything) and lands
-in the folder chosen in the Mac's Settings ▸ Files. Mac → phone comes from dropping a file on the
-dashboard window or the menu-bar icon, or from Finder ▸ Share ▸ "Send to Phone", and lands in the
-phone's `Downloads/Link to Mac`. On the roadmap (`RoadMap.md`): screen mirroring, and read-only
-access to gallery/calls from the Mac.
+v1 links **one phone and one Mac**. Implemented:
+
+- **Clipboard** — two-way text (end-to-end encrypted with ChaCha20-Poly1305) and **bidirectional
+  images** (`file`; §5.4 — auto-fitted under the 1 MiB frame cap, applied on the phone as a FileProvider
+  content URI, read on the phone by the shell daemon via a system Context).
+- **Files and folders, both ways** (`file`; §5.4) — chunked, windowed, acked, with honest receipts,
+  **resume**, a 1 GiB per-file cap, folders that keep their structure, and cancel. Phone → Mac comes from
+  the system share sheet ("Send to Clipboard" for images, "Send as a File" for anything, several at once),
+  from the phone's **Files screen** (send files, send a folder, a persisted history, retry), and lands in
+  the folder chosen under the Mac's Settings ▸ Files. Mac → phone comes from dropping files and/or folders
+  on the dashboard window or the menu-bar icon (one bar, one summary), and lands in the phone's
+  `Downloads/Link to Mac`.
+- **Remote lock**, **proximity auto-lock** (with the live BLE distance on both dashboards).
+- **Relay-less LAN-direct** mode (§5.1) — auto-preferred over the relay on the same Wi-Fi.
+- **Bidirectional telemetry** (`stat`: each side's battery, the phone's name, the Mac's BLE reading).
+- **One-way notification mirroring** (`note`, phone → Mac; §5.2) as a native banner and the dashboard's
+  Notifications tab.
+- **Message (SMS) mirroring and replies** (`sms`; §5.3) — conversation threads in the Messages tab, and a
+  reply composer for 1:1 threads that sends a real SMS from the phone.
+- **Updates** — Sparkle on the Mac; the Android app points at the GitHub release.
+
+Not working today: **Finder ▸ Share ▸ "Send to Phone"** — the extension ships in the bundle but macOS
+(`amfid`) refuses to run an *ad-hoc signed* app extension (`AppleMobileFileIntegrityError -423`); it needs a
+Developer ID, or an `NSServices` entry the app provides itself. On the roadmap (`RoadMap.md`): FCM push-wake
+for minimum idle battery, screen mirroring, and read-only access to the gallery and calls from the Mac.
 
 ---
 
 ## Appendix: file map
 
 ```
-server/src/
-  index.ts        HTTP+WS bootstrap, auth, per-conn wiring, shutdown
-  relay.ts        room map, join/clip/cmd/stat/note/sms/file forwarding, backpressure
-  protocol.ts     frame types + validation
-  ratelimit.ts    sliding-window limiter
-  heartbeat.ts    ws ping/pong reaper
-  config.ts       env config
+server/
+  src/
+    index.ts        HTTP+WS bootstrap, auth, per-conn wiring, shutdown
+    relay.ts        room map, join + clip/cmd/stat/note/sms/file forwarding, backpressure
+    protocol.ts     frame types + validation (mirrored by RelayProtocol.swift / RelayClient.kt)
+    ratelimit.ts    sliding-window limiter
+    heartbeat.ts    ws ping/pong reaper
+    config.ts       env config
+    logger.ts       pino logger (redacts the room id, never logs nonce/ct)
+  scripts/smoke.ts  end-to-end check against a running dev server
 
-mac/Sources/LinkToMac/
-  LinkToMacApp.swift     MenuBarExtra + dashboard scene + AppDelegate
-  RelayClient.swift      WS client, reconnect, cmd dispatch; owns the pasteboard + battery monitor, clip-history + notification rings + message store
-  LanServer.swift        LAN-direct WS server (NWListener) + Bonjour + HMAC handshake (onRemoteStat/onRemoteNote/onRemoteSms)
-  PasteboardWatcher.swift changeCount poll (text + image copies) + echo stamp
-  BatteryMonitor.swift   IOKit power-source poll → outbound stat (Mac's own battery)
-  ClipCodec.swift        E2E payload encryption (ChaCha20-Poly1305 / CryptoKit; String + Data variants)
-  ImagePrep.swift        fit a copied image under the relay cap for the file frame
-  FileDrop.swift         FileDropStore (download folder + safe save), FileInbox (chunk reassembly), FileSender (chunked Mac→phone send)
-  FileDropZone.swift     the drop-to-send surface + .phoneFileDrop modifier (window + menu-bar panel)
-  StatusItemController.swift  hand-built NSStatusItem + popover; the menu-bar icon is a drag destination
-  ShareExtension/        Finder ▸ Share ▸ "Send to Phone" (.appex; hands the path over via linktomac://)
-  MacNotifier.swift      native banner for mirrored notes (UNUserNotificationCenter + icon attachment)
-  ProximityMonitor.swift BLE central, RSSI → lock
-  ProximityConfig.swift  UUID derivation + tunables
-  ScreenLock.swift       SACLockScreenImmediate / CGSession
-  Pairing.swift          room/key, Keychain, QR (v3 embeds server + LAN config)
-  ServerSettings.swift   runtime relay endpoint store (UserDefaults + Keychain)
-  ServerSettingsView.swift  "Server Settings…" window
-  LoginItem.swift        SMAppService auto-start
-  MenuPanel.swift        menu-bar M3 phone-identity card + last-copy glance
-  DashboardWindow.swift / DashboardComponents.swift  dashboard window shell + shared M3 components
-  PhonePanel.swift       phone identity: name, status, transport + battery chips
-  ClipHistoryScreen.swift  clip history (recency groups, recopy, clear)
-  FeaturePanel.swift     right-column tabs; Notifications tab renders the note ring, Messages tab renders conversation threads
-  SettingsScreen.swift / AppearanceSettings.swift / AboutView.swift / RelayScreen.swift  settings/about/relay surfaces
+protocol-vectors/   wire vectors BOTH codecs must pass (README.md explains the format)
+  file-frame.json   the `file` frame plaintext: parse, encode, over-long header, malformed
+  dir-sanitize.json how a peer-supplied folder path is made safe
 
-mobile/modules/selfadb/android/.../selfadb/
-  SelfAdbModule.kt          Expo module: autoStart/pair/relay/proximity APIs
+mac/
+  project.yml                    XcodeGen spec (app + share extension + LinkToMacTests); the .xcodeproj is generated
+  scripts/build-release.sh       universal DMG + Sparkle appcast (+ --publish to GitHub)
+  Sources/LinkToMac/
+    LinkToMacApp.swift           @main + AppDelegate: owns the services, Sparkle, the dashboard window, linktomac:// URLs
+    StatusItemController.swift   NSStatusItem + popover; the icon is a drag destination
+    RelayClient.swift            the hub: relay WS, pasteboard + battery owners, inbound stat/note/sms/file, stores, outbound frames
+    RelayProtocol.swift          ClientMessage/ServerMessage + the FileFrame codec
+    LanServer.swift              LAN-direct WS server (NWListener) + Bonjour + HMAC handshake
+    Config.swift / ServerSettings.swift   runtime relay endpoint (UserDefaults + Keychain)
+    ClipCodec.swift              E2E encryption (ChaCha20-Poly1305 / CryptoKit; String + Data variants)
+    PasteboardWatcher.swift      changeCount poll (text + image copies) + echo stamp
+    ImagePrep.swift              fit a copied image under the frame cap
+    BatteryMonitor.swift         IOKit power-source poll → outbound stat
+    FileTransfer.swift           FileSender, AckWindow, FileBatchPlanner, BatchProgress, BurstCounter (Foundation only)
+    FileDrop.swift               FileDropStore (download folder, safe save/move, sanitize) + FileInbox (disk-backed reassembly)
+    FileDropZone.swift           the drop-to-send surface + .phoneFileDrop modifier
+    MacNotifier.swift            native banners (foreground delegate, replace-by-identifier)
+    ProximityMonitor.swift / ProximityConfig.swift   BLE central, RSSI → lock; UUID derivation
+    ScreenLock.swift             SACLockScreenImmediate / CGSession
+    Pairing.swift / PairingView.swift   room/key, Keychain, v3 QR
+    LoginItem.swift              SMAppService auto-start
+    MenuPanel.swift / DashboardWindow.swift / PhonePanel.swift / FeaturePanel.swift / ClipHistoryScreen.swift   popover + dashboard
+    SettingsScreen.swift / AppearanceSettings.swift / RelayScreen.swift / ServerSettingsView.swift / AboutView.swift   settings surfaces
+    DashboardComponents.swift / PanelComponents.swift   shared M3 components
+  ShareExtension/                Finder ▸ Share ▸ "Send to Phone" (inert: ad-hoc signing; hands the path over via linktomac://)
+  Tests/                         swift-testing: AckWindow, FileSender (resume), FileInbox, FileBatchPlanner, FileFrame, FileFrameVectors, BurstCounter
+
+mobile/modules/selfadb/android/src/main/java/expo/modules/selfadb/
+  SelfAdbModule.kt          Expo module: autoStart / pair / relay / proximity / SMS-permission / file-history APIs
   AdbManager.kt             libadb wrapper: pair/connect/discover/push/launch
-  FileInbox.kt              chunk reassembly (to a temp file) + FileSink: save into MediaStore Downloads
-  ShareActivity.kt          the two share-sheet targets (Send to Clipboard / Send as a File)
-  FileFrame.kt              file-frame plaintext: header JSON + chunking + acks (mirrors RelayProtocol.swift)
-  ClipboardAgent (java)     → built to assets/clipboard-agent.dex (captures text + images; system Context for content:// URIs)
-  ClipForegroundService.kt  START_STICKY host for bridge+connection+BLE; applyFile (inbound image → clipboard URI) + captureImage (outbound image → file frame)
+  ClipboardAgent (java)     → built to assets/clipboard-agent.dex (captures text + images)
+  ClipForegroundService.kt  START_STICKY host: bridge + connection + BLE + SMS mirror + the whole file pipeline
   ClipBridge.kt             localhost NDJSON client to the daemon
-  ConnectionManager.kt      LAN-preferred / relay-fallback link arbiter
-  RelayClient.kt            OkHttp WS to the relay (sendClip/sendCmd/sendStat/sendNote)
-  LanClient.kt              OkHttp WS straight to the Mac (LAN-direct) + HMAC handshake
-  LanDiscovery.kt           NsdManager mDNS discovery of the Mac (rid-matched)
-  NotificationListener.kt   NotificationListenerService → note frames (label + icon resolve, noise filter)
-  SmsMirror.kt              FGS-owned SMS reader → sms frames (backfill + ContentObserver deltas, name resolve)
+  ConnectionManager.kt      LAN-preferred / relay-fallback link arbiter (+ outbound queue)
+  RelayClient.kt / LanClient.kt / LanDiscovery.kt   OkHttp WS to the relay / to the Mac; mDNS discovery
+  ClipCodec.kt              E2E encryption (ChaCha20-Poly1305 / javax.crypto; String + ByteArray variants)
+  FileFrame.kt              the file-frame codec (mirrors RelayProtocol.swift)
+  SendItem.kt               what the pipeline sends + TransferId (deterministic id) + skipFully + ShareRef
+  FileInbox.kt              chunk reassembly into a temp file + FileSink (MediaStore Downloads, name/dir sanitising)
+  FolderWalker.kt           picked folder → files (DocTree interface + the SAF implementation)
+  FileHistory.kt            the persisted Files-screen history (store + the app-wide object that emits onFileTransfer)
+  ShareActivity.kt          share-sheet targets (Send to Clipboard / Send as a File, single or multiple)
+  PickActivity.kt           system file / folder picker for the Files screen (persistent read grant)
+  ProcessTextActivity.kt / ClipboardReadActivity.kt   the two ADB-free manual capture paths
+  NotificationListener.kt   NotificationListenerService → note frames (skips both app variants)
+  SmsMirror.kt              FGS-owned SMS reader/sender → sms frames
   BleAdvertiser.kt          BLE presence beacon
-  ClipBus.kt                service ↔ module bridge + ring buffers
-  ClipCodec.kt              E2E payload encryption (ChaCha20-Poly1305 / javax.crypto; String + ByteArray variants)
+  ClipBus.kt                service ↔ module bridge + ring buffers + file-transfer event
+mobile/modules/selfadb/android/src/test/…/   JUnit: FileFrameVectorTest, FileInboxTest, FileSinkTest, FolderWalkerTest, FileHistoryTest
 
 mobile/native-src/clipboard-agent/
   ClipboardAgent.java       the privileged daemon source
   build-dex.sh              javac → d8 → dex
 
-mobile/src/features/
-  selfadb/use-clip-boot.ts      boot state machine (JS gate)
-  pairing/pairing-store.ts      SecureStore pairing + v2 QR parse (pairing + server config)
-  connection/server-config.ts   SecureStore relay endpoint (host/port/TLS/password)
-  telemetry/use-mac-battery.ts  Mac battery (stat) hook → Home-screen chip
-mobile/src/app/
-  server-config.tsx         Relay server settings screen
+mobile/src/
+  app/                      Expo Router screens: index (Home), files, settings, notifications, notification-apps, clipboard-history,
+                            server-config, pair-mac, qr-scan, adb-setup, logs, daemon-logs, about
+  features/selfadb/         use-clip-boot (capture state machine), use-permission-settings, use-daemon-heartbeat, client (module re-export)
+  features/files/           use-file-history (the Files screen's data)
+  features/pairing/         pairing-store (SecureStore + QR parse), pairing-context
+  features/connection/      server-config (SecureStore relay endpoint), use-relay-status, use-connection-status
+  features/telemetry/       use-mac-battery, use-mac-distance, use-mac-stat
+  features/clip-history/    use-clip-history
+  features/updates/         GitHub-release update check (native) + OTA
+  components/               the shared M3 vocabulary (rows, groups, sheets, icons)
 ```

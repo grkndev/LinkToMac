@@ -2,10 +2,11 @@
 
 A minimal **WebSocket relay** ("dumb pipe") for the Android ↔ macOS clipboard sync
 project. It pairs the two ends of a room by `roomId` and forwards **end-to-end
-encrypted** `clip` / `cmd` / `stat` frames between them. The relay never stores or
-decrypts content — it only sees `roomId`, ciphertext size, and timing.
+encrypted** `clip` / `cmd` / `stat` / `note` / `sms` / `file` frames between them. The relay
+never stores or decrypts content — it only sees `roomId`, ciphertext size, and timing.
 
-See the design doc: [`../docs/plans/2026-06-09-relay-server-design.md`](../docs/plans/2026-06-09-relay-server-design.md).
+Internals (the frame contract, how the clients use it, the crypto envelope): see
+[`../TECHNICAL.md`](../TECHNICAL.md) §2 and §5.
 
 ## Requirements
 
@@ -62,8 +63,8 @@ First message must be `join`.
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // remote action (e.g. lock), opaque
 { "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (e.g. Mac battery), opaque
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), opaque
-{ "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // mirrored SMS batch/delta (phone → Mac), opaque
-{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // clipboard image (bidirectional), opaque
+{ "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // mirrored SMS batch/delta (phone → Mac) or a reply request/ack (bidirectional), opaque
+{ "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // clipboard image, file chunk, chunk ack/nack (bidirectional), opaque
 { "t": "ping" }
 
 // relay → client
@@ -120,13 +121,15 @@ relay.example.com {
 Caddy forwards WebSocket upgrades automatically — no extra config needed.
 
 **In the app:** set `host = relay.example.com`, `port = 443`, **TLS on** (Mac:
-`RELAY_SECURE = true` in `Secrets.xcconfig`). The Mac embeds host/port/TLS/password into the
-pairing QR, so the phone auto-fills the server config on scan (it's also editable under
-Settings → Relay server).
+TLS on in the Mac's **Settings ▸ Relay Server**). The Mac embeds host/port/TLS/password into
+the pairing QR, so the phone auto-fills the server config on scan (it's also editable under
+Settings → Relay server on the phone).
 
-> **LAN-direct (future):** a Let's Encrypt cert can't be issued for a private LAN IP. That mode
-> will instead pin a **self-signed** cert via the QR (the app's `certFingerprint` field), using
-> the same `wss://` path — no public domain required.
+> **LAN-direct:** when both devices are on the same network they also talk directly over a
+> plain `ws` connection (mDNS discovery, HMAC-authenticated handshake) and the relay is only the
+> fallback — the frames and the E2E envelope are identical. The relay needs no TLS tricks for it
+> (a Let's Encrypt cert can't be issued for a private IP, which is why LAN mode doesn't use TLS).
+> See [`../TECHNICAL.md`](../TECHNICAL.md) §5.1.
 
 **Nginx:**
 
@@ -144,10 +147,12 @@ location /ws {
 ## Security notes
 
 - The relay is a dumb pipe: `nonce`/`ct` are **never** parsed or logged. Clipboard
-  content is end-to-end encrypted by the Android/Mac clients (libsodium secretbox).
+  content is end-to-end encrypted by the Android/Mac clients (ChaCha20-Poly1305 with a
+  type-bound, timestamped v2 envelope and a replay cache).
 - `roomId` is an unguessable 256-bit bearer; `RELAY_AUTH_TOKEN` is the operator-defined
   **relay password** — a second gate so strangers can't open sockets against your VPS. The
-  clients no longer bake it in: the Mac reads it from `Secrets.xcconfig` and ships it to the
-  phone in the pairing QR (and it's editable in the app), so each operator sets their own.
+  clients don't bake it in: you enter it in the Mac's Settings ▸ Relay Server (stored in the
+  Keychain) and it rides to the phone in the pairing QR (it's editable in the app), so each
+  operator sets their own.
 - Per-room cap (2), per-connection rate limit, 1 MiB payload cap, ws-level heartbeat
   with dead-connection cleanup, and slow-consumer backpressure handling.
