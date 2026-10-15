@@ -208,6 +208,33 @@ class ClipForegroundService : Service() {
       val disp = intent.getStringExtra(EXTRA_DISP) ?: FileFrame.DISP_CLIP
       if (items.isNotEmpty()) shareExec.execute { sendShared(items, disp) }
     }
+    // "Send files" / "Send folder" from the Files screen: PickActivity has taken persistent read
+    // grants and hands over the picked URIs (or the folder's tree URI). Walking a folder is I/O,
+    // so it happens on the same single send thread as everything else.
+    if (intent?.action == ACTION_SUBMIT_PICK) {
+      val uris = intent.getStringArrayListExtra(EXTRA_PICK_URIS).orEmpty().map(Uri::parse)
+      val tree = intent.getStringExtra(EXTRA_TREE)?.let(Uri::parse)
+      shareExec.execute {
+        val (items, problems) = pickedItems(uris, tree)
+        if (items.isEmpty() && problems.isEmpty()) return@execute
+        sendShared(items, FileFrame.DISP_SAVE, problems)
+      }
+    }
+    // Retry a failed / cancelled picker send from the Files screen. The same file keeps the same
+    // transfer id, so if the Mac still holds the partial the send resumes where it stopped.
+    if (intent?.action == ACTION_RETRY_SEND) {
+      val id = intent.getStringExtra(EXTRA_HISTORY_ID)
+      shareExec.execute {
+        val entry = id?.let { FileHistory.find(this, it) }
+        val source = entry?.source
+        if (entry == null || source == null) {
+          toastOnMain("That send can't be retried")
+        } else {
+          val item = uriItem(Uri.parse(source), entry.name, entry.mime, entry.dir, entry.size, source)
+          sendShared(listOf(item.withHistoryId(entry.id)), FileFrame.DISP_SAVE)
+        }
+      }
+    }
     // The notification's Cancel button for an outgoing transfer. Handled on the main thread, so
     // it only flips a flag and wakes the sender; the send loop does the actual stopping.
     if (intent?.action == ACTION_CANCEL_TRANSFER) cancelShare()
@@ -541,8 +568,16 @@ class ClipForegroundService : Service() {
     if (uri == null) {
       ClipBus.log("file: couldn't save $display")
       postFileNotification("Couldn't save file", display, null, mime)
+      FileHistory.record(this, HistoryEntry(
+        direction = "in", name = display, dir = FileSink.sanitizeDir(dir).ifEmpty { null }, size = source.length(),
+        mime = mime, ts = System.currentTimeMillis(), status = "failed", error = "Couldn't save it",
+      ))
       return false
     }
+    FileHistory.record(this, HistoryEntry(
+      direction = "in", name = display, dir = FileSink.sanitizeDir(dir).ifEmpty { null }, size = source.length(),
+      mime = mime, ts = System.currentTimeMillis(), status = "done", progress = 100, uri = uri.toString(),
+    ))
     ClipBus.log("file saved to Downloads: $display (${source.length()} B)")
     postReceivedNotification(display, uri, mime, FileSink.sanitizeDir(dir).substringBefore('/').ifEmpty { null })
     return true
@@ -771,16 +806,69 @@ class ClipForegroundService : Service() {
     return size to modified
   }
 
+  private fun SendItem.withHistoryId(id: String) = SendItem(name, mime, dir, size, mtime, open, staged, source, id)
+
+  /** Turn picker results into [SendItem]s: each file streams straight from its URI, a folder is
+   *  walked (keeping its structure as `dir`). Returns the items plus anything left out and why.
+   *  Every item keeps its URI as `source`, which is what makes Retry possible later (the picker
+   *  took a persistent read grant). */
+  private fun pickedItems(uris: List<Uri>, tree: Uri?): Pair<List<SendItem>, List<String>> {
+    val items = ArrayList<SendItem>()
+    val problems = ArrayList<String>()
+    for (uri in uris) {
+      val (name, size) = queryNameAndSize(uri)
+      val mime = contentResolver.getType(uri) ?: "application/octet-stream"
+      items += uriItem(uri, name ?: uri.lastPathSegment ?: "file", mime, null, size, source = uri.toString())
+    }
+    if (tree != null) {
+      try {
+        val docs = ContentResolverTree(contentResolver, tree)
+        val walk = FolderWalker.walk(docs, docs.rootId(), docs.rootName())
+        problems += walk.problems
+        for (w in walk.files) {
+          val docUri = docs.documentUri(w.doc.id)
+          items += SendItem(
+            name = w.doc.name, mime = w.doc.mime.ifEmpty { "application/octet-stream" }, dir = w.dir,
+            size = w.doc.size, mtime = w.doc.modified,
+            open = { contentResolver.openInputStream(docUri) ?: throw java.io.IOException("no stream for $docUri") },
+            source = docUri.toString(),
+          )
+        }
+      } catch (e: Exception) {
+        ClipBus.log("folder walk failed: ${e.message}")
+        problems += "Couldn't read that folder"
+      }
+    }
+    return items to problems
+  }
+
+  private fun queryNameAndSize(uri: Uri): Pair<String?, Long> {
+    var name: String? = null
+    var size = -1L
+    try {
+      contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)
+        ?.use { c ->
+          if (c.moveToFirst()) {
+            if (!c.isNull(0)) name = c.getString(0)
+            if (!c.isNull(1)) size = c.getLong(1)
+          }
+        }
+    } catch (e: Exception) {
+      ClipBus.log("pick: metadata query failed: ${e.message}")
+    }
+    return name to size
+  }
+
   /** Send what the user picked from the share sheet, then delete every staged copy. Toasts the
    *  outcome once, however many files there were: this is a fire-and-forget action with no app UI
    *  to update, and one toast per file would flash past unread. */
-  private fun sendShared(items: List<SendItem>, disp: String) {
+  private fun sendShared(items: List<SendItem>, disp: String, problems: List<String> = emptyList()) {
     shareCancelled = false
     try {
       val link = conn
       when {
         link == null || !ClipBus.peerOnline() -> toastOnMain(NOT_CONNECTED)
-        disp == FileFrame.DISP_SAVE -> toastOnMain(sendAllAsFiles(link, items))
+        disp == FileFrame.DISP_SAVE -> toastOnMain(sendAllAsFiles(link, items, problems))
         else -> {
           // The clipboard holds one image, so there is nothing to batch: the clipboard entry
           // only ever receives a single stream.
@@ -807,7 +895,7 @@ class ClipForegroundService : Service() {
    *  chunk progress, the text names the file in flight with its own percentage
    *  (`rapor.pdf (50%)`), and the title carries the position (`Sending 2/5 to your Mac`). Returns
    *  the single toast to show at the end. */
-  private fun sendAllAsFiles(link: ConnectionManager, files: List<SendItem>): String {
+  private fun sendAllAsFiles(link: ConnectionManager, files: List<SendItem>, problems: List<String> = emptyList()): String {
     val chunkCounts = files.map { it.chunkCount }
     val totalChunks = chunkCounts.sum()
     var chunksBefore = 0
@@ -815,39 +903,74 @@ class ClipForegroundService : Service() {
     var cancelled = false
     val failures = ArrayList<String>()
 
+    // One Files-screen row per file, up front, so the screen shows the whole batch (queued) and a
+    // retry reuses its row instead of adding another.
+    val rows = files.map { f ->
+      FileHistory.record(
+        this,
+        HistoryEntry(
+          id = f.historyId ?: java.util.UUID.randomUUID().toString(), direction = "out", name = f.name,
+          dir = f.dir, size = f.size, mime = f.mime, ts = System.currentTimeMillis(), status = "queued", source = f.source,
+        ),
+      )
+    }.toMutableList()
+    fun mark(i: Int, status: String, error: String? = null, progress: Int? = null, persist: Boolean = true) {
+      rows[i] = FileHistory.record(this, rows[i].copy(status = status, error = error, progress = progress ?: rows[i].progress), persist)
+    }
+
+    var stoppedAt = files.size
     try {
       for ((i, f) in files.withIndex()) {
-        if (shareCancelled) { cancelled = true; break }
+        if (shareCancelled) { cancelled = true; stoppedAt = i; break }
         val title = if (files.size > 1) "Sending ${i + 1}/${files.size} to your Mac" else "Sending to your Mac"
         val before = chunksBefore
+        mark(i, "active", progress = 0)
+        var lastEmit = 0L
         val failure = sendAsFile(link, f) { chunk, count ->
           val pct = chunk * 100 / count
           postTransferProgress(
             TRANSFER_OUT_NOTIF_ID, title, "${f.name} ($pct%)", before + chunk, totalChunks, cancellable = true,
           )
+          // Progress for the Files screen, throttled; in memory only (a status change persists).
+          val now = SystemClock.elapsedRealtime()
+          if (chunk >= count || now - lastEmit >= 300) {
+            lastEmit = now
+            mark(i, "active", progress = pct, persist = false)
+          }
         }
         chunksBefore += chunkCounts[i]
         if (failure == null) {
           sent++
+          mark(i, "done", progress = 100)
         } else if (failure == CANCELLED) {
           cancelled = true
+          mark(i, "cancelled")
+          stoppedAt = i + 1
           break
         } else {
           failures += failure
+          mark(i, "failed", error = failure)
+          stoppedAt = i + 1
           // The Mac or the link is gone: the rest would each wait out the same timeout.
           if (failure == MAC_STOPPED) break
+          stoppedAt = files.size
         }
       }
     } finally {
       clearTransferProgress(TRANSFER_OUT_NOTIF_ID)
+      // Whatever never got its turn: cancelled if the user stopped it, failed if the link died.
+      for (i in stoppedAt until files.size) {
+        if (rows[i].status == "queued") mark(i, if (cancelled) "cancelled" else "failed", error = if (cancelled) null else "Not sent")
+      }
     }
 
+    val note = if (problems.isEmpty()) "" else " · ${problems.first()}" + if (problems.size > 1) " (+${problems.size - 1} more)" else ""
     return when {
       cancelled -> "Cancelled — $sent of ${files.size} sent"
-      files.size == 1 -> if (sent == 1) "Saved ${files[0].name} on your Mac" else failures.first()
-      failures.isEmpty() -> "Saved $sent files on your Mac"
+      files.size == 1 -> if (sent == 1) "Saved ${files[0].name} on your Mac$note" else failures.first()
+      failures.isEmpty() -> "Saved $sent files on your Mac$note"
       sent == 0 -> failures.first()
-      else -> "$sent of ${files.size} saved on your Mac"
+      else -> "$sent of ${files.size} saved on your Mac$note"
     }
   }
 
@@ -1466,6 +1589,11 @@ class ClipForegroundService : Service() {
 
     /** Start-intent action behind the outgoing progress notification's Cancel button. */
     private const val ACTION_CANCEL_TRANSFER = "expo.modules.selfadb.CANCEL_TRANSFER"
+    private const val ACTION_SUBMIT_PICK = "expo.modules.selfadb.SUBMIT_PICK"
+    private const val ACTION_RETRY_SEND = "expo.modules.selfadb.RETRY_SEND"
+    private const val EXTRA_PICK_URIS = "pickUris"
+    private const val EXTRA_TREE = "treeUri"
+    private const val EXTRA_HISTORY_ID = "historyId"
     private const val EXTRA_PATHS = "paths"
     private const val EXTRA_URIS = "uris"
     private const val EXTRA_SIZES = "sizes"
@@ -1484,6 +1612,31 @@ class ClipForegroundService : Service() {
         .setAction(ACTION_SUBMIT_CLIP)
         .putExtra(EXTRA_TEXT, text)
       ContextCompat.startForegroundService(ctx, intent)
+    }
+
+    /** Send what [PickActivity] picked: files, or a folder (its tree URI). The grants are persistent. */
+    fun submitPick(ctx: Context, uris: List<Uri>, tree: Uri?) {
+      val intent = Intent(ctx, ClipForegroundService::class.java)
+        .setAction(ACTION_SUBMIT_PICK)
+        .putStringArrayListExtra(EXTRA_PICK_URIS, ArrayList(uris.map { it.toString() }))
+        .putExtra(EXTRA_TREE, tree?.toString())
+      ContextCompat.startForegroundService(ctx, intent)
+    }
+
+    /** Retry a failed or cancelled picker send (a resume, if the Mac still holds the partial). */
+    fun retrySend(ctx: Context, historyId: String) {
+      ContextCompat.startForegroundService(
+        ctx,
+        Intent(ctx, ClipForegroundService::class.java).setAction(ACTION_RETRY_SEND).putExtra(EXTRA_HISTORY_ID, historyId),
+      )
+    }
+
+    /** Stop the outgoing batch — the same thing the notification's Cancel button does. */
+    fun cancelTransfer(ctx: Context) {
+      ContextCompat.startForegroundService(
+        ctx,
+        Intent(ctx, ClipForegroundService::class.java).setAction(ACTION_CANCEL_TRANSFER),
+      )
     }
 
     /**

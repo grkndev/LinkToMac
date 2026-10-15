@@ -70,7 +70,33 @@ export type RelayEvent = {
   attempt?: number;
 };
 
+export type FileTransferStatus = 'queued' | 'active' | 'done' | 'failed' | 'cancelled';
+
+/** One row of the Files screen: a file that came from the Mac or went to it. */
+export type FileTransferEntry = {
+  id: string;
+  direction: 'in' | 'out';
+  name: string;
+  /** folder the file sat in (`Photos/2024`), when a folder was sent/received */
+  dir: string | null;
+  /** bytes */
+  size: number;
+  mime: string;
+  /** epoch ms */
+  ts: number;
+  status: FileTransferStatus;
+  error: string | null;
+  /** 0..100 while active */
+  progress: number;
+  /** where a received file now lives (a content URI) — pass to `openFile` */
+  uri: string | null;
+  /** a send that didn't finish and can be re-sent (it was picked in the app, so its read grant persisted) */
+  retryable: boolean;
+};
+
 export type SelfAdbModuleEvents = {
+  /** a file-transfer row was added or changed (progress, status) */
+  onFileTransfer: (event: FileTransferEntry) => void;
   onClip: (event: ClipEvent) => void;
   /** a clip received FROM the Mac (written to this device's clipboard) */
   onMacClip: (event: ClipEvent) => void;

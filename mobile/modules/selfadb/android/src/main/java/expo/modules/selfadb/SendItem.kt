@@ -25,6 +25,8 @@ class SendItem(
   val staged: File? = null,
   /** The content URI this came from, when a persisted read grant makes it retryable later. */
   val source: String? = null,
+  /** The Files-screen row this send updates (a retry reuses the failed row instead of adding another). */
+  val historyId: String? = null,
 ) {
   /** Chunks the file splits into (a zero-byte file still has none to send; callers reject it first). */
   val chunkCount: Int

@@ -188,6 +188,17 @@
       </intent-filter>
     </activity>
 
+    <!--
+      The system picker for the Files screen's "Send files" / "Send folder". Not exported and
+      deliberately WITHOUT taskAffinity="": it is started from the app's own activity, so it stacks
+      on top of the app and returns to it, instead of spawning a task of its own.
+    -->
+    <activity
+      android:name=".PickActivity"
+      android:theme="@style/Theme.LinkToMac.Invisible"
+      android:excludeFromRecents="true"
+      android:exported="false" />
+
     <activity
       android:name=".ShareAsFileActivity"
       android:label="@string/selfadb_share_file"
