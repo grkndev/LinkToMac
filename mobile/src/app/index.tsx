@@ -27,6 +27,7 @@ import { haptic } from "@/lib/haptics";
 import { truncate } from "@/lib/text";
 import SelfAdb from "@/features/selfadb/client";
 import { useClipHistory } from "@/features/clip-history/use-clip-history";
+import { useFileHistory } from "@/features/files/use-file-history";
 import { useMacBattery } from "@/features/telemetry/use-mac-battery";
 import {
   macDistanceLabel,
@@ -54,11 +55,22 @@ export default function HomeScreen() {
   const { pairing } = usePairing();
   const { relay } = useRelayStatus();
   const { items: clipItems } = useClipHistory();
+  const { items: fileItems } = useFileHistory();
   const { battery } = useMacBattery();
   const { distance } = useMacDistance();
 
   const status = useConnectionStatus(relay);
   const connected = status.connected;
+
+  const sending = fileItems?.some((e) => e.status === "active" || e.status === "queued");
+  const filesValue =
+    fileItems === null
+      ? ""
+      : sending
+        ? "Sending…"
+        : fileItems.length === 0
+          ? "Send files or a folder"
+          : `${fileItems.length} transfer${fileItems.length === 1 ? "" : "s"}`;
 
   const latestMacClip = clipItems?.[0]?.text;
   const clipValue = latestMacClip
@@ -242,8 +254,9 @@ export default function HomeScreen() {
           <NavRow
             colors={colors}
             icon={icons.folder}
-            label="Received files"
-            value="Soon"
+            label="Files"
+            value={filesValue}
+            onClick={() => router.push("/files")}
           />
           <NavRow
             colors={colors}

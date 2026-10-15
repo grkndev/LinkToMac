@@ -19,6 +19,12 @@ const MODULES = {
   send: require('../../assets/icons/send.xml'),
   cast: require('../../assets/icons/cast.xml'),
   folder: require('../../assets/icons/folder_open.xml'),
+  download: require('../../assets/icons/download.xml'),
+  upload: require('../../assets/icons/upload.xml'),
+  file: require('../../assets/icons/insert_drive_file.xml'),
+  retry: require('../../assets/icons/refresh.xml'),
+  close: require('../../assets/icons/close.xml'),
+  newFolder: require('../../assets/icons/create_new_folder.xml'),
   clipboard: require('../../assets/icons/content_paste.xml'),
   sensors: require('../../assets/icons/sensors.xml'),
   // Settings
