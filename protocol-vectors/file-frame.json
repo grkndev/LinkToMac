@@ -1,0 +1,274 @@
+{
+  "description": "Wire vectors for the `file` frame plaintext (u16 BE header-len || header JSON || raw bytes). Both codecs must pass every case — see README.md.",
+  "cases": [
+    {
+      "name": "clipboard_image_has_no_chunk_fields",
+      "kind": "roundtrip",
+      "params": {
+        "mime": "image/png",
+        "bytes_hex": "89504e47"
+      },
+      "header": {
+        "mime": "image/png"
+      },
+      "frame_hex": "00147b226d696d65223a22696d6167652f706e67227d89504e47",
+      "parsed": {
+        "op": "data",
+        "mime": "image/png",
+        "name": null,
+        "dir": null,
+        "disp": "clip",
+        "id": null,
+        "seq": 0,
+        "count": 1,
+        "reason": null,
+        "bytes_hex": "89504e47"
+      },
+      "note": "no id => no ack and the pre-chunking bytes; an old peer still pastes it"
+    },
+    {
+      "name": "one_chunk_file_still_carries_an_id",
+      "kind": "roundtrip",
+      "params": {
+        "mime": "text/plain",
+        "name": "a.txt",
+        "disp": "save",
+        "id": "abcd1234",
+        "seq": 0,
+        "count": 1,
+        "bytes_hex": "6869"
+      },
+      "header": {
+        "mime": "text/plain",
+        "name": "a.txt",
+        "disp": "save",
+        "id": "abcd1234",
+        "seq": 0,
+        "n": 1
+      },
+      "frame_hex": "00507b2264697370223a2273617665222c226964223a226162636431323334222c226d696d65223a22746578742f706c61696e222c226e223a312c226e616d65223a22612e747874222c22736571223a307d6869",
+      "parsed": {
+        "op": "data",
+        "mime": "text/plain",
+        "name": "a.txt",
+        "dir": null,
+        "disp": "save",
+        "id": "abcd1234",
+        "seq": 0,
+        "count": 1,
+        "reason": null,
+        "bytes_hex": "6869"
+      },
+      "note": "regression: Swift once omitted id when count == 1, so the phone never acked a small file"
+    },
+    {
+      "name": "middle_chunk",
+      "kind": "roundtrip",
+      "params": {
+        "mime": "application/octet-stream",
+        "name": "big.bin",
+        "disp": "save",
+        "id": "feed0001",
+        "seq": 1,
+        "count": 3,
+        "bytes_hex": "0102030405"
+      },
+      "header": {
+        "mime": "application/octet-stream",
+        "name": "big.bin",
+        "disp": "save",
+        "id": "feed0001",
+        "seq": 1,
+        "n": 3
+      },
+      "frame_hex": "00607b2264697370223a2273617665222c226964223a226665656430303031222c226d696d65223a226170706c69636174696f6e2f6f637465742d73747265616d222c226e223a332c226e616d65223a226269672e62696e222c22736571223a317d0102030405",
+      "parsed": {
+        "op": "data",
+        "mime": "application/octet-stream",
+        "name": "big.bin",
+        "dir": null,
+        "disp": "save",
+        "id": "feed0001",
+        "seq": 1,
+        "count": 3,
+        "reason": null,
+        "bytes_hex": "0102030405"
+      }
+    },
+    {
+      "name": "file_inside_a_folder",
+      "kind": "roundtrip",
+      "params": {
+        "mime": "image/jpeg",
+        "name": "p.jpg",
+        "dir": "Album/Sub",
+        "disp": "save",
+        "id": "0a0b0c0d",
+        "seq": 0,
+        "count": 1,
+        "bytes_hex": "ffd8ff"
+      },
+      "header": {
+        "mime": "image/jpeg",
+        "name": "p.jpg",
+        "dir": "Album/Sub",
+        "disp": "save",
+        "id": "0a0b0c0d",
+        "seq": 0,
+        "n": 1
+      },
+      "frame_hex": "00627b22646972223a22416c62756d2f537562222c2264697370223a2273617665222c226964223a223061306230633064222c226d696d65223a22696d6167652f6a706567222c226e223a312c226e616d65223a22702e6a7067222c22736571223a307dffd8ff",
+      "parsed": {
+        "op": "data",
+        "mime": "image/jpeg",
+        "name": "p.jpg",
+        "dir": "Album/Sub",
+        "disp": "save",
+        "id": "0a0b0c0d",
+        "seq": 0,
+        "count": 1,
+        "reason": null,
+        "bytes_hex": "ffd8ff"
+      }
+    },
+    {
+      "name": "name_with_quotes_backslash_and_unicode",
+      "kind": "roundtrip",
+      "params": {
+        "mime": "text/plain",
+        "name": "we\"ird\\näme ✓.txt",
+        "disp": "save",
+        "id": "11223344",
+        "seq": 0,
+        "count": 1,
+        "bytes_hex": "78"
+      },
+      "header": {
+        "mime": "text/plain",
+        "name": "we\"ird\\näme ✓.txt",
+        "disp": "save",
+        "id": "11223344",
+        "seq": 0,
+        "n": 1
+      },
+      "frame_hex": "00617b2264697370223a2273617665222c226964223a223131323233333434222c226d696d65223a22746578742f706c61696e222c226e223a312c226e616d65223a2277655c226972645c5c6ec3a46d6520e29c932e747874222c22736571223a307d78",
+      "parsed": {
+        "op": "data",
+        "mime": "text/plain",
+        "name": "we\"ird\\näme ✓.txt",
+        "dir": null,
+        "disp": "save",
+        "id": "11223344",
+        "seq": 0,
+        "count": 1,
+        "reason": null,
+        "bytes_hex": "78"
+      }
+    },
+    {
+      "name": "ack",
+      "kind": "roundtrip",
+      "params": {
+        "op": "ack",
+        "id": "abcd1234",
+        "seq": 3,
+        "bytes_hex": ""
+      },
+      "header": {
+        "op": "ack",
+        "id": "abcd1234",
+        "seq": 3
+      },
+      "frame_hex": "00247b226964223a226162636431323334222c226f70223a2261636b222c22736571223a337d",
+      "parsed": {
+        "op": "ack",
+        "mime": "image/png",
+        "name": null,
+        "dir": null,
+        "disp": "clip",
+        "id": "abcd1234",
+        "seq": 3,
+        "count": 1,
+        "reason": null,
+        "bytes_hex": ""
+      },
+      "note": "the receiver stored chunk 3"
+    },
+    {
+      "name": "nack_with_reason",
+      "kind": "roundtrip",
+      "params": {
+        "op": "nack",
+        "id": "abcd1234",
+        "seq": 3,
+        "reason": "Storage full",
+        "bytes_hex": ""
+      },
+      "header": {
+        "op": "nack",
+        "id": "abcd1234",
+        "seq": 3,
+        "err": "Storage full"
+      },
+      "frame_hex": "003a7b22657272223a2253746f726167652066756c6c222c226964223a226162636431323334222c226f70223a226e61636b222c22736571223a337d",
+      "parsed": {
+        "op": "nack",
+        "mime": "image/png",
+        "name": null,
+        "dir": null,
+        "disp": "clip",
+        "id": "abcd1234",
+        "seq": 3,
+        "count": 1,
+        "reason": "Storage full",
+        "bytes_hex": ""
+      },
+      "note": "the receiver could not store it; the reason travels as header key err"
+    },
+    {
+      "name": "overlong_name_and_dir_stay_inside_the_u16_header",
+      "kind": "fits",
+      "params": {
+        "mime": "x/y",
+        "name_repeat": {
+          "char": "n",
+          "times": 100000
+        },
+        "dir_repeat": {
+          "char": "d/",
+          "times": 40000
+        },
+        "disp": "save",
+        "id": "i",
+        "seq": 0,
+        "count": 1,
+        "bytes_hex": "0707"
+      },
+      "expect": {
+        "max_header_bytes": 65535,
+        "dir_dropped": true,
+        "name_shorter": true,
+        "id": "i",
+        "seq": 0,
+        "count": 1,
+        "bytes_hex": "0707"
+      },
+      "note": "dir is shed first, then name is shortened; header length is a u16, never a wrapped length"
+    },
+    {
+      "name": "malformed_empty",
+      "kind": "malformed",
+      "frame_hex": ""
+    },
+    {
+      "name": "malformed_one_byte",
+      "kind": "malformed",
+      "frame_hex": "00"
+    },
+    {
+      "name": "malformed_header_longer_than_payload",
+      "kind": "malformed",
+      "frame_hex": "002001"
+    }
+  ]
+}

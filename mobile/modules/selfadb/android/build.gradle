@@ -25,6 +25,18 @@ android {
   lintOptions {
     abortOnError false
   }
+
+  testOptions {
+    unitTests {
+      // android.jar is a stub in JVM tests; unmocked calls (Log, Environment…) return defaults
+      // instead of throwing, so pure logic that merely touches them can still be tested.
+      returnDefaultValues = true
+      all {
+        // The wire vectors shared with the Mac codec live at the repo root (4 levels up from here).
+        systemProperty "vectors.dir", project.file("../../../../protocol-vectors").canonicalPath
+      }
+    }
+  }
 }
 
 dependencies {
@@ -51,4 +63,9 @@ dependencies {
   // module manifest). Every RN app already ships androidx.core; this just makes the compile
   // dependency explicit.
   implementation "androidx.core:core:1.13.1"
+
+  // JVM unit tests (`./gradlew :selfadb:testDebugUnitTest`). org.json is a real library here
+  // because the android.jar copy is a stub that throws on use — FileFrame needs it.
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.json:json:20240303"
 }
