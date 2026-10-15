@@ -62,14 +62,42 @@ final class FileDropStore {
         try Self.write(bytes: bytes, to: folder, preferredName: preferredName, mime: mime)
     }
 
-    /// The file-system half of `save`, free of the main actor so a 64 MB write can run on a
-    /// background task instead of freezing the UI.
-    nonisolated static func write(bytes: Data, to folder: URL, preferredName: String?, mime: String) throws -> URL {
+    /// The file-system half of `save`, free of the main actor so a big write can run on a
+    /// background task instead of freezing the UI. `dir` is the peer's folder path for the file
+    /// (sanitised here), recreated under `folder`.
+    nonisolated static func write(
+        bytes: Data, to folder: URL, preferredName: String?, dir: String? = nil, mime: String
+    ) throws -> URL {
+        let target = try destination(in: folder, preferredName: preferredName, dir: dir, mime: mime)
+        try bytes.write(to: target, options: .atomic)
+        return target
+    }
+
+    /// Move a finished download (a temp file the inbox streamed chunks into) into place — a
+    /// rename on one volume, a copy+delete across volumes, but never a pass through memory, which
+    /// is what makes a 1 GiB file possible.
+    nonisolated static func moveIn(
+        _ temp: URL, to folder: URL, preferredName: String?, dir: String? = nil, mime: String
+    ) throws -> URL {
+        let target = try destination(in: folder, preferredName: preferredName, dir: dir, mime: mime)
+        try FileManager.default.moveItem(at: temp, to: target)
+        return target
+    }
+
+    /// Where a received file goes: `folder/<sanitised dir>/<sanitised name>`, with the folders
+    /// created and a free name picked (never overwriting).
+    private nonisolated static func destination(
+        in folder: URL, preferredName: String?, dir: String?, mime: String
+    ) throws -> URL {
         let fm = FileManager.default
-        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        var parent = folder
+        for part in sanitizeDir(dir).split(separator: "/") {
+            parent = parent.appendingPathComponent(String(part), isDirectory: true)
+        }
+        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
 
         let base = sanitize(preferredName, mime: mime)
-        var candidate = folder.appendingPathComponent(base)
+        var candidate = parent.appendingPathComponent(base)
         if fm.fileExists(atPath: candidate.path) {
             let stem = (base as NSString).deletingPathExtension
             let ext = (base as NSString).pathExtension
@@ -77,14 +105,13 @@ final class FileDropStore {
             // Bounded so a pathological folder can't spin here; 999 collisions is already absurd.
             for n in 2...999 {
                 let name = ext.isEmpty ? "\(stem) \(n)" : "\(stem) \(n).\(ext)"
-                candidate = folder.appendingPathComponent(name)
+                candidate = parent.appendingPathComponent(name)
                 if !fm.fileExists(atPath: candidate.path) { free = true; break }
             }
-            // Refuse rather than fall through: the last candidate exists, and `.atomic` would
+            // Refuse rather than fall through: the last candidate exists, and a write would
             // replace it.
             guard free else { throw CocoaError(.fileWriteFileExists) }
         }
-        try bytes.write(to: candidate, options: .atomic)
         return candidate
     }
 
@@ -141,28 +168,43 @@ final class FileDropStore {
     }
 }
 
-/// Reassembles chunked inbound `file` transfers.
+/// Reassembles chunked inbound `file` transfers — **on disk**.
 ///
 /// The phone splits anything over `FileFrame` chunk size and repeats the full header on every
-/// chunk, so frames may be buffered in any order and a transfer never depends on chunk 0 landing
-/// first. Everything here is bounded — an inbound transfer is attacker-influenced in the sense
-/// that a buggy or hostile peer could otherwise pin unbounded memory:
-/// at most `maxConcurrent` transfers, `maxBytes` each, and anything idle past `ttl` is swept.
+/// chunk, so frames may arrive in any order and a transfer never depends on chunk 0 landing first.
+/// Each chunk is written straight into a temp file at `seq × chunkRawBytes` (the phone's
+/// `FileInbox.kt` does the same): holding a gigabyte of chunks in a dictionary and then
+/// concatenating it would need two gigabytes of RAM, which is what used to cap files at 64 MB.
+///
+/// Everything is bounded — an inbound transfer is peer-controlled: at most `maxConcurrent`
+/// transfers, `maxBytes` each. A half-received transfer is **kept for `ttl`** (10 min) so a retry
+/// of the same file can resume — the ack tells the sender how many leading chunks (`have`) are
+/// already here — but it is shown as "receiving" only while fresh (`staleAfter`), and a stale one
+/// is evicted rather than blocking a new transfer.
 @MainActor
 final class FileInbox {
     /// A transfer that just became complete.
     struct Assembled {
+        /// Where the bytes are: a small one-frame file / clipboard image stays in memory; a
+        /// chunked file is a temp file the caller must move (or delete).
+        enum Payload {
+            case memory(Data)
+            case file(URL)
+        }
+
         let mime: String
         let name: String?
+        let dir: String?
         let disp: String
-        let bytes: Data
+        let payload: Payload
     }
 
     /// What `accept` did with a frame. `rejected` is distinct from `buffered` on purpose: the
     /// receiver acks a stored chunk and **nacks** a refused one, so the sender hears about it now
     /// instead of reporting a delivery that never happened.
     enum Result {
-        case buffered(received: Int, total: Int)
+        /// `have` = leading chunks `[0, have)` already stored, for the ack (resume).
+        case buffered(received: Int, total: Int, have: Int)
         case done(Assembled)
         case rejected
     }
@@ -170,11 +212,16 @@ final class FileInbox {
     private struct Partial {
         let mime: String
         let name: String?
+        let dir: String?
         let disp: String
         let count: Int
-        var chunks: [Int: Data]
-        var bytes: Int
-        var touched: Date
+        let file: URL
+        let handle: FileHandle
+        var seen = Set<Int>()
+        /// Length of the contiguous run `0..<contiguous` — what resume reports as `have`.
+        var contiguous = 0
+        var bytes = 0
+        var touched = Date()
     }
 
     private var partials: [String: Partial] = [:]
@@ -183,85 +230,164 @@ final class FileInbox {
     private let maxConcurrent = 2
     private let maxBytes: Int
     private let ttl: TimeInterval
+    private let staleAfter: TimeInterval
+    private let directory: URL
 
-
-    init(ttl: TimeInterval = 120, maxBytes: Int = FileFrame.maxTransferBytes, log: @escaping (String) -> Void) {
-        self.ttl = ttl
-        self.maxBytes = maxBytes
-        self.log = log
+    nonisolated static var defaultDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("LinkToMac-inbox", isDirectory: true)
     }
 
-    /// Chunks stored / chunks expected for the transfer in flight, or nil when nothing is
-    /// arriving. Drives the dashboard's "receiving" row.
-    private(set) var progress: (name: String, received: Int, total: Int)?
+    init(
+        ttl: TimeInterval = 600,
+        staleAfter: TimeInterval = 120,
+        maxBytes: Int = FileFrame.maxTransferBytes,
+        directory: URL = FileInbox.defaultDirectory,
+        log: @escaping (String) -> Void
+    ) {
+        self.ttl = ttl
+        self.staleAfter = staleAfter
+        self.maxBytes = maxBytes
+        self.directory = directory
+        self.log = log
+        Self.purge(directory, olderThan: 3600) // leftovers from a previous run
+    }
 
-    /// Take one decoded data frame: buffer it, complete the transfer, or reject it (the log says
+    /// Chunks stored / chunks expected for the freshest transfer still arriving, or nil when
+    /// nothing is. Drives the dashboard's "receiving" row; a partial that has gone quiet for
+    /// `staleAfter` no longer counts (it is only being kept for a resume).
+    var progress: (name: String, received: Int, total: Int)? {
+        let cutoff = Date().addingTimeInterval(-staleAfter)
+        guard let p = partials.values.filter({ $0.touched >= cutoff }).max(by: { $0.touched < $1.touched })
+        else { return nil }
+        return (p.name ?? "File", p.seen.count, p.count)
+    }
+
+    /// Take one decoded data frame: store it, complete the transfer, or reject it (the log says
     /// why).
     func accept(_ frame: FileFrame.Parsed) -> Result {
         sweep()
 
         if frame.isSingle {
-            return .done(Assembled(mime: frame.mime, name: frame.name, disp: frame.disp, bytes: frame.bytes))
+            return .done(Assembled(mime: frame.mime, name: frame.name, dir: frame.dir, disp: frame.disp,
+                                   payload: .memory(frame.bytes)))
         }
         guard let id = frame.id else { return .rejected }
         guard frame.count > 0, frame.seq >= 0, frame.seq < frame.count else {
             log("file: chunk \(frame.seq)/\(frame.count) out of range")
-            return reject()
-        }
-
-        if partials[id] == nil, partials.count >= maxConcurrent {
-            log("file: too many transfers in flight; dropping \(id)")
             return .rejected
         }
-        var partial = partials[id] ?? Partial(
-            mime: frame.mime, name: frame.name, disp: frame.disp,
-            count: frame.count, chunks: [:], bytes: 0, touched: Date()
-        )
+        // A chunk is written at seq × chunkRawBytes; a longer one would overwrite its neighbour.
+        guard frame.bytes.count <= FileFrame.chunkRawBytes else {
+            log("file: chunk of \(frame.bytes.count) B exceeds the chunk size; dropping \(id)")
+            discard(id)
+            return .rejected
+        }
+
+        var partial: Partial
+        if let existing = partials[id] {
+            partial = existing
+        } else {
+            if partials.count >= maxConcurrent, !evictOldestStale() {
+                log("file: too many transfers in flight; dropping \(id)")
+                return .rejected
+            }
+            guard let created = open(frame) else { return .rejected }
+            // Registered at once, so every reject below can `discard` it (close + delete the temp file).
+            partials[id] = created
+            partial = created
+        }
         guard partial.count == frame.count else {
             log("file: chunk count changed mid-transfer for \(id); dropping")
-            partials[id] = nil
-            return reject()
+            discard(id)
+            return .rejected
         }
-        if partial.chunks[frame.seq] == nil {
-            partial.bytes += frame.bytes.count
-            guard partial.bytes <= maxBytes else {
+
+        if !partial.seen.contains(frame.seq) {
+            let bytes = partial.bytes + frame.bytes.count
+            guard bytes <= maxBytes else {
                 log("file: transfer \(id) exceeded \(maxBytes / (1024 * 1024)) MB; dropping")
-                partials[id] = nil
-                return reject()
+                discard(id)
+                return .rejected
             }
-            partial.chunks[frame.seq] = frame.bytes
+            do {
+                try partial.handle.seek(toOffset: UInt64(frame.seq) * UInt64(FileFrame.chunkRawBytes))
+                try partial.handle.write(contentsOf: frame.bytes)
+            } catch {
+                log("file: couldn't write chunk \(frame.seq) of \(id): \(error.localizedDescription)")
+                discard(id)
+                return .rejected
+            }
+            partial.bytes = bytes
+            partial.seen.insert(frame.seq)
+            while partial.seen.contains(partial.contiguous) { partial.contiguous += 1 }
         }
         partial.touched = Date()
 
-        guard partial.chunks.count == partial.count else {
+        guard partial.seen.count == partial.count else {
             partials[id] = partial
-            progress = (partial.name ?? "File", partial.chunks.count, partial.count)
-            return .buffered(received: partial.chunks.count, total: partial.count)
+            return .buffered(received: partial.seen.count, total: partial.count, have: partial.contiguous)
         }
         partials[id] = nil
-        progress = nil
-        var bytes = Data(capacity: partial.bytes)
-        for seq in 0..<partial.count {
-            guard let chunk = partial.chunks[seq] else { return reject() }
-            bytes.append(chunk)
+        try? partial.handle.close()
+        return .done(Assembled(mime: partial.mime, name: partial.name, dir: partial.dir, disp: partial.disp,
+                               payload: .file(partial.file)))
+    }
+
+    private func open(_ frame: FileFrame.Parsed) -> Partial? {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent("\(UUID().uuidString).part")
+            guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+                log("file: couldn't create a temp file in \(directory.path)")
+                return nil
+            }
+            let handle = try FileHandle(forWritingTo: url)
+            return Partial(mime: frame.mime, name: frame.name, dir: frame.dir, disp: frame.disp,
+                           count: frame.count, file: url, handle: handle)
+        } catch {
+            log("file: couldn't open a temp file: \(error.localizedDescription)")
+            return nil
         }
-        return .done(Assembled(mime: partial.mime, name: partial.name, disp: partial.disp, bytes: bytes))
     }
 
-    private func reject() -> Result {
-        if partials.isEmpty { progress = nil }
-        return .rejected
+    /// Forget a transfer and delete its temp file.
+    private func discard(_ id: String) {
+        guard let partial = partials.removeValue(forKey: id) else { return }
+        try? partial.handle.close()
+        try? FileManager.default.removeItem(at: partial.file)
     }
 
-    /// Drop transfers whose sender went away mid-file, so a dead phone can't hold memory forever.
-    /// Also called on a timer while a transfer is showing: it used to run only when the next frame
-    /// arrived, so a phone that vanished left the "receiving" row on screen for good.
+    /// Make room by dropping the partial that has been quiet longest — but only if it has been
+    /// quiet for `staleAfter`; a live transfer is never evicted. True if one was freed.
+    private func evictOldestStale() -> Bool {
+        let cutoff = Date().addingTimeInterval(-staleAfter)
+        guard let (id, _) = partials.filter({ $0.value.touched < cutoff }).min(by: { $0.value.touched < $1.value.touched })
+        else { return false }
+        log("file: evicting idle transfer \(id) to make room")
+        discard(id)
+        return true
+    }
+
+    /// Drop transfers whose sender went away for good (idle past `ttl`), deleting their temp files.
+    /// Also called on a timer while a transfer is showing, so the "receiving" row can't outlive a
+    /// phone that went away.
     func sweep() {
         let cutoff = Date().addingTimeInterval(-ttl)
         for (id, partial) in partials where partial.touched < cutoff {
-            log("file: transfer \(id) abandoned (\(partial.chunks.count)/\(partial.count) chunks)")
-            partials[id] = nil
+            log("file: transfer \(id) abandoned (\(partial.seen.count)/\(partial.count) chunks)")
+            discard(id)
         }
-        if partials.isEmpty { progress = nil }
+    }
+
+    /// Delete temp files older than `age` — what a crash or a quit mid-transfer leaves behind.
+    nonisolated static func purge(_ directory: URL, olderThan age: TimeInterval) {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let cutoff = Date().addingTimeInterval(-age)
+        for item in items {
+            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, modified < cutoff { try? fm.removeItem(at: item) }
+        }
     }
 }
