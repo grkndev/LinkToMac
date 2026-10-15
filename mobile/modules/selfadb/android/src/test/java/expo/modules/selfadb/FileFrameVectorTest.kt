@@ -39,7 +39,7 @@ class FileFrameVectorTest {
     val id = p.optString("id")
     val seq = p.optInt("seq", 0)
     return when (p.optString("op", "data")) {
-      FileFrame.OP_ACK -> FileFrame.ack(id, seq)
+      FileFrame.OP_ACK -> FileFrame.ack(id, seq, if (p.has("have")) p.getInt("have") else null)
       FileFrame.OP_NACK -> FileFrame.nack(id, seq, p.str("reason"))
       else -> {
         val bytes = hex(p.optString("bytes_hex"))
@@ -74,6 +74,7 @@ class FileFrameVectorTest {
       assertEquals("$name: seq", want.getInt("seq"), frame.seq)
       assertEquals("$name: count", want.getInt("count"), frame.count)
       assertEquals("$name: reason", want.str("reason"), frame.reason)
+      assertEquals("$name: have", if (want.isNull("have")) null else want.getInt("have"), frame.have)
       assertEquals("$name: bytes", want.getString("bytes_hex"), frame.bytes.joinToString("") { "%02x".format(it) })
     }
   }
@@ -121,6 +122,18 @@ class FileFrameVectorTest {
       assertEquals("$name: n", want.getInt("count"), header.getInt("n"))
       assertEquals("$name: body", want.getString("bytes_hex"), body.joinToString("") { "%02x".format(it) })
       assertNotNull("$name: parses", FileFrame.parse(frame))
+    }
+  }
+
+  @Test
+  fun dirSanitizeVectors() {
+    val dir = requireNotNull(System.getProperty("vectors.dir")) { "vectors.dir not set (see build.gradle)" }
+    val cases = JSONObject(File(dir, "dir-sanitize.json").readText()).getJSONArray("cases")
+    assertTrue("no dir-sanitize vectors loaded", cases.length() > 0)
+    for (i in 0 until cases.length()) {
+      val c = cases.getJSONObject(i)
+      val input = if (c.isNull("input")) null else c.getString("input")
+      assertEquals(c.getString("name"), c.getString("expected"), FileSink.sanitizeDir(input))
     }
   }
 

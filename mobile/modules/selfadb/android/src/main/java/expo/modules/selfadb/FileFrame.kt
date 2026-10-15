@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream
  * | `seq`  | 0-based chunk index                                            | 0                 |
  * | `n`    | total chunk count                                              | 1                 |
  * | `err`  | why a [OP_NACK] was sent (free text)                           | no reason given   |
+ * | `have` | on an [OP_ACK]: leading chunks `[0, have)` already stored (resume) | no resume info |
  *
  * The header repeats in full on every chunk (it costs ~100 bytes and makes each chunk
  * self-describing, so the receiver never depends on chunk 0 arriving first).
@@ -49,7 +50,10 @@ class FileFrame(
   val count: Int,
   val bytes: ByteArray,
   /** Why a [OP_NACK] was sent, when the receiver said. */
-  val reason: String?,
+  val reason: String? = null,
+  /** On an [OP_ACK]: leading chunks `[0, have)` the receiver already holds, so a retry of the same
+   *  file can resume there. Absent from older receivers. */
+  val have: Int? = null,
 ) {
   /** True when this frame is the whole file (the pre-chunking shape, and any file under one chunk). */
   val isSingle: Boolean get() = id == null || count <= 1
@@ -84,7 +88,7 @@ class FileFrame(
 
     /** Refuse to even start a transfer bigger than this. At [CHUNK_RAW_BYTES] that is ~103
      *  frames; the Mac's reassembly buffer enforces the same ceiling. */
-    const val MAX_TRANSFER_BYTES = 64 * 1024 * 1024
+    const val MAX_TRANSFER_BYTES = 1024 * 1024 * 1024
 
     /** Build one frame's plaintext. [seq]/[count]/[id] are omitted from the header for a
      *  single-frame transfer, keeping the bytes identical to what pre-chunking builds sent. */
@@ -140,8 +144,9 @@ class FileFrame(
     }
 
     /** Build a zero-byte [OP_ACK] frame for one stored chunk. */
-    fun ack(id: String, seq: Int): ByteArray {
+    fun ack(id: String, seq: Int, have: Int? = null): ByteArray {
       val header = JSONObject().put("op", OP_ACK).put("id", id).put("seq", seq)
+      if (have != null) header.put("have", have)
       val headerBytes = header.toString().toByteArray(Charsets.UTF_8)
       val out = ByteArrayOutputStream(2 + headerBytes.size)
       out.write((headerBytes.size shr 8) and 0xFF)
@@ -183,6 +188,7 @@ class FileFrame(
         count = header.optInt("n", 1),
         bytes = payload.copyOfRange(2 + headerLen, payload.size),
         reason = header.optString("err").ifEmpty { null },
+        have = if (header.has("have")) header.optInt("have") else null,
       )
     }
   }

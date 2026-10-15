@@ -57,8 +57,8 @@ class FileInboxTest {
 
   @Test fun oversizeTransferIsRejectedAndItsTempFileRemoved() {
     val dir = tmp.newFolder()
-    val inbox = FileInbox(dir) { }
-    val r = inbox.accept(frame("big", 0, 2, ByteArray(FileFrame.MAX_TRANSFER_BYTES + 1)))
+    val inbox = FileInbox(dir, maxBytes = 100) { }
+    val r = inbox.accept(frame("big", 0, 2, ByteArray(101)))
     assertTrue(r is FileInbox.Result.Rejected)
     assertFalse(java.io.File(dir, "in-big").exists())
   }

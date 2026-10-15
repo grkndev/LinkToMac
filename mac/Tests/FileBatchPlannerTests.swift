@@ -68,7 +68,7 @@ import Testing
         let plan = FileBatchPlanner.plan(urls: [root.appendingPathComponent("zero.txt"), big])
         #expect(plan.items.isEmpty)
         #expect(plan.problems.contains("zero.txt is empty"))
-        #expect(plan.problems.contains("big.bin is larger than 64 MB"))
+        #expect(plan.problems.contains("big.bin is larger than 1 GB"))
     }
 
     @Test func runawayFolderIsCapped() throws {

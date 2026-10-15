@@ -45,7 +45,7 @@ import Testing
         let seq = params["seq"] as? Int ?? 0
         switch params["op"] as? String {
         case FileFrame.opAck:
-            return FileFrame.ack(id: id, seq: seq)
+            return FileFrame.ack(id: id, seq: seq, have: params["have"] as? Int)
         case FileFrame.opNack:
             return FileFrame.nack(id: id, seq: seq, reason: params["reason"] as? String)
         default:
@@ -78,6 +78,7 @@ import Testing
             #expect(frame.seq == want["seq"] as? Int, "\(name): seq")
             #expect(frame.count == want["count"] as? Int, "\(name): count")
             #expect(frame.reason == want["reason"] as? String, "\(name): reason")
+            #expect(frame.have == want["have"] as? Int, "\(name): have")
             #expect(frame.bytes == Self.data(hex: want["bytes_hex"] as! String), "\(name): bytes")
         }
     }
@@ -120,6 +121,19 @@ import Testing
             #expect(header["n"] as? Int == want["count"] as? Int, "\(name): n")
             #expect(body == Self.data(hex: want["bytes_hex"] as! String), "\(name): body")
             #expect(FileFrame.parse(frame) != nil, "\(name): parses")
+        }
+    }
+
+    @Test func dirSanitizeVectors() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("protocol-vectors/dir-sanitize.json")
+        let doc = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        let cases = doc["cases"] as! [[String: Any]]
+        #expect(!cases.isEmpty)
+        for c in cases {
+            let input = c["input"] as? String // JSON null -> nil
+            #expect(FileDropStore.sanitizeDir(input) == c["expected"] as? String, "\(c["name"] ?? "?")")
         }
     }
 

@@ -25,6 +25,8 @@ class FileInbox(
   private val dir: File,
   /** Idle time after which a half-received transfer is swept. A parameter only so a test needn't wait two minutes. */
   private val ttlMs: Long = TTL_MS,
+  /** Per-transfer size cap; a parameter only so a test needn't allocate a gigabyte. */
+  private val maxBytes: Long = FileFrame.MAX_TRANSFER_BYTES.toLong(),
   private val log: (String) -> Unit,
 ) {
 
@@ -84,7 +86,7 @@ class FileInbox(
 
     if (partial.seen.add(frame.seq)) {
       partial.bytes += frame.bytes.size
-      if (partial.bytes > FileFrame.MAX_TRANSFER_BYTES) {
+      if (partial.bytes > maxBytes) {
         log("file: transfer $id exceeded the size cap; dropping")
         discard(id)
         return Result.Rejected

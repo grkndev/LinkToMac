@@ -84,10 +84,10 @@ abstract class ShareActivity : Activity() {
       if (meta.size > FileFrame.MAX_TRANSFER_BYTES) skipped++ else picked += uri to meta
     }
     if (picked.isEmpty()) {
-      toast("Too large to send (max ${FileFrame.MAX_TRANSFER_BYTES / (1024 * 1024)} MB each)")
+      toast("Too large to send (max ${sizeLabel(FileFrame.MAX_TRANSFER_BYTES.toLong())} each)")
       return false
     }
-    if (skipped > 0) toast("$skipped file(s) skipped: over ${FileFrame.MAX_TRANSFER_BYTES / (1024 * 1024)} MB")
+    if (skipped > 0) toast("$skipped file(s) skipped: over ${sizeLabel(FileFrame.MAX_TRANSFER_BYTES.toLong())}")
 
     // Anything past a single chunk takes long enough that silence reads as a dead button, so
     // acknowledge the start here; ClipForegroundService toasts the outcome either way.
@@ -177,6 +177,12 @@ abstract class ShareActivity : Activity() {
       intent.getParcelableExtra(Intent.EXTRA_STREAM)
     }
     return listOfNotNull(one)
+  }
+
+  /** `1 GB` / `64 MB` — a limit shown to people reads better than a byte count. */
+  private fun sizeLabel(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> "${bytes shr 30} GB"
+    else -> "${bytes shr 20} MB"
   }
 
   private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
