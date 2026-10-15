@@ -9,11 +9,9 @@ import {
 } from "@expo/ui/jetpack-compose";
 import {
   alpha,
-  fillMaxHeight,
   fillMaxWidth,
   padding,
   weight,
-  wrapContentHeight,
 } from "@expo/ui/jetpack-compose/modifiers";
 import type { ReactNode } from "react";
 import { Alert } from "@/components/AlertDialog";

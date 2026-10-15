@@ -46,7 +46,7 @@ export const Alert = {
   },
 };
 
-export const GlobalAlertDialog = forwardRef<AlertRef>((_, ref) => {
+export const GlobalAlertDialog = forwardRef<AlertRef>(function GlobalAlertDialog(_, ref) {
   const [visible, setVisible] = useState(false);
   const [options, setOptions] = useState<AlertOptions | null>(null);
   const colors = useM3Colors();
