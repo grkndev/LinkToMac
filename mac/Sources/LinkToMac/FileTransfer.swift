@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -66,6 +67,8 @@ struct OutgoingItem: Equatable, Sendable {
     let name: String
     let dir: String?
     let size: Int
+    /// Modification time (seconds). Part of the transfer's identity — see `FileSender.transferID`.
+    var mtime: Int = 0
 }
 
 /// Turns what the user dropped (files and/or folders) into a flat, ordered list of files.
@@ -82,7 +85,7 @@ enum FileBatchPlanner {
 
     static func plan(urls: [URL], fileManager fm: FileManager = .default) -> Plan {
         var plan = Plan()
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
 
         for dropped in urls {
             // A symlink the user dropped on purpose is followed; ones found *inside* a folder
@@ -97,7 +100,7 @@ enum FileBatchPlanner {
             if values.isDirectory == true {
                 walk(folder: url, rootName: name, fm: fm, keys: keys, into: &plan)
             } else {
-                add(file: url, name: name, dir: nil, size: values.fileSize, into: &plan)
+                add(file: url, name: name, dir: nil, size: values.fileSize, values: values, into: &plan)
             }
             if plan.items.count >= maxFiles { break }
         }
@@ -140,7 +143,7 @@ enum FileBatchPlanner {
             let parts = Array(entry.standardizedFileURL.pathComponents.dropFirst(rootComponents.count).dropLast())
             let dir = ([rootName] + parts).joined(separator: "/")
             let before = plan.items.count
-            add(file: entry, name: entry.lastPathComponent, dir: dir, size: values.fileSize, into: &plan)
+            add(file: entry, name: entry.lastPathComponent, dir: dir, size: values.fileSize, values: values, into: &plan)
             if plan.items.count > before { found += 1 }
         }
 
@@ -150,7 +153,8 @@ enum FileBatchPlanner {
         }
     }
 
-    private static func add(file: URL, name: String, dir: String?, size: Int?, into plan: inout Plan) {
+    private static func add(file: URL, name: String, dir: String?, size: Int?, values: URLResourceValues,
+                            into plan: inout Plan) {
         guard let size, size > 0 else {
             plan.problems.append("\(name) is empty")
             return
@@ -289,6 +293,9 @@ final class FileSender: @unchecked Sendable {
     private final class Transfer: @unchecked Sendable {
         let id: String
         let window: AckWindow
+        /// Leading chunks the phone says it already holds (from an ack's `have`); guarded by the
+        /// sender's lock. Only ever grows.
+        var have = 0
         init(id: String, window: AckWindow) { self.id = id; self.window = window }
     }
 
@@ -367,12 +374,29 @@ final class FileSender: @unchecked Sendable {
         window?.fail("Cancelled")
     }
 
-    /// The phone stored chunk `seq` of `id`. Safe from any thread.
-    func ack(id: String, seq: Int) {
+    /// The phone stored chunk `seq` of `id`; `have`, when it sends one, is how many leading chunks
+    /// it already holds from an earlier attempt at the same file. Safe from any thread.
+    func ack(id: String, seq: Int, have: Int? = nil) {
         lock.lock()
-        let window = active?.transfer?.id == id ? active?.transfer?.window : nil
+        let transfer = active?.transfer?.id == id ? active?.transfer : nil
+        if let transfer, let have, have > transfer.have { transfer.have = have }
+        let window = transfer?.window
         lock.unlock()
         window?.acknowledge(seq)
+    }
+
+    /// The transfer id for a file: **deterministic**, so sending the same file again reuses it —
+    /// which is what lets the phone recognise a retry and report what it already has (resume)
+    /// with no UI at all. The key is name, size, modification time and folder: an edited file
+    /// changes size or mtime and so starts fresh. (An edit that preserves both is undetectable.)
+    static func transferID(for item: OutgoingItem) -> String {
+        let key = "\(item.name)|\(item.size)|\(item.mtime)|\(item.dir ?? "")"
+        return SHA256.hash(data: Data(key.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func currentHave(_ batch: Batch) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return batch.transfer?.have ?? 0
     }
 
     /// The phone could not store `id` — fail it now rather than after the ack timeout.
@@ -440,7 +464,7 @@ final class FileSender: @unchecked Sendable {
 
         let chunk = config.chunkBytes
         let count = (item.size + chunk - 1) / chunk
-        let id = String(UUID().uuidString.prefix(8))
+        let id = Self.transferID(for: item)
         let window = AckWindow(capacity: config.ackWindow)
         let mime = Self.mimeType(for: item.url)
 
@@ -453,7 +477,20 @@ final class FileSender: @unchecked Sendable {
         report(batch, item, index: index, sent: 0)
 
         var sent = 0
-        for seq in 0..<count {
+        var seq = 0
+        while seq < count {
+            // Resume: the phone's acks say how many leading chunks it already holds. Jump over
+            // them (clamped so the last chunk is always sent — that is what completes the file
+            // and earns the final ack). Chunks already in the window when the first ack lands
+            // are simply re-sent; that costs at most `ackWindow` chunks.
+            let have = min(currentHave(batch), count - 1)
+            if seq < have {
+                try? handle.seek(toOffset: UInt64(have) * UInt64(chunk))
+                seq = have
+                sent = min(item.size, have * chunk)
+                report(batch, item, index: index, sent: sent)
+                continue
+            }
             switch window.reserve(seq, timeout: config.ackTimeout) {
             case .ok: break
             case .timeout: return .failed("Your phone stopped responding", fatal: true)
@@ -476,6 +513,7 @@ final class FileSender: @unchecked Sendable {
             }
             if route == .relay { batch.lastRelayAt = Date() }
             sent += data.count
+            seq += 1
             report(batch, item, index: index, sent: sent)
         }
 

@@ -491,7 +491,7 @@ final class RelayClient {
         // Replies to the transfer this Mac is sending (`sendFilesToPhone`).
         switch frame.op {
         case FileFrame.opAck:
-            if let id = frame.id { fileSender.ack(id: id, seq: frame.seq) }
+            if let id = frame.id { fileSender.ack(id: id, seq: frame.seq, have: frame.have) }
             return
         case FileFrame.opNack:
             if let id = frame.id { fileSender.nack(id: id, reason: frame.reason) }
@@ -503,8 +503,8 @@ final class RelayClient {
         let result = fileInbox.accept(frame)
         publishIncoming()
         switch result {
-        case .buffered:
-            replyAck(frame)
+        case let .buffered(_, _, have):
+            replyAck(frame, have: have)
         case .rejected:
             replyNack(frame, "The Mac couldn't accept it")
         case let .done(file):
@@ -512,10 +512,18 @@ final class RelayClient {
             case FileFrame.dispSave:
                 saveIncomingFile(file, frame: frame)
             default:
+                guard case let .memory(bytes) = file.payload else {
+                    // A clipboard image is always one frame; a chunked one is a peer bug, and
+                    // pasting a temp file's contents would be an unbounded read.
+                    if case let .file(url) = file.payload { try? FileManager.default.removeItem(at: url) }
+                    log("chunked clipboard image ignored")
+                    replyNack(frame, "Chunked clipboard images aren't supported")
+                    return
+                }
                 // Echo-suppressed writer, so the image isn't immediately re-sent to the phone.
-                pasteboard?.writeImage(file.bytes, mime: file.mime)
+                pasteboard?.writeImage(bytes, mime: file.mime)
                 recordClip("[Image]", isImage: true)
-                log("image received (\(file.mime), \(file.bytes.count) bytes)")
+                log("image received (\(file.mime), \(bytes.count) bytes)")
                 replyAck(frame)
             }
         }
@@ -552,12 +560,25 @@ final class RelayClient {
         let folder = fileDrop.folder
         Task { [weak self] in
             let outcome = await Task.detached(priority: .userInitiated) {
-                Swift.Result { try FileDropStore.write(bytes: file.bytes, to: folder, preferredName: file.name, mime: file.mime) }
+                Swift.Result {
+                    switch file.payload {
+                    case let .memory(bytes):
+                        return try FileDropStore.write(bytes: bytes, to: folder, preferredName: file.name, dir: file.dir, mime: file.mime)
+                    case let .file(temp):
+                        // The chunks were streamed to disk; move the finished file into place.
+                        do {
+                            return try FileDropStore.moveIn(temp, to: folder, preferredName: file.name, dir: file.dir, mime: file.mime)
+                        } catch {
+                            try? FileManager.default.removeItem(at: temp) // don't strand a big temp file
+                            throw error
+                        }
+                    }
+                }
             }.value
             guard let self else { return }
             switch outcome {
             case let .success(url):
-                self.log("file saved: \(url.path) (\(file.bytes.count) bytes)")
+                self.log("file saved: \(url.path)")
                 self.replyAck(frame)
                 self.announceSaved(url)
             case let .failure(error):
@@ -705,9 +726,9 @@ final class RelayClient {
     /// Acknowledge a stored chunk — and only chunks of a transfer that carries an `id`; clipboard
     /// images aren't acked. Sent on both transports: `ConnectionManager` keeps exactly one link
     /// joined at a time, so the phone receives it once, never twice.
-    private func replyAck(_ frame: FileFrame.Parsed) {
+    private func replyAck(_ frame: FileFrame.Parsed, have: Int? = nil) {
         guard let id = frame.id else { return }
-        let payload = FileFrame.ack(id: id, seq: frame.seq)
+        let payload = FileFrame.ack(id: id, seq: frame.seq, have: have)
         sendFile(payload)
         onLocalFile?(payload)
     }

@@ -8,6 +8,7 @@ private final class FakePhone: @unchecked Sendable {
         case silent                // never answer
         case nack(onSeq: Int, String)
         case noLink                // no transport available
+        case acksWithHave(Int)     // ack every chunk, reporting `have` (resume)
     }
 
     private let lock = NSLock()
@@ -28,6 +29,8 @@ private final class FakePhone: @unchecked Sendable {
         switch behavior {
         case .acks:
             if let id = frame.id { sender?.ack(id: id, seq: frame.seq) }
+        case let .acksWithHave(have):
+            if let id = frame.id { sender?.ack(id: id, seq: frame.seq, have: have) }
         case .silent:
             break
         case let .nack(seq, reason):
@@ -219,6 +222,60 @@ final class Locked<T>: @unchecked Sendable {
     init(_ value: T) { stored = value }
     var value: T { lock.lock(); defer { lock.unlock() }; return stored }
     func mutate(_ body: (inout T) -> Void) { lock.lock(); body(&stored); lock.unlock() }
+}
+
+@Suite struct FileSenderResumeTests {
+    @Test func theAcksHaveSkipsTheChunksThePhoneAlreadyHolds() async throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let item = try makeFile(40, in: dir) // 10 chunks of 4 bytes
+        let phone = FakePhone(.acksWithHave(6))
+        let result = await run(FileSender(config: config()), [item], phone)
+
+        #expect(result.sent == ["f.bin"])
+        // Chunk 0 goes out, its ack says "I have 0..<6", so the sender jumps straight to chunk 6.
+        #expect(phone.frames.map(\.seq) == [0, 6, 7, 8, 9])
+        let tail = phone.frames.dropFirst().reduce(Data()) { $0 + $1.bytes }
+        #expect(tail == (try Data(contentsOf: item.url)).suffix(16))
+    }
+
+    @Test func aHaveBeyondTheEndStillSendsTheLastChunk() async throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let item = try makeFile(40, in: dir)
+        let phone = FakePhone(.acksWithHave(9999))
+        let result = await run(FileSender(config: config()), [item], phone)
+
+        #expect(result.sent == ["f.bin"])
+        // Clamped: the last chunk must still go, because it is what completes the file.
+        #expect(phone.frames.map(\.seq) == [0, 9])
+    }
+
+    @Test func resumeProgressCountsSkippedBytesAsDone() async throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let item = try makeFile(40, in: dir)
+        let sender = FileSender(config: config())
+        let phone = FakePhone(.acksWithHave(6))
+        phone.sender = sender
+        let seen = Locked<[BatchProgress]>([])
+        _ = await withCheckedContinuation { (cont: CheckedContinuation<BatchResult, Never>) in
+            sender.send(items: [item], transport: phone.transport,
+                        progress: { p in seen.mutate { $0.append(p) } }, done: { cont.resume(returning: $0) })
+        }
+        let all = seen.value
+        #expect(all.contains { $0.currentDone == 24 }) // 6 chunks × 4 bytes jumped over
+        #expect(zip(all, all.dropFirst()).allSatisfy { $0.currentDone <= $1.currentDone })
+        #expect(all.last?.currentDone == 40)
+    }
+
+    @Test func theTransferIDIsStableForTheSameFileAndChangesWhenItIsEdited() {
+        let url = URL(fileURLWithPath: "/tmp/a.bin")
+        let base = OutgoingItem(url: url, name: "a.bin", dir: "Trip", size: 100, mtime: 1_000)
+        let again = OutgoingItem(url: URL(fileURLWithPath: "/elsewhere/a.bin"), name: "a.bin", dir: "Trip", size: 100, mtime: 1_000)
+        #expect(FileSender.transferID(for: base) == FileSender.transferID(for: again)) // same file, same id
+        #expect(FileSender.transferID(for: base).count == 8)
+        #expect(FileSender.transferID(for: base) != FileSender.transferID(for: OutgoingItem(url: url, name: "a.bin", dir: "Trip", size: 101, mtime: 1_000)))
+        #expect(FileSender.transferID(for: base) != FileSender.transferID(for: OutgoingItem(url: url, name: "a.bin", dir: "Trip", size: 100, mtime: 1_001)))
+        #expect(FileSender.transferID(for: base) != FileSender.transferID(for: OutgoingItem(url: url, name: "a.bin", dir: nil, size: 100, mtime: 1_000)))
+    }
 }
 
 @Suite struct BatchProgressTests {
