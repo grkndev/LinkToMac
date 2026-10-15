@@ -132,7 +132,28 @@ between them. It never stores anything and never inspects clipboard content.
   **Cancel** is one-sided: stopping a transfer (the Mac drop zone's Cancel, the phone notification's
   Cancel) just stops sending. There is deliberately no `cancel` op on the wire — an *old* peer parses
   an unknown `op` as a data chunk, so adding one would corrupt transfers with older apps. The
-  receiver drops the partial file with its 120 s idle sweep.
+  receiver simply stops hearing from the sender and drops the partial when it expires (below).
+
+  **Resume.** An `ack` may carry `have` — how many leading chunks `[0, have)` the receiver already
+  holds. The transfer id is **deterministic** (first 8 hex of SHA-256 of `name|size|mtime|dir`, on
+  both senders), so sending the *same file again* reuses it: the receiver recognises the partial,
+  every ack reports `have`, and the sender seeks past those chunks (clamped so the last chunk always
+  goes — it is what completes the file and earns the final ack). Only the few chunks that were in
+  the ack window when it stopped are re-sent. No UI is needed: re-share or re-drop the file (the
+  phone's Files screen also has Retry for sends picked in the app). A receiver keeps a half-received
+  transfer for **10 min**; one idle for 2 min stops showing as "receiving" and may be evicted to make
+  room for a new transfer (a live one never is). An edited file changes size or mtime and so starts
+  fresh; an edit preserving both can't be told apart. Old peers ignore `have` and re-send everything,
+  which is correct, just slower.
+
+  **Size and memory.** The cap is **1 GiB per file** on both sides (they must match). Both receivers
+  stream chunks into a temp file at `seq × chunk size` and then move it into place, so a gigabyte
+  costs one chunk of RAM, not two gigabytes; the phone sends a large share-sheet file straight from
+  its content URI (read grant on the start intent) instead of copying it into the cache first. Time
+  (≈ 3–4 min per GiB over the paced relay) and free space are the real limits.
+
+  **Folders.** `dir` carries the relative path; both receivers recreate the tree under the download
+  folder after sanitising it with twin functions pinned by `protocol-vectors/dir-sanitize.json`.
 
   Files that arrive in a burst raise **one** updating notification on each side ("N files" /
   "N files in Photos"), not one per file.
@@ -151,8 +172,9 @@ between them. It never stores anything and never inspects clipboard content.
   rather than theoretical, since both drop the *connection* rather than the frame:
   the sender keeps only 4 chunks unacked (the `ack` op is flow control, not politeness) and, on the
   relay, paces itself to 8 frames/s against the 120-per-10 s rate limit. LAN-direct has neither
-  limit and is not paced. The receiver's reassembly buffer is bounded on every axis (2 concurrent
-  transfers, 64 MB each, 120 s idle sweep) because an inbound transfer is peer-controlled.
+  limit and is not paced. The receiver is bounded on every axis (2 concurrent transfers, 1 GiB each,
+  chunks no longer than the chunk size, a 10 min retention) because an inbound transfer is
+  peer-controlled.
 - **Backpressure:** if a peer's `ws.bufferedAmount` exceeds `maxPayloadBytes * 8`, it is
   declared a slow consumer and dropped (close code `4003`) instead of buffering unbounded.
 - Logs are privacy-preserving: the `roomId` is redacted to a 6-char prefix, and only

@@ -59,6 +59,8 @@ class FileInbox(
     val seen = HashSet<Int>()
     /** Length of the contiguous run `0 until contiguous` — what resume reports as `have`. */
     var contiguous = 0
+    /** Frames that arrived for a chunk already stored — what a retry re-sends instead of skipping. */
+    var resent = 0
     var bytes = 0L
     var touched = System.currentTimeMillis()
   }
@@ -103,7 +105,7 @@ class FileInbox(
       return Result.Rejected
     }
 
-    if (partial.seen.add(frame.seq)) {
+    if (!partial.seen.add(frame.seq)) partial.resent++ else {
       partial.bytes += frame.bytes.size
       if (partial.bytes > maxBytes) {
         log("file: transfer $id exceeded the size cap; dropping")
@@ -128,6 +130,9 @@ class FileInbox(
       return Result.Buffered(received = partial.seen.size, total = partial.count, have = partial.contiguous)
     }
     partials.remove(id)
+    // How many chunks arrived twice: a resumed transfer re-sends only the few that were in flight when
+    // it stopped, a retry that couldn't resume re-sends everything it had already delivered.
+    log("file: $id complete — ${partial.count} chunks, ${partial.resent} re-sent")
     return Result.Done(Completed(partial.file, partial.mime, partial.name, partial.dir, partial.disp))
   }
 
