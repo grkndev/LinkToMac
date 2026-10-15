@@ -19,6 +19,8 @@ object ClipBus {
   @Volatile var onMacStat: ((String) -> Unit)? = null
   @Volatile var onLog: ((String) -> Unit)? = null
   @Volatile var onRelay: ((Map<String, Any?>) -> Unit)? = null
+  /** A file-transfer history row was added or changed (see [FileHistory]). */
+  @Volatile var onFileTransfer: ((Map<String, Any?>) -> Unit)? = null
 
   /** Last relay state, retained so a late-attaching UI can query it (the service may
    *  have connected long before the app/JS came up). */

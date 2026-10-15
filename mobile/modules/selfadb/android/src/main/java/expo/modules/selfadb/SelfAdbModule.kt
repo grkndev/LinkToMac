@@ -104,7 +104,7 @@ class SelfAdbModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SelfAdb")
 
-    Events("onClip", "onMacClip", "onMacStat", "onLog", "onStatus", "onRelay")
+    Events("onClip", "onMacClip", "onMacStat", "onLog", "onStatus", "onRelay", "onFileTransfer")
 
     // Attach UI callbacks to the (possibly already-running) service.
     // Each callback runs on ClipForegroundService's thread, not JS's — a sendEvent() that
@@ -117,6 +117,7 @@ class SelfAdbModule : Module() {
       ClipBus.onMacStat = { json -> parseStat(json)?.let { safeSendEvent("onMacStat", it) } }
       ClipBus.onLog = { msg -> safeSendEvent("onLog", mapOf("message" to msg)) }
       ClipBus.onRelay = { payload -> safeSendEvent("onRelay", payload) }
+      ClipBus.onFileTransfer = { entry -> safeSendEvent("onFileTransfer", entry) }
     }
 
     AsyncFunction("isPaired") {
@@ -613,6 +614,41 @@ class SelfAdbModule : Module() {
       )
     }
 
+    // ---- Files screen: history, pickers, retry, cancel --------------------------------------
+
+    /** The persisted transfer history, newest first (see [FileHistory]). */
+    AsyncFunction("getFileHistory") {
+      FileHistory.list(appCtx).map { it.toMap() }
+    }
+
+    AsyncFunction("clearFileHistory") {
+      FileHistory.clear(appCtx)
+    }
+
+    /** Open a received file (a MediaStore URI) in whatever app handles its type. */
+    AsyncFunction("openFile") { uri: String, mime: String ->
+      try {
+        appCtx.startActivity(
+          Intent(Intent.ACTION_VIEW)
+            .setDataAndType(Uri.parse(uri), mime)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        )
+        true
+      } catch (e: Exception) {
+        ClipBus.log("openFile failed: ${e.message}")
+        false
+      }
+    }
+
+    /** Show the system file picker and send what is picked. Started from the app's own activity so it stacks on the app. */
+    AsyncFunction("pickFiles") { startPicker(PickActivity.MODE_FILES) }
+
+    AsyncFunction("pickFolder") { startPicker(PickActivity.MODE_FOLDER) }
+
+    AsyncFunction("retryFileSend") { id: String -> ClipForegroundService.retrySend(appCtx, id) }
+
+    AsyncFunction("cancelFileSend") { ClipForegroundService.cancelTransfer(appCtx) }
+
     /** Open this app's system "App info" page — where a permission Android won't prompt for can
      *  still be granted by hand. */
     AsyncFunction("openAppSettings") {
@@ -802,6 +838,11 @@ class SelfAdbModule : Module() {
         promise.resolve("denied")
       }
     }, *permissions)
+  }
+
+  private fun startPicker(mode: String) {
+    val activity = appContext.currentActivity ?: throw Exception("The app isn't in the foreground")
+    activity.startActivity(Intent(activity, PickActivity::class.java).putExtra(PickActivity.EXTRA_MODE, mode))
   }
 
   private fun openAppSettings() {

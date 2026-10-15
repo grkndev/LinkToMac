@@ -2,6 +2,7 @@ import { NativeModule, requireNativeModule } from 'expo';
 
 import type {
   ClipEvent,
+  FileTransferEntry,
   InstalledApp,
   NotifAppFilter,
   NotifFilterMode,
@@ -78,6 +79,19 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */
   relayGetStatus(): Promise<RelayEvent>;
+  /** the persisted file-transfer history, newest first (survives restarts and the JS runtime). */
+  getFileHistory(): Promise<FileTransferEntry[]>;
+  clearFileHistory(): Promise<void>;
+  /** open a received file (its `uri`) in the app that handles its type; false if none can. */
+  openFile(uri: string, mime: string): Promise<boolean>;
+  /** show the system file picker and send what is picked (several files allowed). */
+  pickFiles(): Promise<void>;
+  /** show the system folder picker and send the folder, keeping its structure. */
+  pickFolder(): Promise<void>;
+  /** re-send a failed/cancelled `retryable` entry (resumes if the Mac still holds the partial). */
+  retryFileSend(id: string): Promise<void>;
+  /** stop the outgoing batch (what the progress notification's Cancel does). */
+  cancelFileSend(): Promise<void>;
   /** hide/show the FGS notification's status-bar icon (re-posts on a MIN/LOW importance channel). */
   setStatusNotificationVisible(visible: boolean): Promise<void>;
   /** whether the status-bar icon is currently shown (persisted, default true). */
