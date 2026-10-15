@@ -5,6 +5,7 @@ import type {
   InstalledApp,
   NotifAppFilter,
   NotifFilterMode,
+  PermissionRequestResult,
   RelayEvent,
   SelfAdbModuleEvents,
   StatEvent,
@@ -102,8 +103,8 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   setNotifAppFilter(mode: NotifFilterMode, include: string[], exclude: string[]): Promise<void>;
   /** whether we hold both READ_SMS and READ_CONTACTS (read texts + resolve sender names). */
   hasSmsAccess(): Promise<boolean>;
-  /** request READ_SMS + READ_CONTACTS; resolves whether SMS reading is granted. Syncs on grant. */
-  requestSmsAccess(): Promise<boolean>;
+  /** request READ_SMS + READ_CONTACTS (see {@link PermissionRequestResult}). Syncs on grant. */
+  requestSmsAccess(): Promise<PermissionRequestResult>;
   /** whether SMS messages are forwarded to the Mac (persisted, default true). */
   getSmsForwarding(): Promise<boolean>;
   /** pause/resume mirroring SMS to the Mac without revoking the OS permission. */
@@ -112,8 +113,10 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   syncSms(): Promise<void>;
   /** whether we hold SEND_SMS (requested lazily, on the first reply attempt). */
   hasSendSmsAccess(): Promise<boolean>;
-  /** request SEND_SMS; resolves whether replies from the Mac can now be sent. */
-  requestSendSmsAccess(): Promise<boolean>;
+  /** request SEND_SMS (see {@link PermissionRequestResult}); granted means replies can be sent. */
+  requestSendSmsAccess(): Promise<PermissionRequestResult>;
+  /** open this app's system App-info page, where a permission Android won't prompt for can be granted by hand. */
+  openAppSettings(): Promise<void>;
   /** whether the app is exempt from battery optimizations (more resilient FGS). */
   hasIgnoreBatteryOptimizations(): Promise<boolean>;
   /** open the system dialog to request battery-optimization exemption. */

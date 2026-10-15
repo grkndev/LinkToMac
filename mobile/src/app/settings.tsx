@@ -24,6 +24,10 @@ const CAPTURE_HINT: Record<CaptureState, string> = {
   error: "Off. Something went wrong — tap for details.",
 };
 
+/** Shown on the SMS grant rows once Android has refused to prompt (see usePermissionSettings). */
+const BLOCKED_HINT =
+  "Finish in App info: allow restricted settings if offered, then Permissions → SMS → Allow.";
+
 export default function SettingsScreen() {
   const router = useRouter();
   const { unpair } = usePairing();
@@ -38,6 +42,7 @@ export default function SettingsScreen() {
     requestSmsPermission,
     sendSmsAccess,
     requestSendSmsPermission,
+    smsBlocked,
     batteryOk,
     proximityOn,
     toggleProximity,
@@ -76,7 +81,11 @@ export default function SettingsScreen() {
               colors={colors}
               icon={icons.chat}
               label="Grant SMS access"
-              hint="Allow Link to macOS to read your messages and contacts so they can be shown on your Mac."
+              hint={
+                smsBlocked
+                  ? BLOCKED_HINT
+                  : "Allow Link to macOS to read your messages and contacts so they can be shown on your Mac."
+              }
               onPress={requestSmsPermission}
             />
           ) : null}
@@ -85,7 +94,11 @@ export default function SettingsScreen() {
               colors={colors}
               icon={icons.chat}
               label="Grant SMS Send Access"
-              hint="Allow Link to macOS to send text messages so you can reply from your Mac."
+              hint={
+                smsBlocked
+                  ? BLOCKED_HINT
+                  : "Allow Link to macOS to send text messages so you can reply from your Mac."
+              }
               onPress={requestSendSmsPermission}
             />
           ) : null}

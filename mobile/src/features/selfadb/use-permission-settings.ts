@@ -17,6 +17,9 @@ export function usePermissionSettings() {
   const [smsMirrorOn, setSmsMirrorOn] = useState(true);
   const [smsAccess, setSmsAccess] = useState<boolean | null>(null);
   const [sendSmsAccess, setSendSmsAccess] = useState<boolean | null>(null);
+  // True once Android has refused an SMS permission without prompting: only App info can grant it
+  // now, so the rows say so until the grant shows up (see `explainBlockedPermission`).
+  const [smsBlocked, setSmsBlocked] = useState(false);
   const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
   const [proximityOn, setProximityOn] = useState(false);
   // True while a proximity toggle is mid-flight. The permission prompt below
@@ -124,14 +127,40 @@ export function usePermissionSettings() {
 
   const requestSmsPermission = () => {
     SelfAdb.requestSmsAccess()
-      .then(setSmsAccess)
+      .then((result) => {
+        setSmsAccess(result === 'granted');
+        if (result === 'blocked') explainBlockedPermission();
+      })
       .catch(() => {});
   };
 
   const requestSendSmsPermission = () => {
     SelfAdb.requestSendSmsAccess()
-      .then(setSendSmsAccess)
+      .then((result) => {
+        setSendSmsAccess(result === 'granted');
+        if (result === 'blocked') explainBlockedPermission();
+      })
       .catch(() => {});
+  };
+
+  /**
+   * Android declined to even ask. For a sideloaded APK that is the restricted-settings block on
+   * SMS permissions, and the button used to look dead; say what to do and offer the screen where
+   * it can be done. (A person tapping "Don't allow" is `denied`, not this, and stays quiet.)
+   */
+  const explainBlockedPermission = () => {
+    setSmsBlocked(true);
+    Alert.alert(
+      'Android is blocking this permission',
+      'This app was installed from outside the Play Store, so Android restricts SMS access until you allow it:\n\n' +
+        '1. In App info, tap ⋮ (top right) → Allow restricted settings, if you see it.\n' +
+        '2. Open Permissions → SMS → Allow.\n\n' +
+        'Then come back — this row will go away.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Open App info', onPress: () => SelfAdb.openAppSettings().catch(() => {}) },
+      ],
+    );
   };
 
   return {
@@ -148,6 +177,8 @@ export function usePermissionSettings() {
     requestSmsPermission,
     sendSmsAccess,
     requestSendSmsPermission,
+    // Only while something is still ungranted: once the user finishes in App info the hint is moot.
+    smsBlocked: smsBlocked && (smsAccess === false || sendSmsAccess === false),
     batteryOk,
     proximityOn,
     toggleProximity,
