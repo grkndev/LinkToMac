@@ -69,6 +69,7 @@ enum ClientMessage: Encodable {
 ///
 /// - `op`   — `data` (payload), `ack` (receiver stored one chunk) or `nack` (receiver could not
 ///            store it). Default `data`.
+/// - `have` — on an `ack`: leading chunks `[0, have)` already stored, so a retry resumes there.
 /// - `mime` — content type. Default `image/png`.
 /// - `name` — original file name, used by `disp: save`.
 /// - `disp` — `clip` (paste it) or `save` (write it to the download folder). Default `clip`.
@@ -96,8 +97,10 @@ enum FileFrame {
     /// relay's `MAX_PAYLOAD_BYTES` and both WebSocket `maximumMessageSize` settings.
     static let chunkRawBytes = 640 * 1024
 
-    /// Refuse to start a transfer bigger than this. Mirrors the phone's `MAX_TRANSFER_BYTES`.
-    static let maxTransferBytes = 64 * 1024 * 1024
+    /// Refuse to start a transfer bigger than this. Mirrors the phone's `MAX_TRANSFER_BYTES` — they
+    /// must match, or one side accepts a file the other then drops. Both receivers stream chunks to
+    /// disk, so this is no longer a memory limit; time and free space are the real ones.
+    static let maxTransferBytes = 1024 * 1024 * 1024
 
     /// One decoded `file` frame.
     struct Parsed {
@@ -112,6 +115,8 @@ enum FileFrame {
         let bytes: Data
         /// Why a `nack` was sent, when the receiver said.
         let reason: String?
+        /// On an `ack`: how many leading chunks `[0, have)` the receiver already holds (resume).
+        let have: Int?
 
         /// True when this frame is the whole file (the pre-chunking shape, and any one-chunk file).
         var isSingle: Bool { id == nil || count <= 1 }
@@ -144,9 +149,13 @@ enum FileFrame {
         return frame(header: fitted(header), bytes: bytes)
     }
 
-    /// Build a zero-payload `ack` frame for one stored chunk.
-    static func ack(id: String, seq: Int) -> Data {
-        frame(header: ["op": opAck, "id": id, "seq": seq], bytes: Data())
+    /// Build a zero-payload `ack` frame for one stored chunk. `have` (optional) tells the sender
+    /// how many leading chunks the receiver already holds, so a retry of the same file can skip
+    /// them; an older sender ignores the extra key and an older receiver never sends it.
+    static func ack(id: String, seq: Int, have: Int? = nil) -> Data {
+        var header: [String: Any] = ["op": opAck, "id": id, "seq": seq]
+        if let have { header["have"] = have }
+        return frame(header: header, bytes: Data())
     }
 
     /// Build a zero-payload `nack` frame: the receiver could not store `id`/`seq`.
@@ -212,7 +221,8 @@ enum FileFrame {
             seq: header["seq"] as? Int ?? 0,
             count: header["n"] as? Int ?? 1,
             bytes: bytes,
-            reason: header["err"] as? String
+            reason: header["err"] as? String,
+            have: header["have"] as? Int
         )
     }
 }

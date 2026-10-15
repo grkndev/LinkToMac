@@ -88,6 +88,27 @@ final class FileDropStore {
         return candidate
     }
 
+    /// Turn a folder path that came off the wire into something safe to join onto the download
+    /// folder. Twin of the Kotlin `FileSink.sanitizeDir` — both run `protocol-vectors/dir-sanitize.json`.
+    /// Splits on `/` and `\`, drops empty / `.` / `..` parts, replaces `:`, trims, caps a part at
+    /// 100 characters and the path at 8 levels, so a peer can't escape the folder or build a
+    /// pathological tree.
+    nonisolated static func sanitizeDir(_ dir: String?) -> String {
+        guard let dir else { return "" }
+        var out: [String] = []
+        for part in dir.split(whereSeparator: { $0 == "/" || $0 == "\\" }) {
+            let cleaned = String(
+                part.replacingOccurrences(of: ":", with: "-")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                    .prefix(100)
+            )
+            if !cleaned.isEmpty { out.append(cleaned) }
+            if out.count == 8 { break }
+        }
+        return out.joined(separator: "/")
+    }
+
     /// Turn a name that came off the wire into something safe to join onto a path. The phone sends
     /// whatever the sharing app called the file, so treat it as untrusted: keep only the last path
     /// component (no traversal), drop the separators HFS+ and POSIX each care about, and fall back

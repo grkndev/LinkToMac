@@ -22,6 +22,7 @@
         "seq": 0,
         "count": 1,
         "reason": null,
+        "have": null,
         "bytes_hex": "89504e47"
       },
       "note": "no id => no ack and the pre-chunking bytes; an old peer still pastes it"
@@ -57,6 +58,7 @@
         "seq": 0,
         "count": 1,
         "reason": null,
+        "have": null,
         "bytes_hex": "6869"
       },
       "note": "regression: Swift once omitted id when count == 1, so the phone never acked a small file"
@@ -92,6 +94,7 @@
         "seq": 1,
         "count": 3,
         "reason": null,
+        "have": null,
         "bytes_hex": "0102030405"
       }
     },
@@ -128,6 +131,7 @@
         "seq": 0,
         "count": 1,
         "reason": null,
+        "have": null,
         "bytes_hex": "ffd8ff"
       }
     },
@@ -162,6 +166,7 @@
         "seq": 0,
         "count": 1,
         "reason": null,
+        "have": null,
         "bytes_hex": "78"
       }
     },
@@ -190,9 +195,42 @@
         "seq": 3,
         "count": 1,
         "reason": null,
+        "have": null,
         "bytes_hex": ""
       },
       "note": "the receiver stored chunk 3"
+    },
+    {
+      "name": "ack_with_have_for_resume",
+      "kind": "roundtrip",
+      "params": {
+        "op": "ack",
+        "id": "abcd1234",
+        "seq": 0,
+        "have": 5,
+        "bytes_hex": ""
+      },
+      "header": {
+        "op": "ack",
+        "id": "abcd1234",
+        "seq": 0,
+        "have": 5
+      },
+      "frame_hex": "002d7b2268617665223a352c226964223a226162636431323334222c226f70223a2261636b222c22736571223a307d",
+      "parsed": {
+        "op": "ack",
+        "mime": "image/png",
+        "name": null,
+        "dir": null,
+        "disp": "clip",
+        "id": "abcd1234",
+        "seq": 0,
+        "count": 1,
+        "reason": null,
+        "have": 5,
+        "bytes_hex": ""
+      },
+      "note": "the receiver already holds chunks 0..4 of this transfer (a retry of the same file): the sender may skip them"
     },
     {
       "name": "nack_with_reason",
@@ -221,6 +259,7 @@
         "seq": 3,
         "count": 1,
         "reason": "Storage full",
+        "have": null,
         "bytes_hex": ""
       },
       "note": "the receiver could not store it; the reason travels as header key err"

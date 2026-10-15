@@ -1,0 +1,75 @@
+{
+  "description": "Folder-path sanitising for the `dir` header of a received file. A peer-supplied path must never escape the download folder or build a pathological tree. Kotlin `FileSink.sanitizeDir` and Swift `FileDropStore.sanitizeDir` must map every input to `expected`. ASCII only: Kotlin counts UTF-16 units and Swift Characters, so the 100-per-part cap is not pinned for surrogate pairs.",
+  "cases": [
+    {
+      "name": "plain_nested_path",
+      "input": "Album/Sub",
+      "expected": "Album/Sub"
+    },
+    {
+      "name": "single_component",
+      "input": "Album",
+      "expected": "Album"
+    },
+    {
+      "name": "parent_traversal_is_dropped",
+      "input": "../../etc",
+      "expected": "etc"
+    },
+    {
+      "name": "absolute_path_loses_its_root",
+      "input": "/abs/path",
+      "expected": "abs/path"
+    },
+    {
+      "name": "empty_and_dot_parts_vanish",
+      "input": "a//b/./c",
+      "expected": "a/b/c"
+    },
+    {
+      "name": "only_dots",
+      "input": "..",
+      "expected": ""
+    },
+    {
+      "name": "three_dots",
+      "input": "...",
+      "expected": ""
+    },
+    {
+      "name": "backslash_is_a_separator",
+      "input": "a\\b",
+      "expected": "a/b"
+    },
+    {
+      "name": "colon_becomes_dash",
+      "input": "a:b/c",
+      "expected": "a-b/c"
+    },
+    {
+      "name": "whitespace_and_dots_are_trimmed",
+      "input": " spaced / .dot. ",
+      "expected": "spaced/dot"
+    },
+    {
+      "name": "depth_is_capped_at_eight",
+      "input": "1/2/3/4/5/6/7/8/9/10",
+      "expected": "1/2/3/4/5/6/7/8"
+    },
+    {
+      "name": "part_is_capped_at_100",
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "name": "empty_string",
+      "input": "",
+      "expected": ""
+    },
+    {
+      "name": "null_input",
+      "input": null,
+      "expected": ""
+    }
+  ]
+}

@@ -156,7 +156,8 @@ enum FileBatchPlanner {
             return
         }
         guard size <= FileFrame.maxTransferBytes else {
-            plan.problems.append("\(name) is larger than \(FileFrame.maxTransferBytes / (1024 * 1024)) MB")
+            let limit = ByteCountFormatter.string(fromByteCount: Int64(FileFrame.maxTransferBytes), countStyle: .binary)
+            plan.problems.append("\(name) is larger than \(limit)")
             return
         }
         plan.items.append(OutgoingItem(url: file, name: name, dir: dir, size: size))
