@@ -14,6 +14,20 @@ import Foundation
 /// the banner is re-posted text-only, so an icon problem can never suppress the banner itself.**
 @MainActor
 enum MacNotifier {
+    /// Without a delegate macOS silently drops a banner while *this* app is frontmost — which is
+    /// exactly when the user has just dragged files onto the dashboard, so the "3 files sent"
+    /// summary never appeared. Presenting in the foreground makes it show regardless.
+    private final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelegate {
+        nonisolated func userNotificationCenter(
+            _ center: UNUserNotificationCenter,
+            willPresent notification: UNNotification,
+            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+        ) {
+            completionHandler([.banner, .sound])
+        }
+    }
+
+    private static let presenter = ForegroundPresenter()
     private static var requested = false
     /// Non-nil while the (one-time) authorization request is in flight. `post` awaits this
     /// before reading settings, so a banner that races the very first request doesn't read a
@@ -24,6 +38,7 @@ enum MacNotifier {
     static func requestAuthorizationIfNeeded() {
         guard !requested else { return }
         requested = true
+        UNUserNotificationCenter.current().delegate = presenter
         pendingAuthorization = Task {
             do {
                 _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])

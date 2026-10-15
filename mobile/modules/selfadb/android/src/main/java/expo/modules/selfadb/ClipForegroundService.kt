@@ -562,31 +562,32 @@ class ClipForegroundService : Service() {
       return false
     }
     ClipBus.log("file saved to Downloads: $display (${source.length()} B)")
-    if (dir.isNullOrEmpty()) {
-      postFileNotification("Saved from your Mac", display, uri, mime)
-    } else {
-      postFolderNotification(FileSink.sanitizeDir(dir).substringBefore('/'))
-    }
+    postReceivedNotification(display, uri, mime, FileSink.sanitizeDir(dir).substringBefore('/').ifEmpty { null })
     return true
   }
 
-  private var folderTop: String? = null
-  private var folderCount = 0
-  private var folderLastAt = 0L
+  private var receivedCount = 0
+  private var receivedTop: String? = null
+  private var receivedLastAt = 0L
 
-  /** One notification for a whole received folder, updated in place: a folder can be hundreds of
-   *  files, and a banner each would bury the shade. A gap of [FOLDER_NOTIF_QUIET_MS] starts a
-   *  fresh count, so a second folder sent later announces itself again. */
-  private fun postFolderNotification(top: String) {
+  /** One notification for everything that arrives in a burst, updated in place. A folder can be
+   *  hundreds of files and a multi-file send several; a banner each would bury the shade. The
+   *  first file of a burst is announced by name and opens on tap; later ones turn it into a count
+   *  (`4 files in Photos` when they share a folder, else `3 files`). A gap of
+   *  [RECEIVED_NOTIF_QUIET_MS] starts a fresh burst, so a file sent later announces itself again. */
+  private fun postReceivedNotification(display: String, uri: Uri, mime: String, top: String?) {
     val now = SystemClock.elapsedRealtime()
-    if (top != folderTop || now - folderLastAt > FOLDER_NOTIF_QUIET_MS) {
-      folderTop = top
-      folderCount = 0
+    if (now - receivedLastAt > RECEIVED_NOTIF_QUIET_MS) receivedCount = 0
+    receivedLastAt = now
+    receivedCount++
+    if (receivedCount == 1) {
+      receivedTop = top
+      postFileNotification("Saved from your Mac", display, uri, mime, RECEIVED_NOTIF_ID)
+      return
     }
-    folderCount++
-    folderLastAt = now
-    val body = if (folderCount == 1) top else "$folderCount files in $top"
-    postFileNotification("Saved from your Mac", body, null, "*/*", FOLDER_NOTIF_ID)
+    if (receivedTop != top) receivedTop = null // the burst spans folders (or mixes folder and loose files)
+    val body = receivedTop?.let { "$receivedCount files in $it" } ?: "$receivedCount files"
+    postFileNotification("Saved from your Mac", body, null, "*/*", RECEIVED_NOTIF_ID)
   }
 
   /** Last post time per progress notification, so a fast transfer doesn't hammer the notification
@@ -1335,9 +1336,11 @@ class ClipForegroundService : Service() {
     /** First id for received-file notifications; each arrival takes the next one. */
     private const val FILE_NOTIF_ID_BASE = 2000
 
-    /** Fixed id for the single, updated-in-place notification of a received folder. */
-    private const val FOLDER_NOTIF_ID = 1005
-    private const val FOLDER_NOTIF_QUIET_MS = 10_000L
+    /** Fixed id for the single, updated-in-place notification of a burst of received files. */
+    private const val RECEIVED_NOTIF_ID = 1005
+
+    /** Quiet gap that ends a burst. Generous: a big file over the relay can take this long on its own. */
+    private const val RECEIVED_NOTIF_QUIET_MS = 30_000L
     /** Fixed ids for the two progress bars (one transfer per direction at a time: outbound is
      *  serialised on [shareExec], inbound is realistically one file). */
     private const val TRANSFER_OUT_NOTIF_ID = 1003
