@@ -21,7 +21,12 @@ import java.io.RandomAccessFile
  * transfers, [FileFrame.MAX_TRANSFER_BYTES] each, and anything idle past [TTL_MS] is swept on the
  * next frame.
  */
-class FileInbox(private val dir: File, private val log: (String) -> Unit) {
+class FileInbox(
+  private val dir: File,
+  /** Idle time after which a half-received transfer is swept. A parameter only so a test needn't wait two minutes. */
+  private val ttlMs: Long = TTL_MS,
+  private val log: (String) -> Unit,
+) {
 
   /** A transfer whose last chunk just landed. [file] lives in [dir] and is the caller's to consume
    *  and delete. */
@@ -107,7 +112,7 @@ class FileInbox(private val dir: File, private val log: (String) -> Unit) {
   /** Drop transfers whose sender went away mid-file, so a dead Mac can't leave temp files (or a
    *  map entry) behind forever. */
   private fun sweep() {
-    val cutoff = System.currentTimeMillis() - TTL_MS
+    val cutoff = System.currentTimeMillis() - ttlMs
     partials.entries.toList().forEach { (id, p) ->
       if (p.touched < cutoff) {
         log("file: transfer $id abandoned (${p.seen.size}/${p.count} chunks)")
