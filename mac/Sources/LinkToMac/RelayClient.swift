@@ -214,6 +214,9 @@ final class RelayClient {
     /// otherwise runs in no particular order.
     @ObservationIgnored private var fileSendChain: Task<Void, Never>?
 
+    /// Groups files arriving back to back into one banner (see `announceSaved`).
+    @ObservationIgnored private var receivedBurst = BurstCounter()
+
     /// Periodically sweeps abandoned inbound transfers while one is showing, so the "receiving"
     /// row can't outlive a phone that went away.
     @ObservationIgnored private var incomingSweeper: Task<Void, Never>?
@@ -556,7 +559,7 @@ final class RelayClient {
             case let .success(url):
                 self.log("file saved: \(url.path) (\(file.bytes.count) bytes)")
                 self.replyAck(frame)
-                Task { await MacNotifier.post(title: "Saved from your phone", body: url.lastPathComponent) }
+                self.announceSaved(url)
             case let .failure(error):
                 self.log("file save failed: \(error.localizedDescription)")
                 self.replyNack(frame, "The Mac couldn't write the file")
@@ -568,6 +571,15 @@ final class RelayClient {
                 }
             }
         }
+    }
+
+    /// One banner for a burst of received files, updated in place: the first is named, later ones
+    /// turn it into "N files" (a multi-file share from the phone would otherwise stack a banner
+    /// per file). Mirrors the Android side's coalescing.
+    private func announceSaved(_ url: URL) {
+        let n = receivedBurst.note()
+        let body = n == 1 ? url.lastPathComponent : "\(n) files"
+        Task { await MacNotifier.post(title: "Saved from your phone", body: body, identifier: "received-files") }
     }
 
     /// Send a batch of local files and folders to the phone, where they land in
