@@ -41,6 +41,24 @@ struct BatchProgress: Equatable {
     }
 }
 
+/// Counts files that arrive in one burst, so a multi-file send raises one updating banner instead
+/// of one per file. A gap longer than `gap` ends the burst and the next file starts a new count.
+struct BurstCounter {
+    let gap: TimeInterval
+    private var count = 0
+    private var last = Date.distantPast
+
+    init(gap: TimeInterval = 30) { self.gap = gap }
+
+    /// Record one arrival at `now`; returns its position in the current burst (1 for the first).
+    mutating func note(at now: Date = Date()) -> Int {
+        if now.timeIntervalSince(last) > gap { count = 0 }
+        last = now
+        count += 1
+        return count
+    }
+}
+
 /// A file queued for the phone. `dir` is the folder it sits in relative to the dropped root
 /// (`Photos/2024`), nil for a file dropped on its own.
 struct OutgoingItem: Equatable, Sendable {
