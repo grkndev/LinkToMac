@@ -60,9 +60,9 @@ final class StatusItemController {
                 let drop = StatusDropView(frame: button.bounds)
                 drop.autoresizingMask = [.width, .height]
                 drop.onDragEnter = { [weak self] in self?.showPanel(activate: false) }
-                drop.onDrop = { [weak self] url in
-                    NSLog("[LinkToMac] status item drop: %@", url.lastPathComponent)
-                    self?.client.sendFileToPhone(url)
+                drop.onDrop = { [weak self] urls in
+                    NSLog("[LinkToMac] status item drop: %d item(s)", urls.count)
+                    self?.client.sendFilesToPhone(urls)
                 }
                 button.addSubview(drop)
             }
@@ -133,7 +133,7 @@ final class StatusItemController {
 /// panel. Clicks are forwarded to the button underneath so normal toggling is unaffected.
 private final class StatusDropView: NSView {
     var onDragEnter: (() -> Void)?
-    var onDrop: ((URL) -> Void)?
+    var onDrop: (([URL]) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -152,10 +152,12 @@ private final class StatusDropView: NSView {
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
-              let first = urls.first
+        // `fileURLsOnly`: without it a dragged web link or a text clip also reads back as an NSURL.
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty
         else { return false }
-        onDrop?(first)
+        onDrop?(urls)
         return true
     }
 

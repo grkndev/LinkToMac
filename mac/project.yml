@@ -64,6 +64,22 @@ targets:
         # Mandatory: macOS won't register an unsandboxed app extension at all.
         CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
 
+  # Pure-logic tests (frame codec, ack window, sender, folder planner, inbox). No host app: the
+  # files under test are compiled straight into the bundle, so running them never launches the
+  # menu-bar agent or dials a relay. Only Foundation/AppKit-free-ish sources belong here.
+  LinkToMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+      - path: Sources/LinkToMac/RelayProtocol.swift
+      - path: Sources/LinkToMac/FileTransfer.swift
+      - path: Sources/LinkToMac/FileDrop.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
+        GENERATE_INFOPLIST_FILE: "YES"
+
 schemes:
   LinkToMac:
     build:
@@ -71,5 +87,9 @@ schemes:
         LinkToMac: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - LinkToMacTests
     archive:
       config: Release

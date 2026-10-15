@@ -81,21 +81,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The path arrives from our own extension, but it is still just a string from outside the
     /// process, so it is checked for being a real file before anything is read.
     func application(_ application: NSApplication, open urls: [URL]) {
+        var files: [URL] = []
         for url in urls where url.scheme == "linktomac" && url.host == "send" {
             guard let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "path" })?.value,
                   !path.isEmpty
             else { continue }
             let file = URL(fileURLWithPath: path)
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
-                  !isDirectory.boolValue
-            else {
-                NSLog("[LinkToMac] share extension handed over a path that isn't a file")
+            // Files and folders both go; anything that isn't on disk doesn't.
+            guard FileManager.default.fileExists(atPath: file.path) else {
+                NSLog("[LinkToMac] share extension handed over a path that doesn't exist")
                 continue
             }
-            client.sendFileToPhone(file)
+            files.append(file)
         }
+        // One call for all of them, so several arrivals are one batch with one summary.
+        client.sendFilesToPhone(files)
     }
 
     /// Clicking the Dock icon (with the window closed) reopens the dashboard.
