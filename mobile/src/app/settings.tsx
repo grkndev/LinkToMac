@@ -12,8 +12,7 @@ import SelfAdb from "@/features/selfadb/client";
 import { useClipBootContext } from "@/features/selfadb/clip-boot-context";
 import type { CaptureState } from "@/features/selfadb/use-clip-boot";
 import { usePermissionSettings } from "@/features/selfadb/use-permission-settings";
-import { Icon, RNHostView } from "@expo/ui/jetpack-compose";
-import { View } from "react-native";
+import { Icon } from "@expo/ui/jetpack-compose";
 
 /** Row hint per capture state — the self-ADB pipeline's health, reported not gated on. */
 const CAPTURE_HINT: Record<CaptureState, string> = {

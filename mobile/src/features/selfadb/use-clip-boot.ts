@@ -75,7 +75,11 @@ export function useClipBoot(): ClipBoot {
   const [refreshing, setRefreshing] = useState(false);
   const busy = useRef(false);
   const captureRef = useRef(capture);
-  captureRef.current = capture;
+  // Mirrored in an effect, not during render: the late-result / foreground handlers below read it
+  // after the commit, so they always see the committed value.
+  useEffect(() => {
+    captureRef.current = capture;
+  }, [capture]);
 
   const refresh = useCallback(async () => {
     if (busy.current) return;
@@ -146,6 +150,9 @@ export function useClipBoot(): ClipBoot {
   }, []);
 
   useEffect(() => {
+    // Deliberate kick-off of the boot state machine: it starts the native autoStart and reflects
+    // that in state (setRefreshing). Don't defer or reorder it — the boot gate depends on it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
     const sub = AppState.addEventListener('change', (next) => {
       // On return to foreground, retry the recoverable states. Don't disturb a

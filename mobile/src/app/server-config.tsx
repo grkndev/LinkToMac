@@ -96,8 +96,8 @@ export default function ServerConfigScreen() {
     >
         <Text style={[styles.intro, { color: colors.onSurfaceVariant }]}>
           On the same Wi-Fi the app connects straight to your Mac (LAN-direct, no relay). A relay
-          server is only needed to sync while you're away — leave it blank for LAN-only. The
-          password must match the server's password; use TLS (wss://) over the internet.
+          server is only needed to sync while you&apos;re away — leave it blank for LAN-only. The
+          password must match the server&apos;s password; use TLS (wss://) over the internet.
         </Text>
 
         <TextField
