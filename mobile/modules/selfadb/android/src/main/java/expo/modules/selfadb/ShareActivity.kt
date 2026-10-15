@@ -51,11 +51,11 @@ abstract class ShareActivity : Activity() {
   /** Returns true when a worker thread took over and owns the [finish] call. */
   private fun handle(): Boolean {
     val intent = intent ?: return false
-    val uri = streamExtra(intent)
+    val uris = streamExtras(intent)
 
     // A shared link or text block has no stream — send it as a clip, which is what the user
     // means by "share this to my Mac" for text, and costs nothing to support here.
-    if (uri == null) {
+    if (uris.isEmpty()) {
       val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
       if (text.isNullOrBlank()) {
         toast(NOTHING_TO_SEND)
@@ -74,28 +74,46 @@ abstract class ShareActivity : Activity() {
       return false
     }
 
-    val meta = queryMeta(uri)
-    val mime = contentResolver.getType(uri) ?: intent.type ?: "application/octet-stream"
-    if (meta.size > FileFrame.MAX_TRANSFER_BYTES) {
-      toast("${meta.name} is too large (max ${FileFrame.MAX_TRANSFER_BYTES / (1024 * 1024)} MB)")
+    // Name + size + type for each, up front: it is cheap, and lets a too-large file be refused
+    // before a single byte is copied. One oversized file in a multi-selection is skipped, not
+    // fatal to the rest.
+    val picked = ArrayList<Pair<Uri, Meta>>()
+    var skipped = 0
+    for (uri in uris) {
+      val meta = queryMeta(uri)
+      if (meta.size > FileFrame.MAX_TRANSFER_BYTES) skipped++ else picked += uri to meta
+    }
+    if (picked.isEmpty()) {
+      toast("Too large to send (max ${FileFrame.MAX_TRANSFER_BYTES / (1024 * 1024)} MB each)")
       return false
     }
+    if (skipped > 0) toast("$skipped file(s) skipped: over ${FileFrame.MAX_TRANSFER_BYTES / (1024 * 1024)} MB")
 
     // Anything past a single chunk takes long enough that silence reads as a dead button, so
     // acknowledge the start here; ClipForegroundService toasts the outcome either way.
-    if (meta.size > FileFrame.CHUNK_RAW_BYTES) toast("Sending ${meta.name}…")
+    if (picked.size > 1) {
+      toast("Sending ${picked.size} files…")
+    } else if (picked[0].second.size > FileFrame.CHUNK_RAW_BYTES) {
+      toast("Sending ${picked[0].second.name}…")
+    }
 
     Thread {
-      var staged: File? = null
+      val staged = ArrayList<File>()
       try {
-        staged = stage(uri)
+        val names = ArrayList<String>()
+        val mimes = ArrayList<String>()
+        for ((uri, meta) in picked) {
+          staged += stage(uri)
+          names += meta.name
+          mimes += contentResolver.getType(uri) ?: intent.type ?: "application/octet-stream"
+        }
         // Can be refused with ForegroundServiceStartNotAllowedException if this activity died
         // while we were copying — Android 12+ only permits a foreground start. Inside the try so
         // that lands as a toast rather than an uncaught exception on this thread.
-        ClipForegroundService.submitShare(this, staged.absolutePath, meta.name, mime, disposition)
+        ClipForegroundService.submitShare(this, staged.map { it.absolutePath }, names, mimes, disposition)
       } catch (e: Exception) {
         ClipBus.log("share: send not started: ${e.message}")
-        staged?.delete() // nothing will pick it up now; don't leave a copy of the file behind
+        staged.forEach { it.delete() } // nothing will pick them up now; don't leave copies behind
         runOnUiThread { toast(COULD_NOT_SEND) }
       }
       runOnUiThread { finish() }
@@ -142,13 +160,24 @@ abstract class ShareActivity : Activity() {
 
   private class Meta(val name: String, val size: Long)
 
-  @Suppress("DEPRECATION") // the typed overload is API 33+; this module ships to API 30.
-  private fun streamExtra(intent: Intent): Uri? =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+  /** Every stream the intent carries: one for `ACTION_SEND`, a list for `ACTION_SEND_MULTIPLE`. */
+  @Suppress("DEPRECATION") // the typed overloads are API 33+; this module ships to API 30.
+  private fun streamExtras(intent: Intent): List<Uri> {
+    if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+      val list = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+      } else {
+        intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+      }
+      return list.orEmpty()
+    }
+    val one = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
     } else {
       intent.getParcelableExtra(Intent.EXTRA_STREAM)
     }
+    return listOfNotNull(one)
+  }
 
   private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
