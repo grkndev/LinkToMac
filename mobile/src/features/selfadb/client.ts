@@ -20,6 +20,7 @@ export type {
   LogEvent,
   NotifAppFilter,
   NotifFilterMode,
+  PermissionRequestResult,
   RelayEvent,
   StatEvent,
   StatusEvent,

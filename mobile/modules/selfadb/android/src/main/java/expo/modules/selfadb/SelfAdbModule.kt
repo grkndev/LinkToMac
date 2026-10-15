@@ -613,6 +613,12 @@ class SelfAdbModule : Module() {
       )
     }
 
+    /** Open this app's system "App info" page — where a permission Android won't prompt for can
+     *  still be granted by hand. */
+    AsyncFunction("openAppSettings") {
+      openAppSettings()
+    }
+
     AsyncFunction("hasIgnoreBatteryOptimizations") {
       val pm = appCtx.getSystemService(Context.POWER_SERVICE) as PowerManager
       pm.isIgnoringBatteryOptimizations(appCtx.packageName)
@@ -759,22 +765,19 @@ class SelfAdbModule : Module() {
     }
   }
 
-  /** Parse the Mac's telemetry JSON into an event/result map, or null if it can't be parsed. Keeps
-   *  the JS side free of raw-string parsing. The Mac merges battery + BLE proximity into one `stat`
-   *  (`{"level":85,"charging":true,"prox":"near","rssi":-67}`) and omits whichever it lacks — a
-   *  desktop Mac sends no battery, proximity-off sends no `prox` — so every field is optional and
-   *  only present ones are forwarded; the JS hooks each pick out their own and ignore the rest. */
   /**
-   * Ask for runtime [permissions], and when Android refuses WITHOUT showing a dialog, send the
-   * user to this app's settings page instead of silently doing nothing.
+   * Ask for runtime [permissions] and report what happened, so JS can explain it:
+   *  - `"granted"` — done (and [onGranted] ran);
+   *  - `"denied"`  — a person answered the prompt with "Don't allow";
+   *  - `"blocked"` — Android refused WITHOUT showing a prompt.
    *
-   * A refusal that comes back almost instantly can't have been a person tapping "Don't allow" —
-   * the system just declined to ask. That happens once a permission has been denied twice
-   * ("don't ask again"), and it is also what a sideloaded APK sees for the SMS permissions: the
-   * first request is blocked as a restricted setting, the user allows it under App info, comes
-   * back, taps the button again — and the system still shows nothing, so the button looked dead.
-   * App info is the one place the grant can still be made by hand; the Settings screen re-checks
-   * the grant when the app returns to the foreground, so the row disappears once it is.
+   * A refusal that comes back almost instantly ([INSTANT_DENIAL_MS]) can't have been a person
+   * tapping "Don't allow" — the system just declined to ask. That happens once a permission has
+   * been denied twice ("don't ask again"), and it is also what a sideloaded APK sees for the SMS
+   * permissions: the first request is blocked as a restricted setting, the user allows it under
+   * App info, comes back, taps the button again — and the system still shows nothing, which used
+   * to look like a dead button. App info is the one place the grant can still be made by hand;
+   * JS tells the user so and offers [openAppSettings].
    */
   private fun requestWithSettingsFallback(
     promise: Promise,
@@ -784,19 +787,20 @@ class SelfAdbModule : Module() {
   ) {
     val manager = appContext.permissions
     if (manager == null) {
-      promise.resolve(false)
+      promise.resolve("denied")
       return
     }
     val askedAt = SystemClock.elapsedRealtime()
     manager.askForPermissions({ result ->
-      val granted = isGranted(result)
-      if (granted) {
+      if (isGranted(result)) {
         onGranted()
+        promise.resolve("granted")
       } else if (SystemClock.elapsedRealtime() - askedAt < INSTANT_DENIAL_MS) {
-        ClipBus.log("permission ${permissions.first()} refused without a prompt; opening app settings")
-        openAppSettings()
+        ClipBus.log("permission ${permissions.first()} refused without a prompt")
+        promise.resolve("blocked")
+      } else {
+        promise.resolve("denied")
       }
-      promise.resolve(granted)
     }, *permissions)
   }
 
@@ -811,6 +815,11 @@ class SelfAdbModule : Module() {
     }
   }
 
+  /** Parse the Mac's telemetry JSON into an event/result map, or null if it can't be parsed. Keeps
+   *  the JS side free of raw-string parsing. The Mac merges battery + BLE proximity into one `stat`
+   *  (`{"level":85,"charging":true,"prox":"near","rssi":-67}`) and omits whichever it lacks — a
+   *  desktop Mac sends no battery, proximity-off sends no `prox` — so every field is optional and
+   *  only present ones are forwarded; the JS hooks each pick out their own and ignore the rest. */
   private fun parseStat(json: String): Map<String, Any?>? = try {
     val o = JSONObject(json)
     val m = HashMap<String, Any?>()

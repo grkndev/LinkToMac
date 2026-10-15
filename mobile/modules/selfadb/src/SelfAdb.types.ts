@@ -42,6 +42,15 @@ export type NotifAppFilter = {
   exclude: string[];
 };
 
+/**
+ * Outcome of a runtime-permission request.
+ *  - `granted` — now held.
+ *  - `denied`  — a person answered the system prompt with "Don't allow".
+ *  - `blocked` — Android refused without showing a prompt (a permission denied twice, or the
+ *    restricted-settings block a sideloaded APK hits for SMS). Only App info can still grant it.
+ */
+export type PermissionRequestResult = 'granted' | 'denied' | 'blocked';
+
 export type StatusEvent = {
   /** adb connection: "idle" | "connecting" | "connected" | "failed" */
   adb: string;
