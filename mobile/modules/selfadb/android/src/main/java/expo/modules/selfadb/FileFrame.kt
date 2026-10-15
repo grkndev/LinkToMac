@@ -108,13 +108,35 @@ class FileFrame(
       // makes the receiver ack, and a "Send as a File" transfer wants that receipt at any size.
       // A clipboard send passes no id, so its bytes stay exactly what pre-chunking builds sent.
       if (id != null) header.put("id", id).put("seq", seq).put("n", count)
-      val headerBytes = header.toString().toByteArray(Charsets.UTF_8)
+      val headerBytes = fitted(header).toString().toByteArray(Charsets.UTF_8)
       val out = ByteArrayOutputStream(2 + headerBytes.size + length)
       out.write((headerBytes.size shr 8) and 0xFF)
       out.write(headerBytes.size and 0xFF)
       out.write(headerBytes)
       out.write(bytes, offset, length)
       return out.toByteArray()
+    }
+
+    /** The header length is a u16, so it can never exceed this. */
+    private const val MAX_HEADER_BYTES = 0xFFFF
+
+    /** Keep a header under the u16 limit — mirrors the Mac's `FileFrame.fitted` (a shared vector
+     *  pins both). A file name and folder path are user data of unbounded length, and a longer
+     *  header would be truncated by the length prefix into something no receiver can parse. Shed
+     *  the folder first (the file still arrives, flat), then shorten the name. */
+    private fun fitted(header: JSONObject): JSONObject {
+      fun size() = header.toString().toByteArray(Charsets.UTF_8).size
+      if (size() <= MAX_HEADER_BYTES) return header
+      header.remove("dir")
+      if (size() <= MAX_HEADER_BYTES) return header
+      var name = header.optString("name")
+      while (size() > MAX_HEADER_BYTES && name.length > 16) {
+        name = name.take(name.length / 2)
+        // Don't leave half a surrogate pair at the cut.
+        if (name.last().isHighSurrogate()) name = name.dropLast(1)
+        header.put("name", name)
+      }
+      return header
     }
 
     /** Build a zero-byte [OP_ACK] frame for one stored chunk. */
