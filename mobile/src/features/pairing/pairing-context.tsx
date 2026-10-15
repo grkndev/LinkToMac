@@ -20,8 +20,6 @@ type PairingContextValue = {
   setPairing: (pairing: Pairing, server?: ServerConfig | null) => Promise<void>;
   setServer: (server: ServerConfig) => Promise<void>;
   unpair: () => Promise<void>;
-  paused: boolean;
-  setPaused: (paused: boolean) => void;
 };
 
 const PairingContext = createContext<PairingContextValue | null>(null);
@@ -38,7 +36,6 @@ const PairingContext = createContext<PairingContextValue | null>(null);
 export function PairingProvider({ children }: { children: ReactNode }) {
   const [pairing, setPairingState] = useState<Pairing | null | undefined>(undefined);
   const [server, setServerState] = useState<ServerConfig | null | undefined>(undefined);
-  const [paused, setPausedState] = useState(false);
 
   useEffect(() => {
     // A SecureStore read failure must not strand `pairing` at undefined (which the
@@ -50,8 +47,6 @@ export function PairingProvider({ children }: { children: ReactNode }) {
     loadServerConfig()
       .then(setServerState)
       .catch(() => setServerState(null));
-    // Seed the send gate from the persisted native value so it survives app/service restarts.
-    SelfAdb.relayIsSendPaused().then(setPausedState).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -85,23 +80,11 @@ export function PairingProvider({ children }: { children: ReactNode }) {
     await SelfAdb.clearRelay().catch(() => {});
     setPairingState(null);
     setServerState(null);
-    setPausedState(false);
-  }, []);
-
-  const setPaused = useCallback(async (next: boolean) => {
-    // Optimistic flip for a snappy toggle, but roll back if the native gate rejects —
-    // otherwise the UI shows "paused" while clips keep flowing (or vice versa) until relaunch.
-    setPausedState(next);
-    try {
-      await SelfAdb.relaySetPaused(next);
-    } catch {
-      setPausedState(!next);
-    }
   }, []);
 
   const value = useMemo(
-    () => ({ pairing, server, setPairing, setServer, unpair, paused, setPaused }),
-    [pairing, server, setPairing, setServer, unpair, paused, setPaused],
+    () => ({ pairing, server, setPairing, setServer, unpair }),
+    [pairing, server, setPairing, setServer, unpair],
   );
 
   return <PairingContext.Provider value={value}>{children}</PairingContext.Provider>;

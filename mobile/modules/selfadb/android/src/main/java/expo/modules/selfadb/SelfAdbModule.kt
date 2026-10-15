@@ -11,7 +11,9 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
+import expo.modules.interfaces.permissions.PermissionsResponse
 import expo.modules.interfaces.permissions.PermissionsStatus
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -71,6 +73,9 @@ class SelfAdbModule : Module() {
   }
 
   private companion object {
+    /** A permission refusal faster than this was the system declining to prompt, not a user. */
+    const val INSTANT_DENIAL_MS = 600L
+
     // Cap the daemon-log read so a single adb transfer never exceeds libadb's
     // maxdata-sized read buffer (which would throw BufferOverflowException). 64 KB still
     // overflowed on One UI (observed 2026-07-06 on a spam-bloated clip.log) — 32 KB holds.
@@ -388,21 +393,6 @@ class SelfAdbModule : Module() {
       ClipBus.lastRelay ?: mapOf("status" to "disconnected", "peerOnline" to false, "lastError" to null)
     }
 
-    /** Live pause/resume of outbound (Mac-bound) forwarding; stays connected to receive. */
-    AsyncFunction("relaySetPaused") { paused: Boolean ->
-      val svc = ClipForegroundService.instance
-      if (svc != null) {
-        svc.setPaused(paused)
-      } else {
-        ClipForegroundService.setClipSendPaused(appCtx, paused)
-      }
-    }
-
-    /** Whether outbound forwarding to the Mac is currently paused (persisted). */
-    AsyncFunction("relayIsSendPaused") {
-      ClipForegroundService.getClipSendPaused(appCtx)
-    }
-
     // ---- Proximity auto-lock (BLE presence beacon) ---------------------------
 
     /** Enable/disable advertising the BLE presence beacon (Mac locks when this phone leaves). */
@@ -566,16 +556,6 @@ class SelfAdbModule : Module() {
       ClipForegroundService.setNotifAppFilter(appCtx, mode, include, exclude)
     }
 
-    // ---- Image sending (phone clipboard image -> Mac) ------------------------
-
-    AsyncFunction("getSendImages") {
-      ClipForegroundService.getSendImages(appCtx)
-    }
-
-    AsyncFunction("setSendImages") { enabled: Boolean ->
-      ClipForegroundService.setSendImages(appCtx, enabled)
-    }
-
     // ---- Messages mirroring (SMS store -> Mac) -------------------------------
 
     /** Whether we hold BOTH READ_SMS and READ_CONTACTS (needed to read texts + resolve names). */
@@ -587,16 +567,12 @@ class SelfAdbModule : Module() {
     /** Request READ_SMS + READ_CONTACTS at runtime; resolves whether SMS reading is now possible
      *  (READ_SMS granted — contacts only affect name resolution). On grant, kick an immediate sync. */
     AsyncFunction("requestSmsAccess") { promise: Promise ->
-      val manager = appContext.permissions
-      if (manager == null) {
-        promise.resolve(false)
-        return@AsyncFunction
-      }
-      manager.askForPermissions({ result ->
-        val granted = result[Manifest.permission.READ_SMS]?.status == PermissionsStatus.GRANTED
-        if (granted) ClipForegroundService.instance?.startSmsMirroring()
-        promise.resolve(granted)
-      }, Manifest.permission.READ_SMS, Manifest.permission.READ_CONTACTS)
+      requestWithSettingsFallback(
+        promise,
+        arrayOf(Manifest.permission.READ_SMS, Manifest.permission.READ_CONTACTS),
+        isGranted = { it[Manifest.permission.READ_SMS]?.status == PermissionsStatus.GRANTED },
+        onGranted = { ClipForegroundService.instance?.startSmsMirroring() },
+      )
     }
 
     /** Whether SMS messages are forwarded to the Mac (persisted, default true). Soft pause that
@@ -630,14 +606,11 @@ class SelfAdbModule : Module() {
     /** Request SEND_SMS at runtime; resolves whether replies can now be sent. Surfaced from the
      *  "Grant SMS Send Access" row shown after a reply fails for lack of permission. */
     AsyncFunction("requestSendSmsAccess") { promise: Promise ->
-      val manager = appContext.permissions
-      if (manager == null) {
-        promise.resolve(false)
-        return@AsyncFunction
-      }
-      manager.askForPermissions({ result ->
-        promise.resolve(result[Manifest.permission.SEND_SMS]?.status == PermissionsStatus.GRANTED)
-      }, Manifest.permission.SEND_SMS)
+      requestWithSettingsFallback(
+        promise,
+        arrayOf(Manifest.permission.SEND_SMS),
+        isGranted = { it[Manifest.permission.SEND_SMS]?.status == PermissionsStatus.GRANTED },
+      )
     }
 
     AsyncFunction("hasIgnoreBatteryOptimizations") {
@@ -791,6 +764,53 @@ class SelfAdbModule : Module() {
    *  (`{"level":85,"charging":true,"prox":"near","rssi":-67}`) and omits whichever it lacks — a
    *  desktop Mac sends no battery, proximity-off sends no `prox` — so every field is optional and
    *  only present ones are forwarded; the JS hooks each pick out their own and ignore the rest. */
+  /**
+   * Ask for runtime [permissions], and when Android refuses WITHOUT showing a dialog, send the
+   * user to this app's settings page instead of silently doing nothing.
+   *
+   * A refusal that comes back almost instantly can't have been a person tapping "Don't allow" —
+   * the system just declined to ask. That happens once a permission has been denied twice
+   * ("don't ask again"), and it is also what a sideloaded APK sees for the SMS permissions: the
+   * first request is blocked as a restricted setting, the user allows it under App info, comes
+   * back, taps the button again — and the system still shows nothing, so the button looked dead.
+   * App info is the one place the grant can still be made by hand; the Settings screen re-checks
+   * the grant when the app returns to the foreground, so the row disappears once it is.
+   */
+  private fun requestWithSettingsFallback(
+    promise: Promise,
+    permissions: Array<String>,
+    isGranted: (Map<String, PermissionsResponse>) -> Boolean,
+    onGranted: () -> Unit = {},
+  ) {
+    val manager = appContext.permissions
+    if (manager == null) {
+      promise.resolve(false)
+      return
+    }
+    val askedAt = SystemClock.elapsedRealtime()
+    manager.askForPermissions({ result ->
+      val granted = isGranted(result)
+      if (granted) {
+        onGranted()
+      } else if (SystemClock.elapsedRealtime() - askedAt < INSTANT_DENIAL_MS) {
+        ClipBus.log("permission ${permissions.first()} refused without a prompt; opening app settings")
+        openAppSettings()
+      }
+      promise.resolve(granted)
+    }, *permissions)
+  }
+
+  private fun openAppSettings() {
+    try {
+      appCtx.startActivity(
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", appCtx.packageName, null))
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      )
+    } catch (e: Exception) {
+      ClipBus.log("couldn't open app settings: ${e.message}")
+    }
+  }
+
   private fun parseStat(json: String): Map<String, Any?>? = try {
     val o = JSONObject(json)
     val m = HashMap<String, Any?>()
