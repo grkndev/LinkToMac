@@ -213,6 +213,9 @@ class ClipForegroundService : Service() {
       }
       if (files.isNotEmpty()) shareExec.execute { sendShared(files, disp) }
     }
+    // The notification's Cancel button for an outgoing transfer. Handled on the main thread, so
+    // it only flips a flag and wakes the sender; the send loop does the actual stopping.
+    if (intent?.action == ACTION_CANCEL_TRANSFER) cancelShare()
     return START_STICKY
   }
 
@@ -583,7 +586,9 @@ class ClipForegroundService : Service() {
    * Its own low-importance channel: this is a running status, not an event, and it must never
    * make a sound or a heads-up on every file.
    */
-  private fun postTransferProgress(notifId: Int, title: String, name: String, done: Int, total: Int) {
+  private fun postTransferProgress(
+    notifId: Int, title: String, name: String, done: Int, total: Int, cancellable: Boolean = false,
+  ) {
     val now = SystemClock.elapsedRealtime()
     val complete = done >= total
     if (!complete && now - (lastProgressPost[notifId] ?: 0L) < PROGRESS_THROTTLE_MS) return
@@ -601,6 +606,7 @@ class ClipForegroundService : Service() {
       @Suppress("DEPRECATION") Notification.Builder(this)
     }
     val percent = if (total > 0) done * 100 / total else 0
+    if (cancellable) builder.addAction(cancelTransferAction())
     nm.notify(
       notifId,
       builder
@@ -616,6 +622,21 @@ class ClipForegroundService : Service() {
         .build()
     )
   }
+
+  /** "Cancel" on the outgoing progress notification. A `getService` PendingIntent to our own
+   *  already-running foreground service: the Android 12+ notification-trampoline ban is about
+   *  activities started from a service, not this. */
+  private fun cancelTransferAction(): Notification.Action =
+    Notification.Action.Builder(
+      Icon.createWithResource(this, R.drawable.ic_stat_link),
+      "Cancel",
+      PendingIntent.getService(
+        this,
+        REQ_CANCEL_TRANSFER,
+        Intent(this, ClipForegroundService::class.java).setAction(ACTION_CANCEL_TRANSFER),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      ),
+    ).build()
 
   /** Take the progress bar down — on completion, on failure, and on a rejected chunk. */
   private fun clearTransferProgress(notifId: Int) {
@@ -676,6 +697,22 @@ class ClipForegroundService : Service() {
   // with it), so this side only has a path. Runs on [shareExec] — a single thread, so two
   // transfers can never interleave on one ack window or one socket.
 
+  /** Set by the notification's Cancel button; read by the send loop between chunks. Reset at the
+   *  start of each batch, so a Cancel can only ever stop the batch the user was looking at. */
+  @Volatile private var shareCancelled = false
+
+  /** Stop the outgoing batch: nothing more is read or sent, and a sender blocked on the ack window
+   *  (or the final drain) is woken at once — the same over-release trick a nack uses. There is no
+   *  `cancel` frame: an old peer would parse an unknown `op` as a data chunk, so the Mac simply
+   *  drops the partial file with its idle sweep. */
+  private fun cancelShare() {
+    shareCancelled = true
+    transfer?.let {
+      it.failed = CANCELLED
+      it.window.release(ACK_WINDOW + 1)
+    }
+  }
+
   /** A file [ShareActivity] already staged in our cache. */
   private class SharedFile(val path: String, val name: String, val mime: String)
 
@@ -683,6 +720,7 @@ class ClipForegroundService : Service() {
    *  outcome once, however many files there were: this is a fire-and-forget action with no app UI
    *  to update, and one toast per file would flash past unread. */
   private fun sendShared(files: List<SharedFile>, disp: String) {
+    shareCancelled = false
     try {
       val link = conn
       when {
@@ -715,10 +753,12 @@ class ClipForegroundService : Service() {
     val totalChunks = chunkCounts.sum()
     var chunksBefore = 0
     var sent = 0
+    var cancelled = false
     val failures = ArrayList<String>()
 
     try {
       for ((i, f) in files.withIndex()) {
+        if (shareCancelled) { cancelled = true; break }
         val file = File(f.path)
         val title = if (files.size > 1) "Sending ${i + 1}/${files.size} to your Mac" else "Sending to your Mac"
         val before = chunksBefore
@@ -727,12 +767,17 @@ class ClipForegroundService : Service() {
         } else {
           sendAsFile(link, file, f.name, f.mime) { chunk, count ->
             val pct = chunk * 100 / count
-            postTransferProgress(TRANSFER_OUT_NOTIF_ID, title, "${f.name} ($pct%)", before + chunk, totalChunks)
+            postTransferProgress(
+              TRANSFER_OUT_NOTIF_ID, title, "${f.name} ($pct%)", before + chunk, totalChunks, cancellable = true,
+            )
           }
         }
         chunksBefore += chunkCounts[i]
         if (failure == null) {
           sent++
+        } else if (failure == CANCELLED) {
+          cancelled = true
+          break
         } else {
           failures += failure
           // The Mac or the link is gone: the rest would each wait out the same timeout.
@@ -744,6 +789,7 @@ class ClipForegroundService : Service() {
     }
 
     return when {
+      cancelled -> "Cancelled — $sent of ${files.size} sent"
       files.size == 1 -> if (sent == 1) "Saved ${files[0].name} on your Mac" else failures.first()
       failures.isEmpty() -> "Saved $sent files on your Mac"
       sent == 0 -> failures.first()
@@ -798,8 +844,9 @@ class ClipForegroundService : Service() {
             ClipBus.log("share: timed out waiting for ack ${seq - ACK_WINDOW} of $id")
             return MAC_STOPPED
           }
-          // A nack wakes this with permits to spare; the reason says why the Mac refused.
-          t.failed?.let { return "$name: $it" }
+          // A nack or a cancel wakes this with permits to spare; `failed` says which.
+          t.failed?.let { return if (it == CANCELLED) CANCELLED else "$name: $it" }
+          if (shareCancelled) return CANCELLED
           val read = fill(input, buf)
           if (read <= 0) return "Couldn't read $name"
           // Re-read the transport each chunk: a LAN link can drop to the relay mid-transfer.
@@ -822,7 +869,7 @@ class ClipForegroundService : Service() {
           ClipBus.log("share: transfer $id never fully acked")
           return MAC_STOPPED
         }
-        t.failed?.let { return "$name: $it" }
+        t.failed?.let { return if (it == CANCELLED) CANCELLED else "$name: $it" }
       }
       ClipBus.log("share: file $id delivered")
       return null
@@ -1327,6 +1374,7 @@ class ClipForegroundService : Service() {
     private const val PROGRESS_THROTTLE_MS = 400L
     /** PendingIntent request code for the notification's "Send clipboard" action. */
     private const val REQ_SEND_CLIPBOARD = 1
+    private const val REQ_CANCEL_TRANSFER = 2
     private const val EXTRA_PORT = "port"
 
     /** Start-intent action carrying a manually captured clip (see [submitClip]). */
@@ -1335,6 +1383,9 @@ class ClipForegroundService : Service() {
 
     /** Start-intent action carrying a share-sheet send (see [submitShare]). */
     private const val ACTION_SUBMIT_SHARE = "expo.modules.selfadb.SUBMIT_SHARE"
+
+    /** Start-intent action behind the outgoing progress notification's Cancel button. */
+    private const val ACTION_CANCEL_TRANSFER = "expo.modules.selfadb.CANCEL_TRANSFER"
     private const val EXTRA_PATHS = "paths"
     private const val EXTRA_NAMES = "names"
     private const val EXTRA_MIMES = "mimes"
@@ -1422,6 +1473,10 @@ class ClipForegroundService : Service() {
 
     /** The reason [sendAsFile] gives when acks stop coming — also what ends a whole batch early. */
     private const val MAC_STOPPED = "Your Mac stopped responding"
+
+    /** What [sendAsFile] returns (and what a cancelled [Transfer] records) when the user pressed
+     *  Cancel — never shown as a failure, it ends the batch quietly. */
+    private const val CANCELLED = "Cancelled"
 
     // Direct Share ids + categories. The categories must match res/xml/selfadb_shortcuts.xml
     // exactly or the system refuses to use the shortcut as a share target.
