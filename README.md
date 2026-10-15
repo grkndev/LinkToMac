@@ -117,10 +117,13 @@ A small **menu-bar app** on the Mac and a **background app** on Android stay con
   both ways. Copies on the phone are always sent; the Mac side still has its own switches
   (**Send copies to Android**, **Sync images**) if you want a one-way flow.
 - **Send a file** — from the phone, share anything and pick **Send to Clipboard** (images, ready
-  to paste) or **Send as a File** (any type, original quality). From the Mac, drop a file on the
-  dashboard window or the menu-bar icon.
+  to paste) or **Send as a File** (any type, original quality, several at once). Or open **Files**
+  on the phone's Home screen: **Send files**, **Send folder** (its structure is kept), the history of
+  everything sent and received (tap to open, **Retry** a failed send). From the Mac, drop files
+  and/or folders on the dashboard window or the menu-bar icon.
   Files land in `Downloads/Link to Mac` on the phone, and in the folder you pick under
-  **Settings ▸ Files** on the Mac. Both ends show progress while it transfers.
+  **Settings ▸ Files** on the Mac. Up to **1 GB per file**, with progress on both ends; if a
+  transfer is cut off, sending the same file again **resumes** where it stopped.
 - **Lock Mac** — tap **Lock Mac** on the phone's Home screen (needs the Mac connected).
 - **Auto-lock when you leave** — turn it on in **both** apps: the phone's Settings
   (_Auto-lock Mac when I leave_) and the Mac menu (_Lock when phone leaves_). On the Mac you can
