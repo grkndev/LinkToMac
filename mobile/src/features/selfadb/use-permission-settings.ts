@@ -17,7 +17,6 @@ export function usePermissionSettings() {
   const [smsMirrorOn, setSmsMirrorOn] = useState(true);
   const [smsAccess, setSmsAccess] = useState<boolean | null>(null);
   const [sendSmsAccess, setSendSmsAccess] = useState<boolean | null>(null);
-  const [sendImagesOn, setSendImagesOn] = useState(true);
   const [batteryOk, setBatteryOk] = useState<boolean | null>(null);
   const [proximityOn, setProximityOn] = useState(false);
   // True while a proximity toggle is mid-flight. The permission prompt below
@@ -64,9 +63,6 @@ export function usePermissionSettings() {
     SelfAdb.getSmsForwarding()
       .then(setSmsMirrorOn)
       .catch(() => {});
-    SelfAdb.getSendImages()
-      .then(setSendImagesOn)
-      .catch(() => {});
     recheckGrants();
 
     const sub = AppState.addEventListener('change', (next) => {
@@ -88,11 +84,6 @@ export function usePermissionSettings() {
   const toggleSmsMirror = (on: boolean) => {
     setSmsMirrorOn(on);
     SelfAdb.setSmsForwarding(on).catch(() => {});
-  };
-
-  const toggleSendImages = (on: boolean) => {
-    setSendImagesOn(on);
-    SelfAdb.setSendImages(on).catch(() => {});
   };
 
   // Auto-lock needs Nearby Devices to advertise the BLE beacon; ask before enabling.
@@ -157,8 +148,6 @@ export function usePermissionSettings() {
     requestSmsPermission,
     sendSmsAccess,
     requestSendSmsPermission,
-    sendImagesOn,
-    toggleSendImages,
     batteryOk,
     proximityOn,
     toggleProximity,

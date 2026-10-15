@@ -362,8 +362,9 @@ the pair for good. Three contracts around it (all verified on-device):
   it into a **time-bounded recent-writes map** (10 s window, consumed on match — a single slot
   bounced rapid A-then-B sequences back to the Mac) and writes it to the device clipboard; the
   resulting `onClip` from the daemon is recognized and swallowed.
-- A `sendPaused` flag gates **outbound** (Mac-bound) forwarding only — inbound clips from the
-  Mac still arrive while paused. This backs the *"pause sending from the phone"* setting.
+- There is no send gate on the phone any more: every captured clip is forwarded. (A "Send copies"
+  / "Send images" pair of switches used to live in the phone's Settings; they were removed as
+  unneeded. The Mac keeps its own outbound switches.)
 - **Clipboard images (`file`, bidirectional):**
   - *Mac → phone (inbound):* `applyFile` decodes the frame's `u16 header-len ‖ header JSON ‖ raw
     bytes` plaintext, writes the image to `cacheDir/clips`, and puts it on the system clipboard as a
@@ -395,7 +396,7 @@ the pair for good. Three contracts around it (all verified on-device):
   - *Echo:* the Mac→phone write lands on the clipboard, the daemon re-reads it, and would bounce it
     back — so `applyFile` stamps the raw bytes' **SHA-256** in `recentImageWrites` and `captureImage`
     drops the matching re-capture (the image analogue of the text `recentWrites` map). The outbound
-    path also honors `sendPaused`.
+    path forwards unconditionally.
 
 ### 3.5 Relay client + BLE beacon (Android)
 
@@ -433,7 +434,7 @@ When automatic capture is down, capture degrades rather than stopping: `ProcessT
 (the text-selection toolbar entry) and `ClipboardReadActivity` (the sticky notification's "Send
 clipboard" action) both cost one tap and need no ADB, no Wi-Fi and no permission. Every path —
 daemon or manual — funnels through `ClipForegroundService.ingestClip(text, ts, source)`, which
-owns echo suppression, the clip history and the `sendPaused` gate (§6).
+owns echo suppression and the clip history (§6).
 
 `autoStart` therefore starts the **foreground service first**, before touching ADB at all
 (and `setRelay` starts it too when the service is down, so a fresh QR pair connects immediately
@@ -771,7 +772,7 @@ unpair.
    proxy binder.
 2. The agent reads the clip and emits `{"type":"clip", …}` over localhost to `ClipBridge`.
 3. `ClipForegroundService.ingestClip(text, ts, DAEMON)` checks it isn't the echo of its own
-   write, records history, and (unless `sendPaused`) calls `ConnectionManager.sendClip`.
+   write, records history, and calls `ConnectionManager.sendClip`.
 4. `ClipCodec.encode` **encrypts** (ChaCha20-Poly1305) → `{ t:"clip", nonce, ct }` → relay → Mac.
 5. The Mac **decrypts** `ct`, stamps `lastChangeCount`, and writes `NSPasteboard`.
 
@@ -782,9 +783,7 @@ from either `ProcessTextActivity` (the text-selection toolbar entry; the text ar
 `ClipboardReadActivity` (the sticky notification's "Send clipboard" action; a real translucent
 window so `clipboardAccessAllowed`'s `isUidFocused` check passes, read in `onWindowFocusChanged`).
 Both hand off via `ClipForegroundService.submitClip`, so **`ingestClip` is the single funnel**
-every capture path goes through and no source can skip echo suppression or the history. `MANUAL`
-deliberately bypasses `sendPaused`: that switch turns off *automatic* forwarding, and an explicit
-tap on "send this" isn't what the user disabled.
+every capture path goes through and no source can skip echo suppression or the history.
 
 **Mac → Phone (copy on macOS):**
 

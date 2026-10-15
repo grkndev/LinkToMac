@@ -77,10 +77,6 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */
   relayGetStatus(): Promise<RelayEvent>;
-  /** pause/resume outbound (Mac-bound) forwarding; stays connected to receive. Persisted. */
-  relaySetPaused(paused: boolean): Promise<void>;
-  /** whether outbound forwarding to the Mac is currently paused (persisted, default false). */
-  relayIsSendPaused(): Promise<boolean>;
   /** hide/show the FGS notification's status-bar icon (re-posts on a MIN/LOW importance channel). */
   setStatusNotificationVisible(visible: boolean): Promise<void>;
   /** whether the status-bar icon is currently shown (persisted, default true). */
@@ -104,10 +100,6 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   getNotifAppFilter(): Promise<NotifAppFilter>;
   /** persist the per-app mirroring filter; the notification listener reads it live per post. */
   setNotifAppFilter(mode: NotifFilterMode, include: string[], exclude: string[]): Promise<void>;
-  /** whether copied images are sent to the Mac's clipboard (persisted, default true). */
-  getSendImages(): Promise<boolean>;
-  /** enable/disable sending copied images to the Mac (independent of text clipboard sync). */
-  setSendImages(enabled: boolean): Promise<void>;
   /** whether we hold both READ_SMS and READ_CONTACTS (read texts + resolve sender names). */
   hasSmsAccess(): Promise<boolean>;
   /** request READ_SMS + READ_CONTACTS; resolves whether SMS reading is granted. Syncs on grant. */

@@ -114,8 +114,8 @@ A small **menu-bar app** on the Mac and a **background app** on Android stay con
 ## Using the features
 
 - **Clipboard** — just copy on either device; the other one follows. Text and images both sync
-  both ways. You can pause _sending_ from the phone in Settings while still receiving the Mac's
-  copies, and there's a separate **Send images** switch if you want text-only in one direction.
+  both ways. Copies on the phone are always sent; the Mac side still has its own switches
+  (**Send copies to Android**, **Sync images**) if you want a one-way flow.
 - **Send a file** — from the phone, share anything and pick **Send to Clipboard** (images, ready
   to paste) or **Send as a File** (any type, original quality). From the Mac, drop a file on the
   dashboard window or the menu-bar icon.

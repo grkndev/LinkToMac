@@ -145,11 +145,6 @@ class ClipForegroundService : Service() {
   private fun sha256(bytes: ByteArray): String =
     MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
-  /** Outbound gate: when true, captured clips are NOT forwarded to the Mac (inbound still
-   *  works). Seeded from PREFS_UI in onStartCommand so a START_STICKY restart with no JS
-   *  keeps honoring the user's choice. */
-  @Volatile private var sendPaused: Boolean = false
-
   /** Last telemetry payload sent, so a battery broadcast only forwards a `stat` when it changed. */
   @Volatile private var lastStatSent: String? = null
   /** Tracks the peer-online edge so we push fresh telemetry once per (re)connect, not every tick. */
@@ -169,7 +164,6 @@ class ClipForegroundService : Service() {
     val port = intent?.getIntExtra(EXTRA_PORT, DEFAULT_PORT)?.also { setClipPort(this, it) }
       ?: getClipPort(this)
     instance = this
-    sendPaused = getClipSendPaused(this)
     val daemonSecret = getDaemonSecret(this)
     if (bridge != null && bridgeSecret != daemonSecret) {
       // deploy() relaunched the daemon under a fresh secret; a bridge still holding the old
@@ -232,9 +226,7 @@ class ClipForegroundService : Service() {
     if (consumeEcho(text)) return // echo of our own recent write -> swallow
     ClipBus.log("clip [${source.label}]: ${text.take(60)}")
     ClipBus.clip(text, ts)
-    // `sendPaused` gates *automatic* forwarding. A manual capture is an explicit tap on "send
-    // this", so it isn't what the user turned off.
-    if (source == ClipSource.MANUAL || !sendPaused) conn?.sendClip(text)
+    conn?.sendClip(text)
   }
 
   /** JS-initiated write (the clipboard-history screen's "copy again"). Deliberately skips the
@@ -253,8 +245,7 @@ class ClipForegroundService : Service() {
   fun isBridgeFlapping(): Boolean = bridge?.isFlapping() == true
 
   /**
-   * Send a remote action to the Mac (e.g. "lock"). Independent of [sendPaused]: the pause
-   * toggle only gates outbound *clipboard* forwarding, not commands. No-op if not connected.
+   * Send a remote action to the Mac (e.g. "lock"). No-op if not connected.
    */
   fun sendCmd(action: String) {
     conn?.sendCmd(action)
@@ -262,8 +253,7 @@ class ClipForegroundService : Service() {
 
   /**
    * Forward a mirrored device notification to the Mac. Called by [NotificationListener] (same
-   * process). Independent of [sendPaused] (that gate is clipboard-only); the listener already
-   * checks [getNotificationForwarding]. No-op if not connected.
+   * process); the listener already checks [getNotificationForwarding]. No-op if not connected.
    */
   fun sendNote(json: String) {
     conn?.sendNote(json)
@@ -271,7 +261,7 @@ class ClipForegroundService : Service() {
 
   /**
    * Forward a batch/delta of mirrored SMS messages to the Mac. Called by [SmsMirror] (same process).
-   * Independent of [sendPaused] (that gate is clipboard-only). No-op if not connected.
+   * No-op if not connected.
    */
   fun sendSms(json: String) {
     conn?.sendSms(json)
@@ -316,16 +306,6 @@ class ClipForegroundService : Service() {
     bleAdvertiser = null
     ClipBus.relay("disconnected", false, null)
     updateNotification(peerOnline = false)
-  }
-
-  /**
-   * Live toggle of the outbound (Mac-bound) clip forwarding. The relay stays connected so
-   * the Mac's clips keep arriving even while paused — only our own sends are suppressed.
-   * Persisted so a START_STICKY restart with no JS keeps honoring it.
-   */
-  fun setPaused(paused: Boolean) {
-    sendPaused = paused
-    setClipSendPaused(this, paused)
   }
 
   private fun maybeStartConnection() {
@@ -676,14 +656,12 @@ class ClipForegroundService : Service() {
   }
 
   /** A clipboard image the daemon captured on the phone → forward to the Mac. Drops the echo of
-   *  our own Mac→phone write, respects the outbound pause, and fits the image under the relay
+   *  our own Mac→phone write, and fits the image under the relay
    *  frame cap (the same ~700 KB budget the Mac uses) before sealing it into a `file` frame. */
   private fun captureImage(mime: String, bytes: ByteArray) {
     try {
       if (consumeImageEcho(sha256(bytes))) return // echo of our own recent write -> swallow
       // Visible skip reasons so the Logs screen shows exactly why an image wasn't forwarded.
-      if (sendPaused) { ClipBus.log("image not sent (clipboard sending is paused)"); return }
-      if (!getSendImages(this)) { ClipBus.log("image not sent (Send images is off)"); return }
       val fit = fitImage(bytes, mime)
       if (fit == null) { ClipBus.log("image capture skipped (can't fit under the frame budget)"); return }
       ClipBus.log("image -> Mac (${fit.second}, ${fit.first.size} B)")
@@ -1004,7 +982,6 @@ class ClipForegroundService : Service() {
   // ---- Telemetry (battery + name -> Mac) -----------------------------------
   // Lives in the service so it keeps reporting even when the JS app is swiped away. Sends a `stat`
   // frame (E2E-encrypted by the active link) carrying {"level":N,"charging":bool,"name":"…"}.
-  // Independent of [sendPaused] (that gate is clipboard-only).
 
   /** Send the current battery to the Mac if it changed since the last send (or `force` on connect). */
   private fun pushBatteryStat(force: Boolean = false) {
@@ -1094,7 +1071,7 @@ class ClipForegroundService : Service() {
 
   // ---- SMS mirroring (SmsMirror -> Mac) ------------------------------------
   // Lives in the service so reads + the live observer survive an app swipe. Gated by the forwarding
-  // toggle AND the READ_SMS runtime grant. Independent of [sendPaused] (that gate is clipboard-only).
+  // toggle AND the READ_SMS runtime grant.
 
   private fun hasSmsPermission(): Boolean =
     checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
@@ -1397,13 +1374,11 @@ class ClipForegroundService : Service() {
     // Separate prefs file: clearConfig() wipes PREFS on unpair, UI settings must survive that.
     private const val PREFS_UI = "linktomac_ui"
     private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"
-    private const val KEY_CLIP_SEND_PAUSED = "clipSendPaused"
     private const val KEY_NOTIFICATION_FORWARDING = "notificationForwarding"
     private const val KEY_NOTIF_FILTER_MODE = "notifFilterMode"
     private const val KEY_NOTIF_INCLUDE_PKGS = "notifIncludePkgs"
     private const val KEY_NOTIF_EXCLUDE_PKGS = "notifExcludePkgs"
     private const val KEY_SMS_FORWARDING = "smsForwarding"
-    private const val KEY_SEND_IMAGES = "sendImages"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     /** The Mac's device name, learned from its `stat` frames — see [rememberMacName]. */
     private const val KEY_MAC_NAME = "macName"
@@ -1504,17 +1479,6 @@ class ClipForegroundService : Service() {
         .apply()
     }
 
-    /** Whether outbound (Mac-bound) clip forwarding is paused (default false = sending). */
-    fun getClipSendPaused(ctx: Context): Boolean =
-      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
-        .getBoolean(KEY_CLIP_SEND_PAUSED, false)
-
-    fun setClipSendPaused(ctx: Context, paused: Boolean) {
-      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
-        .putBoolean(KEY_CLIP_SEND_PAUSED, paused)
-        .apply()
-    }
-
     /** Whether mirroring device notifications to the Mac is enabled (default true). Gates
      *  [NotificationListener] independently of the system "Notification access" grant, so the
      *  user can pause mirroring without revoking access. Persisted in PREFS_UI (survives unpair). */
@@ -1572,19 +1536,6 @@ class ClipForegroundService : Service() {
     fun setSmsForwarding(ctx: Context, enabled: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_SMS_FORWARDING, enabled)
-        .apply()
-    }
-
-    /** Whether copied images are sent to the Mac (default true). A screenshot/photo copy can be
-     *  ~1 MB over the link, so it gets its own switch on top of the clipboard `sendPaused` gate.
-     *  Persisted in PREFS_UI (survives unpair) + read live by [captureImage]. */
-    fun getSendImages(ctx: Context): Boolean =
-      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
-        .getBoolean(KEY_SEND_IMAGES, true)
-
-    fun setSendImages(ctx: Context, enabled: Boolean) {
-      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
-        .putBoolean(KEY_SEND_IMAGES, enabled)
         .apply()
     }
 
