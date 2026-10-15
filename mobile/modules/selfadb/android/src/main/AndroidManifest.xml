@@ -202,6 +202,15 @@
         <category android:name="android.intent.category.DEFAULT" />
         <data android:mimeType="*/*" />
       </intent-filter>
+      <!--
+        A multi-selection (several photos from Gallery, several files from Files). Only this entry
+        takes it: the clipboard holds one image, so there is nothing to paste a list into.
+      -->
+      <intent-filter>
+        <action android:name="android.intent.action.SEND_MULTIPLE" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="*/*" />
+      </intent-filter>
     </activity>
 
     <!--

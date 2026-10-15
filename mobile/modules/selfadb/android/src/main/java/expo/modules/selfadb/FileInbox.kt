@@ -25,7 +25,7 @@ class FileInbox(private val dir: File, private val log: (String) -> Unit) {
 
   /** A transfer whose last chunk just landed. [file] lives in [dir] and is the caller's to consume
    *  and delete. */
-  class Completed(val file: File, val mime: String, val name: String?, val disp: String)
+  class Completed(val file: File, val mime: String, val name: String?, val dir: String?, val disp: String)
 
   /** What [accept] did with a chunk. [Rejected] is distinct from [Buffered] on purpose: the caller
    *  drives a progress notification off this, and a rejected transfer has to clear it rather than
@@ -40,6 +40,7 @@ class FileInbox(private val dir: File, private val log: (String) -> Unit) {
     val file: File,
     val mime: String,
     val name: String?,
+    val dir: String?,
     val disp: String,
     val count: Int,
   ) {
@@ -67,7 +68,7 @@ class FileInbox(private val dir: File, private val log: (String) -> Unit) {
         return Result.Rejected
       }
       if (!dir.exists()) dir.mkdirs()
-      partial = Partial(File(dir, "in-$id"), frame.mime, frame.name, frame.disp, frame.count)
+      partial = Partial(File(dir, "in-$id"), frame.mime, frame.name, frame.dir, frame.disp, frame.count)
       partials[id] = partial
     }
     if (partial.count != frame.count) {
@@ -100,7 +101,7 @@ class FileInbox(private val dir: File, private val log: (String) -> Unit) {
       return Result.Buffered(received = partial.seen.size, total = partial.count)
     }
     partials.remove(id)
-    return Result.Done(Completed(partial.file, partial.mime, partial.name, partial.disp))
+    return Result.Done(Completed(partial.file, partial.mime, partial.name, partial.dir, partial.disp))
   }
 
   /** Drop transfers whose sender went away mid-file, so a dead Mac can't leave temp files (or a
@@ -137,13 +138,14 @@ class FileInbox(private val dir: File, private val log: (String) -> Unit) {
  */
 object FileSink {
 
-  /** Copy [source] into Downloads/Link to Mac. Returns the MediaStore URI, or null on failure. */
-  fun saveToDownloads(ctx: Context, source: File, name: String?, mime: String): Uri? {
+  /** Copy [source] into Downloads/Link to Mac[/[dir]]. Returns the MediaStore URI, or null on
+   *  failure. [dir] is the relative folder a dropped folder's file sat in; it is untrusted. */
+  fun saveToDownloads(ctx: Context, source: File, name: String?, mime: String, dir: String? = null): Uri? {
     val resolver = ctx.contentResolver
     val values = ContentValues().apply {
       put(MediaStore.Downloads.DISPLAY_NAME, sanitize(name, mime))
       put(MediaStore.Downloads.MIME_TYPE, mime)
-      put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Link to Mac")
+      put(MediaStore.Downloads.RELATIVE_PATH, relativePath(dir))
       put(MediaStore.Downloads.IS_PENDING, 1)
     }
     val uri = try {
@@ -167,6 +169,27 @@ object FileSink {
       null
     }
   }
+
+  /** `Download/Link to Mac` plus the sanitised [dir], when there is one. */
+  fun relativePath(dir: String?): String {
+    val base = "${Environment.DIRECTORY_DOWNLOADS}/Link to Mac"
+    val clean = sanitizeDir(dir)
+    return if (clean.isEmpty()) base else "$base/$clean"
+  }
+
+  /** A folder path off the wire is untrusted like a name: keep only plain components. Drops
+   *  empty, `.` and `..` parts (no traversal out of Link to Mac), strips separators and `:`,
+   *  and bounds depth and length so a hostile peer can't build a pathological tree. */
+  fun sanitizeDir(dir: String?): String =
+    (dir ?: "")
+      .split('/', '\\')
+      .map { it.replace(":", "-").trim().trim('.').take(MAX_DIR_PART) }
+      .filter { it.isNotEmpty() }
+      .take(MAX_DIR_DEPTH)
+      .joinToString("/")
+
+  private const val MAX_DIR_DEPTH = 8
+  private const val MAX_DIR_PART = 100
 
   /** The name arrives over the wire, so treat it as untrusted: last path component only (no
    *  traversal), no separators, and a timestamped fallback when nothing usable is left. */

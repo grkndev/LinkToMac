@@ -16,13 +16,15 @@ import java.io.ByteArrayOutputStream
  *
  * | key    | meaning                                                        | absent means      |
  * |--------|----------------------------------------------------------------|-------------------|
- * | `op`   | [OP_DATA] (payload) or [OP_ACK] (receiver acknowledging a seq) | [OP_DATA]         |
+ * | `op`   | [OP_DATA] (payload), [OP_ACK] (receiver stored a seq) or [OP_NACK] (it could not) | [OP_DATA] |
  * | `mime` | content type of the payload                                    | `image/png`       |
  * | `name` | original file name, for [DISP_SAVE]                            | receiver invents  |
+ * | `dir`  | relative folder the file sits in (`Photos/2024`), for [DISP_SAVE] | the download folder |
  * | `disp` | [DISP_CLIP] (paste it) or [DISP_SAVE] (write it to disk)       | [DISP_CLIP]       |
  * | `id`   | transfer id shared by every chunk of one file                  | single-frame      |
  * | `seq`  | 0-based chunk index                                            | 0                 |
  * | `n`    | total chunk count                                              | 1                 |
+ * | `err`  | why a [OP_NACK] was sent (free text)                           | no reason given   |
  *
  * The header repeats in full on every chunk (it costs ~100 bytes and makes each chunk
  * self-describing, so the receiver never depends on chunk 0 arriving first).
@@ -38,12 +40,16 @@ class FileFrame(
   val op: String,
   val mime: String,
   val name: String?,
+  /** Relative folder path for a dropped folder's files; null = the download folder itself. */
+  val dir: String?,
   val disp: String,
   /** Transfer id shared by a chunked file's frames; null for a single-frame transfer. */
   val id: String?,
   val seq: Int,
   val count: Int,
   val bytes: ByteArray,
+  /** Why a [OP_NACK] was sent, when the receiver said. */
+  val reason: String?,
 ) {
   /** True when this frame is the whole file (the pre-chunking shape, and any file under one chunk). */
   val isSingle: Boolean get() = id == null || count <= 1
@@ -55,6 +61,11 @@ class FileFrame(
     /** A zero-byte frame acknowledging that [id]/[seq] was stored, so the sender may advance
      *  its window. Travels back down the same `file` channel. */
     const val OP_ACK = "ack"
+
+    /** A zero-byte frame saying [id]/[seq] could NOT be stored (disk full, write failed, over a
+     *  limit), so the sender stops now instead of waiting out its ack timeout and then claiming a
+     *  delivery that never happened. */
+    const val OP_NACK = "nack"
 
     /** Land on the receiver's clipboard (the original, and still the default). */
     const val DISP_CLIP = "clip"
@@ -83,6 +94,7 @@ class FileFrame(
       offset: Int = 0,
       length: Int = bytes.size,
       name: String? = null,
+      dir: String? = null,
       disp: String = DISP_CLIP,
       id: String? = null,
       seq: Int = 0,
@@ -90,6 +102,7 @@ class FileFrame(
     ): ByteArray {
       val header = JSONObject().put("mime", mime)
       if (name != null) header.put("name", name)
+      if (!dir.isNullOrEmpty()) header.put("dir", dir)
       if (disp != DISP_CLIP) header.put("disp", disp)
       // Emitted whenever the sender assigned an id, even for a one-chunk file: `id` is what
       // makes the receiver ack, and a "Send as a File" transfer wants that receipt at any size.
@@ -115,6 +128,18 @@ class FileFrame(
       return out.toByteArray()
     }
 
+    /** Build a zero-byte [OP_NACK] frame for one chunk that could not be stored. */
+    fun nack(id: String, seq: Int, reason: String? = null): ByteArray {
+      val header = JSONObject().put("op", OP_NACK).put("id", id).put("seq", seq)
+      if (reason != null) header.put("err", reason.take(200))
+      val headerBytes = header.toString().toByteArray(Charsets.UTF_8)
+      val out = ByteArrayOutputStream(2 + headerBytes.size)
+      out.write((headerBytes.size shr 8) and 0xFF)
+      out.write(headerBytes.size and 0xFF)
+      out.write(headerBytes)
+      return out.toByteArray()
+    }
+
     /** Split an inbound plaintext back into header + raw bytes. null when malformed. */
     fun parse(payload: ByteArray): FileFrame? {
       if (payload.size < 2) return null
@@ -129,11 +154,13 @@ class FileFrame(
         op = header.optString("op", OP_DATA),
         mime = header.optString("mime", "image/png"),
         name = header.optString("name").ifEmpty { null },
+        dir = header.optString("dir").ifEmpty { null },
         disp = header.optString("disp", DISP_CLIP),
         id = header.optString("id").ifEmpty { null },
         seq = header.optInt("seq", 0),
         count = header.optInt("n", 1),
         bytes = payload.copyOfRange(2 + headerLen, payload.size),
+        reason = header.optString("err").ifEmpty { null },
       )
     }
   }
