@@ -93,4 +93,66 @@ class FileInboxTest {
     assertFalse(java.io.File(dir, "in-old").exists())
     assertTrue(java.io.File(dir, "in-new").exists())
   }
+
+  @Test fun haveReportsTheContiguousPrefix() {
+    val inbox = inbox()
+    fun have(seq: Int) = (inbox.accept(frame("h", seq, 6, chunk(seq))) as FileInbox.Result.Buffered).have
+    assertEquals(1, have(0))
+    assertEquals(2, have(1))
+    assertEquals(2, have(3)) // a gap at 2
+    assertEquals(4, have(2)) // filling it jumps over 3
+    assertEquals(4, have(2)) // a duplicate changes nothing
+  }
+
+  @Test fun aStalePartialIsEvictedToMakeRoom() {
+    val dir = tmp.newFolder()
+    val inbox = FileInbox(dir, staleMs = 50) { }
+    inbox.accept(frame("1", 0, 2, chunk(0)))
+    inbox.accept(frame("2", 0, 2, chunk(0)))
+    Thread.sleep(150)
+    assertTrue(inbox.accept(frame("3", 0, 2, chunk(0))) is FileInbox.Result.Buffered)
+    assertFalse(java.io.File(dir, "in-1").exists()) // the oldest idle one was dropped
+    assertTrue(java.io.File(dir, "in-3").exists())
+  }
+
+  @Test fun aLiveTransferIsNeverEvicted() {
+    val inbox = FileInbox(tmp.newFolder(), staleMs = 60_000) { }
+    inbox.accept(frame("1", 0, 2, chunk(0)))
+    inbox.accept(frame("2", 0, 2, chunk(0)))
+    assertTrue(inbox.accept(frame("3", 0, 2, chunk(0))) is FileInbox.Result.Rejected)
+  }
+
+  @Test fun aQuietPartialIsKeptSoARetryResumes() {
+    val inbox = FileInbox(tmp.newFolder(), ttlMs = 60_000, staleMs = 50) { }
+    inbox.accept(frame("r", 0, 3, chunk(0)))
+    inbox.accept(frame("r", 1, 3, chunk(1)))
+    Thread.sleep(150) // quiet longer than staleMs, far less than the TTL
+    val again = inbox.accept(frame("r", 0, 3, chunk(0))) as FileInbox.Result.Buffered
+    assertEquals(2, again.have)
+  }
+
+  @Test fun aChunkLargerThanTheChunkSizeIsRejected() {
+    val dir = tmp.newFolder()
+    val inbox = FileInbox(dir) { }
+    // Written at seq * CHUNK_RAW_BYTES, it would overwrite the next chunk.
+    assertTrue(inbox.accept(frame("big", 0, 2, chunk(0, size = FileFrame.CHUNK_RAW_BYTES + 1))) is FileInbox.Result.Rejected)
+    assertFalse(java.io.File(dir, "in-big").exists())
+  }
+
+  @Test fun aHostileIdCannotTraverseOutOfTheInboxDirectory() {
+    val dir = tmp.newFolder()
+    val inbox = FileInbox(dir) { }
+    inbox.accept(frame("../../evil", 0, 2, chunk(0)))
+    assertTrue(dir.listFiles()!!.all { it.parentFile == dir })
+    assertFalse(java.io.File(dir.parentFile, "evil").exists())
+  }
+
+  @Test fun oldLeftoversArePurgedWhenTheInboxIsCreated() {
+    val dir = tmp.newFolder()
+    val old = java.io.File(dir, "in-old").apply { writeText("x"); setLastModified(System.currentTimeMillis() - 2 * 60 * 60 * 1000L) }
+    val fresh = java.io.File(dir, "in-fresh").apply { writeText("x") }
+    FileInbox(dir) { }
+    assertFalse(old.exists())
+    assertTrue(fresh.exists())
+  }
 }

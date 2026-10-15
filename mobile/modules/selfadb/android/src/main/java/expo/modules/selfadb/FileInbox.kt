@@ -12,19 +12,23 @@ import java.io.RandomAccessFile
  * Reassembles chunked inbound `file` transfers (the Mac's "send this to my phone").
  *
  * Chunks are written straight into a temp file at `seq * CHUNK_RAW_BYTES` rather than buffered in
- * a map: a 64 MB transfer held as chunks *and* then concatenated would need ~128 MB of heap, which
- * is a straightforward OOM on a mid-range phone. `RandomAccessFile` + seek costs one chunk of heap
- * no matter how big the file is, and tolerates out-of-order arrival for free (frames are ordered
- * on a single socket today, but nothing here depends on that).
+ * a map: a transfer held as chunks *and* then concatenated would need twice its size in heap,
+ * which is a straightforward OOM on a mid-range phone. `RandomAccessFile` + seek costs one chunk
+ * of heap no matter how big the file is, and tolerates out-of-order arrival for free. (The Mac's
+ * `FileInbox` does the same, and is what let the cap rise from 64 MB to 1 GiB.)
  *
  * Everything is bounded, because an inbound transfer is peer-controlled: [MAX_CONCURRENT]
- * transfers, [FileFrame.MAX_TRANSFER_BYTES] each, and anything idle past [TTL_MS] is swept on the
- * next frame.
+ * transfers, [FileFrame.MAX_TRANSFER_BYTES] each. A half-received transfer is **kept for
+ * [TTL_MS]** (10 min) so a retry of the same file can resume — the ack reports how many leading
+ * chunks are already here (`have`) — but when every slot is taken, one idle longer than
+ * [STALE_MS] is evicted rather than blocking a new transfer.
  */
 class FileInbox(
   private val dir: File,
-  /** Idle time after which a half-received transfer is swept. A parameter only so a test needn't wait two minutes. */
+  /** Idle time after which a half-received transfer is swept. A parameter only so a test needn't wait ten minutes. */
   private val ttlMs: Long = TTL_MS,
+  /** Idle time after which a partial may be evicted to make room. */
+  private val staleMs: Long = STALE_MS,
   /** Per-transfer size cap; a parameter only so a test needn't allocate a gigabyte. */
   private val maxBytes: Long = FileFrame.MAX_TRANSFER_BYTES.toLong(),
   private val log: (String) -> Unit,
@@ -38,7 +42,8 @@ class FileInbox(
    *  drives a progress notification off this, and a rejected transfer has to clear it rather than
    *  leave it stuck on screen forever. */
   sealed class Result {
-    class Buffered(val received: Int, val total: Int) : Result()
+    /** [have] = leading chunks `[0, have)` already stored, for the ack (resume). */
+    class Buffered(val received: Int, val total: Int, val have: Int) : Result()
     class Done(val completed: Completed) : Result()
     object Rejected : Result()
   }
@@ -52,11 +57,17 @@ class FileInbox(
     val count: Int,
   ) {
     val seen = HashSet<Int>()
+    /** Length of the contiguous run `0 until contiguous` — what resume reports as `have`. */
+    var contiguous = 0
     var bytes = 0L
     var touched = System.currentTimeMillis()
   }
 
   private val partials = HashMap<String, Partial>()
+
+  init {
+    purge(olderThanMs = 60 * 60 * 1000L) // what a process death mid-transfer left behind
+  }
 
   /** Take one decoded data frame: buffer it, complete the transfer, or reject it. */
   @Synchronized
@@ -67,15 +78,23 @@ class FileInbox(
       log("file: chunk ${frame.seq}/${frame.count} out of range")
       return Result.Rejected
     }
+    // A chunk is written at seq * CHUNK_RAW_BYTES; a longer one would overwrite its neighbour.
+    if (frame.bytes.size > FileFrame.CHUNK_RAW_BYTES) {
+      log("file: chunk of ${frame.bytes.size} B exceeds the chunk size; dropping $id")
+      discard(id)
+      return Result.Rejected
+    }
 
     var partial = partials[id]
     if (partial == null) {
-      if (partials.size >= MAX_CONCURRENT) {
+      if (partials.size >= MAX_CONCURRENT && !evictOldestStale()) {
         log("file: too many transfers in flight; dropping $id")
         return Result.Rejected
       }
       if (!dir.exists()) dir.mkdirs()
-      partial = Partial(File(dir, "in-$id"), frame.mime, frame.name, frame.dir, frame.disp, frame.count)
+      // The id is peer-supplied: keep it to filename-safe characters so it can't traverse out of [dir].
+      val safe = id.map { if (it.isLetterOrDigit() || it == '-' || it == '_') it else '_' }.joinToString("").take(64)
+      partial = Partial(File(dir, "in-$safe"), frame.mime, frame.name, frame.dir, frame.disp, frame.count)
       partials[id] = partial
     }
     if (partial.count != frame.count) {
@@ -101,18 +120,19 @@ class FileInbox(
         discard(id)
         return Result.Rejected
       }
+      while (partial.seen.contains(partial.contiguous)) partial.contiguous++
     }
     partial.touched = System.currentTimeMillis()
 
     if (partial.seen.size < partial.count) {
-      return Result.Buffered(received = partial.seen.size, total = partial.count)
+      return Result.Buffered(received = partial.seen.size, total = partial.count, have = partial.contiguous)
     }
     partials.remove(id)
     return Result.Done(Completed(partial.file, partial.mime, partial.name, partial.dir, partial.disp))
   }
 
-  /** Drop transfers whose sender went away mid-file, so a dead Mac can't leave temp files (or a
-   *  map entry) behind forever. */
+  /** Drop transfers whose sender went away for good (idle past [ttlMs]), so a dead Mac can't leave
+   *  temp files (or a map entry) behind forever. */
   private fun sweep() {
     val cutoff = System.currentTimeMillis() - ttlMs
     partials.entries.toList().forEach { (id, p) ->
@@ -123,13 +143,30 @@ class FileInbox(
     }
   }
 
+  /** Free a slot by dropping the partial quiet for longest — but only one quiet for [staleMs]; a
+   *  live transfer is never evicted. True if one was freed. */
+  private fun evictOldestStale(): Boolean {
+    val cutoff = System.currentTimeMillis() - staleMs
+    val victim = partials.entries.filter { it.value.touched < cutoff }.minByOrNull { it.value.touched } ?: return false
+    log("file: evicting idle transfer ${victim.key} to make room")
+    discard(victim.key)
+    return true
+  }
+
   private fun discard(id: String) {
     partials.remove(id)?.file?.delete()
   }
 
+  /** Delete temp files older than [olderThanMs]. */
+  private fun purge(olderThanMs: Long) {
+    val cutoff = System.currentTimeMillis() - olderThanMs
+    dir.listFiles()?.filter { it.isFile && it.lastModified() < cutoff }?.forEach { it.delete() }
+  }
+
   private companion object {
     const val MAX_CONCURRENT = 2
-    const val TTL_MS = 120_000L
+    const val TTL_MS = 10 * 60 * 1000L
+    const val STALE_MS = 120_000L
   }
 }
 

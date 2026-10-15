@@ -204,14 +204,9 @@ class ClipForegroundService : Service() {
     // A share-sheet send. Off the main thread (it reads a file and can block on acks for as
     // long as the transfer takes) but never off the service, which outlives the activity.
     if (intent?.action == ACTION_SUBMIT_SHARE) {
-      val paths = intent.getStringArrayListExtra(EXTRA_PATHS).orEmpty()
-      val names = intent.getStringArrayListExtra(EXTRA_NAMES).orEmpty()
-      val mimes = intent.getStringArrayListExtra(EXTRA_MIMES).orEmpty()
+      val items = shareItems(intent)
       val disp = intent.getStringExtra(EXTRA_DISP) ?: FileFrame.DISP_CLIP
-      val files = paths.indices.map { i ->
-        SharedFile(paths[i], names.getOrNull(i) ?: "shared", mimes.getOrNull(i) ?: "application/octet-stream")
-      }
-      if (files.isNotEmpty()) shareExec.execute { sendShared(files, disp) }
+      if (items.isNotEmpty()) shareExec.execute { sendShared(items, disp) }
     }
     // The notification's Cancel button for an outgoing transfer. Handled on the main thread, so
     // it only flips a flag and wakes the sender; the send loop does the actual stopping.
@@ -422,7 +417,11 @@ class ClipForegroundService : Service() {
       if (frame.op == FileFrame.OP_ACK) {
         // Flow control for our own outbound transfer — see [sendAsFile].
         val t = transfer
-        if (t != null && t.id == frame.id) t.window.release()
+        if (t != null && t.id == frame.id) {
+          // Before the release: the sender reads `have` the moment it wakes.
+          frame.have?.let { if (it > t.have) t.have = it }
+          t.window.release()
+        }
         return
       }
       if (frame.op == FileFrame.OP_NACK) {
@@ -446,7 +445,7 @@ class ClipForegroundService : Service() {
               done = result.received,
               total = result.total,
             )
-            ackFrame(frame)
+            ackFrame(frame, have = result.have)
           }
           is FileInbox.Result.Rejected -> {
             clearTransferProgress(TRANSFER_IN_NOTIF_ID)
@@ -493,8 +492,8 @@ class ClipForegroundService : Service() {
   }
 
   /** Acknowledge one stored chunk. No-op for a frame without an `id` (a clipboard image). */
-  private fun ackFrame(frame: FileFrame) {
-    frame.id?.let { conn?.sendFile(FileFrame.ack(it, frame.seq)) }
+  private fun ackFrame(frame: FileFrame, have: Int? = null) {
+    frame.id?.let { conn?.sendFile(FileFrame.ack(it, frame.seq, have)) }
   }
 
   /** Tell the Mac this chunk — and so the file — was not stored, so it stops now. */
@@ -713,31 +712,94 @@ class ClipForegroundService : Service() {
     }
   }
 
-  /** A file [ShareActivity] already staged in our cache. */
-  private class SharedFile(val path: String, val name: String, val mime: String)
+  /** Turn a share intent into [SendItem]s. Each entry is either a copy [ShareActivity] already
+   *  staged in our cache (small files: the proven path) or, when none was made, the content URI
+   *  itself — read straight through a grant that rides in on this intent (`ClipData` +
+   *  `FLAG_GRANT_READ_URI_PERMISSION`), so a large file is streamed instead of copied first. */
+  private fun shareItems(intent: Intent): List<SendItem> {
+    val paths = intent.getStringArrayListExtra(EXTRA_PATHS).orEmpty()
+    val uris = intent.getStringArrayListExtra(EXTRA_URIS).orEmpty()
+    val names = intent.getStringArrayListExtra(EXTRA_NAMES).orEmpty()
+    val mimes = intent.getStringArrayListExtra(EXTRA_MIMES).orEmpty()
+    val sizes = intent.getLongArrayExtra(EXTRA_SIZES)
+    return paths.indices.mapNotNull { i ->
+      val name = names.getOrNull(i) ?: "shared"
+      val mime = mimes.getOrNull(i) ?: "application/octet-stream"
+      val path = paths[i]
+      if (path.isNotEmpty()) {
+        val file = File(path)
+        SendItem(name, mime, null, file.length(), file.lastModified() / 1000, { file.inputStream() }, staged = file)
+      } else {
+        val uri = uris.getOrNull(i)?.let(Uri::parse) ?: return@mapNotNull null
+        uriItem(uri, name, mime, null, sizes?.getOrNull(i) ?: -1L)
+      }
+    }
+  }
+
+  /** A [SendItem] streamed straight from a content [uri] (no cache copy). [size] < 0 asks the provider. */
+  private fun uriItem(uri: Uri, name: String, mime: String, dir: String?, size: Long, source: String? = null): SendItem {
+    val (queriedSize, modified) = queryUriMeta(uri)
+    return SendItem(
+      name = name, mime = mime, dir = dir,
+      size = if (size >= 0) size else queriedSize,
+      mtime = modified,
+      open = {
+        contentResolver.openInputStream(uri) ?: throw java.io.IOException("no stream for $uri")
+      },
+      source = source,
+    )
+  }
+
+  /** (size, last-modified seconds) for a content URI, best effort: providers differ on the column
+   *  names (documents: `last_modified` in ms; MediaStore: `date_modified` in s). -1 / 0 when unknown. */
+  private fun queryUriMeta(uri: Uri): Pair<Long, Long> {
+    var size = -1L
+    var modified = 0L
+    try {
+      contentResolver.query(uri, null, null, null, null)?.use { c ->
+        if (c.moveToFirst()) {
+          c.getColumnIndex(android.provider.OpenableColumns.SIZE).takeIf { it >= 0 && !c.isNull(it) }?.let { size = c.getLong(it) }
+          c.getColumnIndex("last_modified").takeIf { it >= 0 && !c.isNull(it) }?.let { modified = c.getLong(it) / 1000 }
+          if (modified == 0L) {
+            c.getColumnIndex("date_modified").takeIf { it >= 0 && !c.isNull(it) }?.let { modified = c.getLong(it) }
+          }
+        }
+      }
+    } catch (e: Exception) {
+      ClipBus.log("share: metadata query failed: ${e.message}")
+    }
+    return size to modified
+  }
 
   /** Send what the user picked from the share sheet, then delete every staged copy. Toasts the
    *  outcome once, however many files there were: this is a fire-and-forget action with no app UI
    *  to update, and one toast per file would flash past unread. */
-  private fun sendShared(files: List<SharedFile>, disp: String) {
+  private fun sendShared(items: List<SendItem>, disp: String) {
     shareCancelled = false
     try {
       val link = conn
       when {
         link == null || !ClipBus.peerOnline() -> toastOnMain(NOT_CONNECTED)
-        disp == FileFrame.DISP_SAVE -> toastOnMain(sendAllAsFiles(link, files))
+        disp == FileFrame.DISP_SAVE -> toastOnMain(sendAllAsFiles(link, items))
         else -> {
           // The clipboard holds one image, so there is nothing to batch: the clipboard entry
           // only ever receives a single stream.
-          val f = files.first()
-          toastOnMain(if (!File(f.path).isFile) "Couldn't read ${f.name}" else sendToClipboard(link, File(f.path), f.mime))
+          val f = items.first()
+          val file = f.staged
+          toastOnMain(
+            when {
+              file == null -> "That image is too large to paste"
+              !file.isFile -> "Couldn't read ${f.name}"
+              else -> sendToClipboard(link, file, f.mime)
+            }
+          )
         }
       }
     } catch (e: Exception) {
       ClipBus.log("share send failed: ${e.message}")
       toastOnMain("Couldn't send that")
     } finally {
-      files.forEach { File(it.path).delete() }
+      items.forEach { it.staged?.delete() }
     }
   }
 
@@ -745,11 +807,8 @@ class ClipForegroundService : Service() {
    *  chunk progress, the text names the file in flight with its own percentage
    *  (`rapor.pdf (50%)`), and the title carries the position (`Sending 2/5 to your Mac`). Returns
    *  the single toast to show at the end. */
-  private fun sendAllAsFiles(link: ConnectionManager, files: List<SharedFile>): String {
-    val chunkCounts = files.map { f ->
-      val len = File(f.path).length()
-      ((len + FileFrame.CHUNK_RAW_BYTES - 1) / FileFrame.CHUNK_RAW_BYTES).toInt().coerceAtLeast(1)
-    }
+  private fun sendAllAsFiles(link: ConnectionManager, files: List<SendItem>): String {
+    val chunkCounts = files.map { it.chunkCount }
     val totalChunks = chunkCounts.sum()
     var chunksBefore = 0
     var sent = 0
@@ -759,18 +818,13 @@ class ClipForegroundService : Service() {
     try {
       for ((i, f) in files.withIndex()) {
         if (shareCancelled) { cancelled = true; break }
-        val file = File(f.path)
         val title = if (files.size > 1) "Sending ${i + 1}/${files.size} to your Mac" else "Sending to your Mac"
         val before = chunksBefore
-        val failure = if (!file.isFile) {
-          "Couldn't read ${f.name}"
-        } else {
-          sendAsFile(link, file, f.name, f.mime) { chunk, count ->
-            val pct = chunk * 100 / count
-            postTransferProgress(
-              TRANSFER_OUT_NOTIF_ID, title, "${f.name} ($pct%)", before + chunk, totalChunks, cancellable = true,
-            )
-          }
+        val failure = sendAsFile(link, f) { chunk, count ->
+          val pct = chunk * 100 / count
+          postTransferProgress(
+            TRANSFER_OUT_NOTIF_ID, title, "${f.name} ($pct%)", before + chunk, totalChunks, cancellable = true,
+          )
         }
         chunksBefore += chunkCounts[i]
         if (failure == null) {
@@ -824,22 +878,36 @@ class ClipForegroundService : Service() {
    *  The final drain means the success toast is a real delivery receipt, not an optimistic
    *  guess — the only send path here that can say that. */
   private fun sendAsFile(
-    link: ConnectionManager, file: File, name: String, mime: String,
+    link: ConnectionManager, item: SendItem,
     onChunk: (sent: Int, count: Int) -> Unit,
   ): String? {
-    val total = file.length()
+    val name = item.name
+    val total = item.size
     if (total <= 0L) return "$name is empty"
     if (total > FileFrame.MAX_TRANSFER_BYTES) return "$name is too large"
-    val count = ((total + FileFrame.CHUNK_RAW_BYTES - 1) / FileFrame.CHUNK_RAW_BYTES).toInt()
-    val id = UUID.randomUUID().toString().substring(0, 8)
+    val count = item.chunkCount
+    val id = item.transferId
     val t = Transfer(id)
     transfer = t
     ClipBus.log("share -> Mac file: $name ($total B, $count chunk(s), id=$id)")
     try {
       val buf = ByteArray(FileFrame.CHUNK_RAW_BYTES)
       var lastSentAt = 0L
-      file.inputStream().use { input ->
-        for (seq in 0 until count) {
+      item.open().use { input ->
+        var seq = 0
+        while (seq < count) {
+          // Resume: the Mac's acks say how many leading chunks it already holds from an earlier
+          // attempt at this same file (same id). Skip them — clamped so the last chunk is always
+          // sent, because that is what completes the file and earns the final ack. Chunks already
+          // in the window when the first ack lands are simply re-sent (at most [ACK_WINDOW]).
+          val have = minOf(t.have, count - 1)
+          if (seq < have) {
+            input.skipFully((have - seq).toLong() * FileFrame.CHUNK_RAW_BYTES)
+            ClipBus.log("share: resuming $id from chunk $have of $count")
+            seq = have
+            onChunk(seq, count)
+            continue
+          }
           if (!t.window.tryAcquire(ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
             ClipBus.log("share: timed out waiting for ack ${seq - ACK_WINDOW} of $id")
             return MAC_STOPPED
@@ -854,13 +922,14 @@ class ClipForegroundService : Service() {
           val wait = pace - (SystemClock.elapsedRealtime() - lastSentAt)
           if (wait > 0) Thread.sleep(wait)
           link.sendFile(
-            FileFrame.encode(mime, buf, 0, read, name, null, FileFrame.DISP_SAVE, id, seq, count)
+            FileFrame.encode(item.mime, buf, 0, read, name, item.dir, FileFrame.DISP_SAVE, id, seq, count)
           )
           lastSentAt = SystemClock.elapsedRealtime()
+          seq++
           // Progress is counted in chunks *sent*, not acked: the ack window means the two differ
           // by at most [ACK_WINDOW], which is invisible on a transfer of any real size — and the
           // final drain below is what makes the completion honest.
-          onChunk(seq + 1, count)
+          onChunk(seq, count)
         }
       }
       // Reclaim the whole window: every outstanding chunk has been acked once we can.
@@ -873,6 +942,14 @@ class ClipForegroundService : Service() {
       }
       ClipBus.log("share: file $id delivered")
       return null
+    } catch (e: java.io.IOException) {
+      // The source vanished or its grant is gone (a content URI whose permission didn't outlive
+      // the activity, a file deleted mid-send).
+      ClipBus.log("share: couldn't read $name: ${e.message}")
+      return "Couldn't read $name"
+    } catch (e: SecurityException) {
+      ClipBus.log("share: no access to $name: ${e.message}")
+      return "Couldn't read $name"
     } finally {
       transfer = null
     }
@@ -897,6 +974,9 @@ class ClipForegroundService : Service() {
 
     /** Set by an inbound [FileFrame.OP_NACK]: the Mac could not store the file, and why. */
     @Volatile var failed: String? = null
+
+    /** Leading chunks the Mac says it already holds (an ack's `have`); only ever grows. */
+    @Volatile var have = 0
   }
 
   private fun toastOnMain(msg: String) {
@@ -1387,6 +1467,8 @@ class ClipForegroundService : Service() {
     /** Start-intent action behind the outgoing progress notification's Cancel button. */
     private const val ACTION_CANCEL_TRANSFER = "expo.modules.selfadb.CANCEL_TRANSFER"
     private const val EXTRA_PATHS = "paths"
+    private const val EXTRA_URIS = "uris"
+    private const val EXTRA_SIZES = "sizes"
     private const val EXTRA_NAMES = "names"
     private const val EXTRA_MIMES = "mimes"
     private const val EXTRA_DISP = "disp"
@@ -1406,18 +1488,25 @@ class ClipForegroundService : Service() {
 
     /**
      * Hand a share-sheet payload to the service: one or many files, sent in order as one batch.
-     * Each path is a file the caller already staged in our own cache — [ShareActivity] has to
-     * copy it there anyway (its URI grant dies with the activity), and paths survive the Binder
-     * transaction limit that the bytes would not. The service deletes every one when the send
-     * finishes, however it finishes. [paths], [names] and [mimes] are parallel lists.
+     * Small files arrive staged in our own cache ([ShareActivity] has to copy them anyway — its URI
+     * grant dies with the activity); a large one is passed as its content URI with a read grant on
+     * this very intent, so the service streams it instead of copying it first. The service deletes
+     * every staged copy when the send finishes, however it finishes.
      */
-    fun submitShare(ctx: Context, paths: List<String>, names: List<String>, mimes: List<String>, disp: String) {
+    fun submitShare(ctx: Context, refs: List<ShareRef>, disp: String) {
+      val clip = ClipData.newRawUri("files", refs.first().uri)
+      refs.drop(1).forEach { clip.addItem(ClipData.Item(it.uri)) }
       val intent = Intent(ctx, ClipForegroundService::class.java)
         .setAction(ACTION_SUBMIT_SHARE)
-        .putStringArrayListExtra(EXTRA_PATHS, ArrayList(paths))
-        .putStringArrayListExtra(EXTRA_NAMES, ArrayList(names))
-        .putStringArrayListExtra(EXTRA_MIMES, ArrayList(mimes))
+        .putStringArrayListExtra(EXTRA_PATHS, ArrayList(refs.map { it.path }))
+        .putStringArrayListExtra(EXTRA_URIS, ArrayList(refs.map { it.uri.toString() }))
+        .putStringArrayListExtra(EXTRA_NAMES, ArrayList(refs.map { it.name }))
+        .putStringArrayListExtra(EXTRA_MIMES, ArrayList(refs.map { it.mime }))
+        .putExtra(EXTRA_SIZES, refs.map { it.size }.toLongArray())
         .putExtra(EXTRA_DISP, disp)
+      // The grant that lets the service read a URI we did NOT stage: it rides on this intent.
+      intent.clipData = clip
+      intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       ContextCompat.startForegroundService(ctx, intent)
     }
 
