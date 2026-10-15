@@ -116,9 +116,21 @@ between them. It never stores anything and never inspects clipboard content.
   additive, so a peer that only understands `mime` still pastes an image:
   - `disp` — `clip` (paste it; the default) or `save` (write it to the Mac's download folder).
   - `name` — the original file name, for `save`.
-  - `op` — `data` (default) or `ack`, the receiver acknowledging one stored chunk.
-  - `id` / `seq` / `n` — chunk group, 0-based index, total count. The header repeats in full on
-    every chunk, so chunks may arrive in any order.
+  - `dir` — relative folder (`Photos/2024`) the file sat in when a folder was sent. The receiver
+    treats it as untrusted (drops `.`/`..`/empty parts, strips separators, bounds depth) and
+    saves under it; an old peer ignores it and saves flat.
+  - `op` — `data` (default), `ack` (the receiver stored one chunk) or `nack` (it could not; an
+    optional `err` says why, and the sender stops at once).
+  - `id` / `seq` / `n` — chunk group, 0-based index, total count; written even for a one-chunk
+    file, because `id` is what makes the receiver ack. The header repeats in full on every chunk,
+    so chunks may arrive in any order.
+
+  The receipt is honest: a chunk is acked once stored, and the **last** chunk only after the file is
+  written (Downloads on the phone, the download folder on the Mac), so a delivery report means the
+  file exists. The sender's flow-control window is a counter behind a condition variable that
+  can be *failed* — a `nack`, a dead link or a cancel wakes the waiting sender immediately.
+  (It was a `DispatchSemaphore`; one abandoned below its initial value kills the process, which
+  is how a timed-out transfer used to crash the next drop.)
 
   A **clipboard** image is squeezed to fit one frame: the sender downscales / JPEG-re-encodes it to
   ~700 KB raw (`ImagePrep.swift` on the Mac, `ClipForegroundService.fitImage` on the phone) so the
