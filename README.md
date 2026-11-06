@@ -45,18 +45,9 @@ are end-to-end encrypted — the relay only ever sees opaque ciphertext.
 
 ## How it works
 
-```
-  Android phone                 your relay              Mac
-  ┌─────────────────┐           ┌────────────┐        ┌───────────────┐
-  │ background app  │  ◄─────►  │  tiny WS   │  ◄───► │ menubar app + │
-  │  clipboard ·    │           │  server    │        │  dashboard    │
-  │  lock · battery │           │  (room id) │        │  clipboard ·  │
-  │  notifs · SMS   │           │            │        │  lock · QR    │
-  └───────┬─────────┘           └────────────┘        └───────┬───────┘
-          │                                                   │
-          └───────────  Bluetooth presence beacon  ───────────┘
-                      (proximity auto-lock — fully local)
-```
+<p align="center">
+  <img src="docs/images/how-it-works.png" alt="Link to Mac: the Android phone and the Mac talk directly over the same Wi-Fi, or through your own relay when away; a Bluetooth presence beacon drives proximity auto-lock" width="900">
+</p>
 
 A small **menu-bar app** on the Mac and a **background app** on Android stay connected.
 

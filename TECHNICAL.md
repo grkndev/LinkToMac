@@ -27,30 +27,7 @@ explains the dex'd `app_process` daemon, the localhost NDJSON bridge, and the
 Four separate programs cooperate. Three of them are "yours" (you build/run them); the
 fourth is a stock-Android system service the Android app talks to through a trick.
 
-```
-  ANDROID (phone)                         CLOUD                  macOS
-  ┌────────────────────────────────┐                     ┌───────────────────────────┐
-  │ Expo / React Native app (JS)   │                     │ SwiftUI menu-bar + window │
-  │   • UI, pairing, settings,     │                     │   • NSPasteboard poll     │
-  │     Files screen               │                     │   • LAN WS server (NWList)│
-  │   • drives native via Expo     │                     │   • CoreBluetooth central │
-  │ ┌────────────────────────────┐ │   ┌─────────────┐   │   • SACLockScreen / QR    │
-  │ │ Foreground Service (Kotlin)│ │   │  Node `ws`  │   │   • Keychain, Sparkle     │
-  │ │  • OkHttp WS → relay ──────┼─┼──►│   relay     │◄──┼── • URLSession WS client  │
-  │ │  • ClipBridge (localhost)  │ │   │ (room route)│   └───────────┬───────────────┘
-  │ │  • BleAdvertiser           │ │   └─────────────┘               │
-  │ └─────────┬──────────────────┘ │   forwards opaque               │
-  │  connect  │ 127.0.0.1:53123    │   frames by roomId              │
-  │ ┌─────────▼─────────────────┐  │   (no storage, no decrypt)      │
-  │ │ ClipboardAgent (shell UID)│  │                                 │
-  │ │  app_process daemon       │  │                                 │
-  │ │  • IClipboard reflection  │  │                                 │
-  │ │  • ServerSocket NDJSON    │  │                                 │
-  │ └───────────────────────────┘  │                                 │
-  └───────────────┬────────────────┘                                 │
-                  └─────────────── BLE presence beacon ──────────────┘
-                       (proximity auto-lock — fully local, no relay)
-```
+![Component architecture: the Android app (React Native UI, foreground service, ClipboardAgent daemon) and the macOS menu-bar app, linked through the relay or directly over the LAN, with a BLE presence beacon for proximity](docs/images/architecture.png)
 
 ### The data paths
 
@@ -169,19 +146,7 @@ allowed to touch the clipboard, and have the app talk to it over a localhost soc
 gets `shell` privileges by connecting to the phone's **own** ADB daemon over Wireless
 Debugging — "self-ADB".
 
-```
-        Expo module (control plane, only alive with JS)
-              │  start / pair / deploy / kill
-              ▼
-  libadb-android  ──TLS+spake2──►  on-device adbd  (Wireless Debugging)
-              │  exec / push streams
-              ▼
-  app_process ──launches──►  ClipboardAgent (shell UID, DETACHED daemon)
-                                   │  ServerSocket 127.0.0.1:53123 (NDJSON)
-  ClipForegroundService ◄──────────┘
-        owns ClipBridge (localhost client) + RelayClient (WS) + BleAdvertiser
-        survives app swipe (START_STICKY)
-```
+![Self-ADB layers: the Expo module drives libadb-android, which talks TLS to the on-device adbd and launches the ClipboardAgent daemon through app_process; the foreground service connects to the daemon over a localhost socket](docs/images/self-adb-layers.png)
 
 ### 3.1 Self-ADB (`AdbManager.kt`)
 
@@ -429,20 +394,7 @@ the gate was removed.
 
 One `autoStart(clipPort)` call still drives the whole bring-up and returns a state string:
 
-```
-poll daemonAlive (≤2.4s, issue #29) ─ alive + secret known + not flapping ─► "ready" (no ADB)
-        │ still dead after the grace window (or alive w/ unknown secret / flapping bridge)
-   isPaired()? ── no ──────────────────────────────────────────► "need-pair"
-        │ yes
-   self-enable Wireless Debugging (if WRITE_SECURE_SETTINGS held)
-        │
-   mDNS discover _adb-tls-connect ── not found ────────────────► "need-connect"
-        │ found
-   drop stale adb session (isConnected → disconnect), then
-   connect ── AdbPairingRequiredException ─────────────────────► "need-pair"  (re-pair gate)
-        │ ok
-   deploy (push dex if needed + launch daemon) → start service → "ready"
-```
+![autoStart decision flow: poll the daemon, then check pairing, enable Wireless Debugging, discover over mDNS, connect, deploy and start, ending in ready, need-pair or need-connect](docs/images/autostart-flow.png)
 
 **Fast-path grace window (issue #29):** step 1 isn't a single instant snapshot — a cold app
 launch races the FGS's own `START_STICKY` restart + bridge reconnect, so one bad-luck sample
@@ -598,20 +550,7 @@ same release the Mac's Sparkle appcast is published with). The goal is that the 
 installer, where the user presses Update. That is deliberate (no silent install, no
 `USER_ACTION_NOT_REQUIRED`), and it is also what Android allows an ordinary app.
 
-```
-ClipForegroundService ──schedule()──▶ AppUpdater   (first check ~60 s after start, then every 6 h;
-(or JS checkAppUpdate / app launch)                one retry after 15 min if the probe failed)
-        │ GET releases/latest → newer than the installed versionName?
-        ▼
-  download to cacheDir/updates/<v>.apk.part   (OkHttp, Range-resumed, progress → onAppUpdate)
-        │ rename → verify: SHA-256 (asset `digest`), same package, higher versionCode,
-        ▼                   a signing certificate shared with the installed app
-  READY ──▶ UpdateNotifier: "Update ready — tap to install"        (or the sheet's Install button)
-        ▼
-  InstallActivity ─▶ [Install unknown apps, first time] ─▶ PackageInstaller session ─▶ system "Update" screen
-        ▼ the OS replaces the app
-  PackageReplacedReceiver: reset() the record + files, restart ClipForegroundService
-```
+![Android self-update flow: trigger, check the latest release, download, verify, notify, install through PackageInstaller, then restart the service after the OS replaces the app](docs/images/app-update-flow.png)
 
 - **Why a notification tap.** Android 10+ stops a background app from starting an Activity, so with the
   app swiped away "open the installer when the download finishes" is not possible. A notification tap is
