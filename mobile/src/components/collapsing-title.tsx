@@ -1,6 +1,6 @@
 import { useNavigation } from "expo-router";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Animated } from "react-native";
+import { Animated, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useM3Colors } from "@/components/m3";
@@ -8,6 +8,29 @@ import { SANS } from "@/constants/typography";
 
 /** Where the large title sits, in window dp (what `onGloballyPositioned` reports). */
 export type TitleLayout = { x: number; y: number; width: number; height: number };
+
+/** Eased fade stops (position %, alpha): solid behind the status bar, gone at the bottom edge. */
+const FADE_STOPS: readonly (readonly [number, number])[] = [
+  [0, 1],
+  [25, 0.97],
+  [45, 0.85],
+  [65, 0.55],
+  [85, 0.2],
+  [100, 0],
+];
+
+/**
+ * Top-to-bottom CSS gradient from the theme background to the SAME colour at zero alpha (not the
+ * `transparent` keyword, which is black at 0 and can leave a grey fringe mid-fade). Eased through
+ * several stops: a plain two-stop gradient shows a visible edge where the fade begins.
+ */
+function headerGradient(color: string): string {
+  const hex = color.replace("#", "");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const a = hex.length >= 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
+  const stops = FADE_STOPS.map(([pos, alpha]) => `rgba(${r}, ${g}, ${b}, ${(alpha * a).toFixed(3)}) ${pos}%`);
+  return `linear-gradient(to bottom, ${stops.join(", ")})`;
+}
 
 /** The Android toolbar height react-native-screens (and expo-router's own `defaultHeaderHeight`) assume. */
 const TOOLBAR_HEIGHT = 56;
@@ -24,19 +47,19 @@ const TOOLBAR_HEIGHT = 56;
  * driving the header title's opacity + translateY. The header title is set ONCE through
  * `setOptions` and only ever driven by the value, so scrolling never re-renders it.
  *
- * The header is also made transparent, with the screen painting its own backdrop: a translucent
- * native header lets the body extend underneath it, so the big title slides UNDER the title bar
- * (not clipped at its edge) while a `background`-coloured layer over the header area fades in
- * (transparent → background) on the same scroll position. That layer has to live inside the screen:
- * navigation's `headerBackground` is drawn BEHIND the screen content, i.e. behind our opaque Host.
- * Because the body now starts at the top of the screen, `topInset` (status bar + toolbar) must be
- * added to the body's top padding.
+ * The header is also made transparent, and the screen paints its own gradient over the header
+ * area: `background` at the top (status bar side) fading to transparent at the bottom edge. A
+ * translucent native header lets the body extend underneath it, so content scrolling up fades out
+ * softly beneath the title bar instead of being cut off at a hard edge. The gradient lives inside the
+ * screen because navigation's `headerBackground` is drawn BEHIND the screen content, i.e. behind our
+ * opaque Compose Host. Because the body now starts at the top of the screen, `topInset` (status bar
+ * + toolbar) must be added to the body's top padding.
  *
  * The value is fed from JS (`setValue`) into a native-driven style, so the animation itself runs on
  * the UI thread; the only latency is the event's hop through JS (about a frame).
  *
  * Wire it up: `onTitleLayout` → `<LargeTitle onLayoutChange>`, `topInset` → the body's top padding,
- * and render `backdrop` as a sibling AFTER the body so it draws above it.
+ * and render `backdrop` (the gradient) as a sibling AFTER the body so it draws above it.
  */
 export function useCollapsingTitle(title: string): {
   onTitleLayout: (layout: TitleLayout) => void;
@@ -48,9 +71,6 @@ export function useCollapsingTitle(title: string): {
   const insets = useSafeAreaInsets();
   const topInset = insets.top + TOOLBAR_HEIGHT;
   const [progress] = useState(() => new Animated.Value(0));
-  // Backdrop opacity: leads the title (done by 60% of the title's height, the small title is still
-  // arriving), so the big title is covered about when the small one shows rather than overlapping.
-  const [backdropOpacity] = useState(() => new Animated.Value(0));
   // Resting (scroll 0) window `y` of the title: the highest it has ever been. Overscroll or a late
   // layout can only raise it, which is the right direction to correct in.
   const restY = useRef<number | null>(null);
@@ -89,13 +109,12 @@ export function useCollapsingTitle(title: string): {
       const from = height * 0.3;
       const to = height * 0.85;
       progress.setValue(Math.min(1, Math.max(0, (scrolled - from) / (to - from))));
-      backdropOpacity.setValue(Math.min(1, Math.max(0, scrolled / (height * 0.6))));
     },
-    [progress, backdropOpacity],
+    [progress],
   );
 
   const backdrop = (
-    <Animated.View
+    <View
       pointerEvents="none"
       style={{
         position: "absolute",
@@ -103,8 +122,7 @@ export function useCollapsingTitle(title: string): {
         left: 0,
         right: 0,
         height: topInset,
-        backgroundColor: colors.background,
-        opacity: backdropOpacity,
+        experimental_backgroundImage: headerGradient(colors.background),
       }}
     />
   );
