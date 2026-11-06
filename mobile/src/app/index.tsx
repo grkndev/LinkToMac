@@ -13,6 +13,7 @@ import {
   weight,
 } from "@expo/ui/jetpack-compose/modifiers";
 import { useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 
 import { Group, useM3Colors } from "@/components/m3";
 import { M3Screen } from "@/components/m3-screen";
@@ -50,6 +51,11 @@ export default function HomeScreen() {
 
   const status = useConnectionStatus(relay);
   const connected = status.connected;
+
+  // Lock Mac feedback: the tile's icon flips to a check for a moment once the command went out.
+  const [locked, setLocked] = useState(false);
+  const lockTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(lockTimer.current), []);
 
   const sending = fileItems?.some((e) => e.status === "active" || e.status === "queued");
   const filesValue =
@@ -129,6 +135,7 @@ export default function HomeScreen() {
         connected={connected}
         statusLabel={status.label}
         statusColor={status.color}
+        waiting={status.state === "connecting" || status.state === "reconnecting"}
         stats={stats}
       />
 
@@ -140,9 +147,16 @@ export default function HomeScreen() {
           label="Lock Mac"
           variant="filled"
           enabled={connected}
+          done={locked}
           onPress={() => {
             haptic();
-            SelfAdb.sendCommand("lock").catch(() => {});
+            SelfAdb.sendCommand("lock")
+              .then(() => {
+                setLocked(true);
+                clearTimeout(lockTimer.current);
+                lockTimer.current = setTimeout(() => setLocked(false), 1500);
+              })
+              .catch(() => {});
           }}
         />
         <QuickTile colors={colors} icon={icons.cast} label="Cast Screen" badge="Soon" />

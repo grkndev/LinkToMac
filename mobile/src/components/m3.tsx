@@ -12,10 +12,12 @@ import {
   background,
   clip,
   fillMaxWidth,
+  graphicsLayer,
   padding,
   Shapes,
   size,
   weight,
+  type AnimatedValue,
 } from '@expo/ui/jetpack-compose/modifiers';
 import { Children, cloneElement, isValidElement, type ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
@@ -24,6 +26,7 @@ import { Spacing } from '@/constants/theme';
 import { useAppearance } from '@/features/appearance/appearance-context';
 
 import { useIcons, type IconSource } from './icons';
+import { Motion } from './motion';
 
 /**
  * Shared Material 3 Expressive primitives used across the native (Jetpack Compose) screens —
@@ -178,9 +181,29 @@ export function SectionLabel({ colors, children }: { colors: MaterialColors; chi
   );
 }
 
-/** Small filled status dot (connected / reconnecting / error). */
-export function StatusDot({ color, diameter = 8 }: { color: string; diameter?: number }) {
-  return <Box modifiers={[size(diameter, diameter), clip(Shapes.Circle), background(color)]} />;
+/**
+ * Small filled status dot (connected / reconnecting / error). The colour cross-fades when it
+ * changes; `alpha` takes a {@link useBreathing} value for the "still trying" pulse.
+ */
+export function StatusDot({
+  color,
+  diameter = 8,
+  alpha = 1,
+}: {
+  color: string;
+  diameter?: number;
+  alpha?: number | AnimatedValue;
+}) {
+  return (
+    <Box
+      modifiers={[
+        size(diameter, diameter),
+        clip(Shapes.Circle),
+        background(color, { animationSpec: Motion.color }),
+        graphicsLayer({ alpha }),
+      ]}
+    />
+  );
 }
 
 /**

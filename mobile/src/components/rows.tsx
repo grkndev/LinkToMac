@@ -14,11 +14,13 @@ import { Text } from "@/components/text";
 import {
   alpha,
   fillMaxWidth,
+  graphicsLayer,
   height,
   padding,
   size,
   weight,
 } from "@expo/ui/jetpack-compose/modifiers";
+import { EnterTransition, ExitTransition } from "@expo/ui/jetpack-compose";
 import type { ReactNode } from "react";
 import { Alert } from "@/components/AlertDialog";
 
@@ -33,6 +35,7 @@ import {
   type Tone,
   type RowShape,
 } from "@/components/m3";
+import { AnimatedSurface, Reveal, usePulse } from "@/components/motion";
 import { Spacing } from "@/constants/theme";
 import { haptic } from "@/lib/haptics";
 
@@ -563,6 +566,7 @@ export function QuickTile({
   onPress,
   enabled = true,
   badge,
+  done = false,
 }: {
   colors: MaterialColors;
   icon: IconSource;
@@ -571,7 +575,11 @@ export function QuickTile({
   onPress?: () => void;
   enabled?: boolean;
   badge?: string;
+  /** Swaps the icon for a check (the action just succeeded); the caller clears it after a beat. */
+  done?: boolean;
 }) {
+  const icons = useIcons();
+  const { pulse, scale } = usePulse();
   const active = onPress != null && enabled;
   const filled = variant === "filled";
   const container = !active && filled
@@ -590,18 +598,41 @@ export function QuickTile({
       ? () => Alert.show("Not connected", "Connect to your Mac first.", "OK")
       : () => Alert.show("Soon", "This feature is not available yet.", "OK");
   return (
-    <Surface
+    <AnimatedSurface
       color={container}
       shape={TILE_SHAPE}
-      onClick={handleClick}
-      modifiers={[weight(1), height(116)]}
+      onClick={() => {
+        if (active) pulse();
+        handleClick?.();
+      }}
+      modifiers={[
+        weight(1),
+        height(116),
+        graphicsLayer({ scaleX: scale, scaleY: scale }),
+      ]}
     >
       <Column
         modifiers={[fillMaxWidth(), height(116), padding(18, 16, 18, 16)]}
         verticalArrangement="spaceBetween"
       >
         <Row modifiers={[fillMaxWidth()]} horizontalArrangement="spaceBetween" verticalAlignment="center">
-          <Icon source={icon} size={28} tint={content} />
+          {/* Icon ⇄ check: two Reveals sharing one 28dp box, so the swap scales + fades in place. */}
+          <Box contentAlignment="center" modifiers={[size(28, 28)]}>
+            <Reveal
+              visible={!done}
+              enter={EnterTransition.scaleIn({ initialScale: 0.5 }).plus(EnterTransition.fadeIn())}
+              exit={ExitTransition.scaleOut({ targetScale: 0.5 }).plus(ExitTransition.fadeOut())}
+            >
+              <Icon source={icon} size={28} tint={content} />
+            </Reveal>
+            <Reveal
+              visible={done}
+              enter={EnterTransition.scaleIn({ initialScale: 0.5 }).plus(EnterTransition.fadeIn())}
+              exit={ExitTransition.scaleOut({ targetScale: 0.5 }).plus(ExitTransition.fadeOut())}
+            >
+              <Icon source={icons.check} size={28} tint={content} />
+            </Reveal>
+          </Box>
           {badge ? (
             <Surface color="transparent" shape={BADGE_SHAPE} border={{ width: 1, color: colors.outline }}>
               <Box modifiers={[padding(10, 4, 10, 4)]}>
@@ -616,7 +647,7 @@ export function QuickTile({
           {label}
         </Text>
       </Column>
-    </Surface>
+    </AnimatedSurface>
   );
 }
 

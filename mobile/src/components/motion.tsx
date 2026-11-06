@@ -18,7 +18,6 @@ import {
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
   type ComponentProps,
   type ReactNode,
@@ -51,7 +50,11 @@ export const Motion = {
  */
 export function useEntered(): boolean {
   const [entered, setEntered] = useState(false);
-  useEffect(() => setEntered(true), []);
+  // A timeout (setState in a callback, not the effect body) so the first frame is composed hidden.
+  useEffect(() => {
+    const id = setTimeout(() => setEntered(true), 0);
+    return () => clearTimeout(id);
+  }, []);
   return entered;
 }
 
@@ -61,9 +64,11 @@ export function useEntered(): boolean {
  * content on screen while it animates out.
  */
 export function useLatched<T>(value: T | null | undefined): T | undefined {
-  const last = useRef<T | undefined>(undefined);
-  if (value != null) last.current = value;
-  return value ?? last.current;
+  // State, not a ref: React forbids reading/writing refs during render. Updating state while
+  // rendering is the sanctioned "derive from props" pattern (guarded, so it settles in one pass).
+  const [last, setLast] = useState<T | undefined>(value ?? undefined);
+  if (value != null && value !== last) setLast(value);
+  return value ?? last;
 }
 
 /** A press "bounce": call `pulse()`, spread `scale` into `graphicsLayer({ scaleX: scale, scaleY: scale })`. */
@@ -86,13 +91,13 @@ export function usePulse(): { pulse: () => void; scale: AnimatedValue } {
 export function useBreathing(active: boolean, periodMs = 900): AnimatedValue {
   const [low, setLow] = useState(false);
   useEffect(() => {
-    if (!active) {
-      setLow(false);
-      return;
-    }
-    setLow(true);
+    if (!active) return;
+    const first = setTimeout(() => setLow(true), 0);
     const id = setInterval(() => setLow((l) => !l), periodMs);
-    return () => clearInterval(id);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
   }, [active, periodMs]);
   return animated(active && low ? 0.35 : 1, tween({ durationMillis: periodMs, easing: "ease" }));
 }
