@@ -11,7 +11,7 @@ import {
   verticalScroll,
 } from "@expo/ui/jetpack-compose/modifiers";
 import { useNavigation } from "expo-router";
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useState } from "react";
 import { Alert, ToastAndroid } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -35,6 +35,18 @@ export default function ClipboardHistoryScreen() {
   const { items, clear } = useClipHistory();
 
   const hasItems = !!items && items.length > 0;
+
+  // Stable keys (timestamp + occurrence): an index key remounted EVERY row when a new clip arrived.
+  const seen = new Map<number, number>();
+  const rows = (items ?? []).map((item) => {
+    const n = seen.get(item.ts) ?? 0;
+    seen.set(item.ts, n + 1);
+    return { item, key: `${item.ts}-${n}` };
+  });
+  // The items present when the list first loaded; anything not in it arrived while the screen was
+  // open and animates in. (Derived during render — guarded, so it settles in one pass.)
+  const [baseline, setBaseline] = useState<Set<string> | null>(null);
+  if (items && baseline === null) setBaseline(new Set(rows.map((r) => r.key)));
 
   // A "Clear" affordance in the native header, only while there's something to clear.
   useLayoutEffect(() => {
@@ -127,10 +139,11 @@ export default function ClipboardHistoryScreen() {
           {/* Bounded (≤100) grouped list — a plain Column, not LazyColumn, since it lives inside
               the outer verticalScroll() (infinite-height constraints crash a LazyColumn). */}
           <Group>
-            {items.map((item, i) => (
+            {rows.map(({ item, key }, i) => (
               <ClipRow
-                key={`${item.ts}-${i}`}
+                key={key}
                 colors={colors}
+                appear={baseline != null && !baseline.has(key)}
                 latest={i === 0}
                 text={preview(item.text, 200)}
                 time={formatAgo(item.ts)}

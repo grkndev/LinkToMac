@@ -5,17 +5,27 @@ import {
   getMaterialColors,
   Icon,
   Shape,
-  Surface,
+  EnterTransition,
+  ExitTransition,
   type MaterialColors,
 } from "@expo/ui/jetpack-compose";
 import { Text } from "@/components/text";
-import { background, clip, fillMaxWidth, Shapes, size } from "@expo/ui/jetpack-compose/modifiers";
+import {
+  animated,
+  background,
+  clip,
+  fillMaxWidth,
+  graphicsLayer,
+  Shapes,
+  size,
+} from "@expo/ui/jetpack-compose/modifiers";
 import { useMemo } from "react";
 import { useColorScheme } from "react-native";
 
 import { useIcons } from "@/components/icons";
 import { ButtonGroup, ModeTile, SectionLabel, useM3Colors } from "@/components/m3";
 import { M3Screen } from "@/components/m3-screen";
+import { AnimatedSurface, Motion, Reveal } from "@/components/motion";
 import { Spacing } from "@/constants/theme";
 import {
   COLOR_LABELS,
@@ -100,6 +110,9 @@ export default function AppearanceScreen() {
   );
 }
 
+const POP_IN = EnterTransition.scaleIn({ initialScale: 0.4 }).plus(EnterTransition.fadeIn());
+const POP_OUT = ExitTransition.scaleOut({ targetScale: 0.4 }).plus(ExitTransition.fadeOut());
+
 /** A 64dp circular colour choice with its label; the selected one carries a check and a ring. */
 function Swatch({
   colors,
@@ -131,7 +144,7 @@ function Swatch({
       verticalArrangement={{ spacedBy: Spacing.one }}
       modifiers={[size(72, 92)]}
     >
-      <Surface
+      <AnimatedSurface
         color={selected ? colors.primary : colors.surfaceContainerHigh}
         shape={CIRCLE}
         onClick={onPress}
@@ -140,16 +153,27 @@ function Swatch({
         <Box contentAlignment="center" modifiers={[size(64, 64)]}>
           <Box
             contentAlignment="center"
-            modifiers={[size(selected ? 52 : 56, selected ? 52 : 56), clip(Shapes.Circle), background(fill)]}
+            modifiers={[
+              size(56, 56),
+              // Selected = a ring: the dot shrinks 56 → 52 with a spring. Layer first, so the
+              // clip and fill are inside the scaled layer.
+              graphicsLayer({
+                scaleX: animated(selected ? 52 / 56 : 1, Motion.spatial),
+                scaleY: animated(selected ? 52 / 56 : 1, Motion.spatial),
+              }),
+              clip(Shapes.Circle),
+              background(fill),
+            ]}
           >
-            {selected ? (
+            <Reveal visible={selected} enter={POP_IN} exit={POP_OUT}>
               <Icon source={icons.check} size={26} tint={onFill} />
-            ) : dynamic ? (
+            </Reveal>
+            <Reveal visible={!selected && dynamic} enter={POP_IN} exit={POP_OUT}>
               <Icon source={icons.wallpaper} size={26} tint={onFill} />
-            ) : null}
+            </Reveal>
           </Box>
         </Box>
-      </Surface>
+      </AnimatedSurface>
       <Text
         color={selected ? colors.onSurface : colors.onSurfaceVariant}
         style={{ typography: "labelMedium", fontWeight: selected ? "700" : "500", textAlign: "center" }}

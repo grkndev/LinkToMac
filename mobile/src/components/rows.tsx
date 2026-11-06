@@ -35,7 +35,7 @@ import {
   type Tone,
   type RowShape,
 } from "@/components/m3";
-import { AnimatedSurface, Reveal, usePulse } from "@/components/motion";
+import { AnimatedSurface, Reveal, useLatched, usePulse } from "@/components/motion";
 import { Spacing } from "@/constants/theme";
 import { haptic } from "@/lib/haptics";
 
@@ -106,6 +106,10 @@ export function GroupRow({
         }
       : { onClick };
   const container = color ?? colors.surfaceContainer;
+  // Latched: when a notice goes away (permission granted) it must keep rendering while it animates
+  // out, and the row must keep the card structure meanwhile instead of snapping back to a bare row.
+  const keptFooter = useLatched<ReactNode>(footer);
+  const withFooter = keptFooter != null;
   const end =
     trailing ??
     (chevron ? (
@@ -115,7 +119,7 @@ export function GroupRow({
   const row = (
     <Surface
       // With a footer the outer card owns the colour; the clickable row is just a ripple area.
-      color={footer ? "transparent" : container}
+      color={withFooter ? "transparent" : container}
       shape={shape}
       modifiers={[fillMaxWidth()]}
       {...toggleable}
@@ -175,12 +179,14 @@ export function GroupRow({
     </Surface>
   );
 
-  if (!footer) return row;
+  if (!withFooter) return row;
   return (
     <Surface color={container} shape={shape} modifiers={[fillMaxWidth()]}>
       <Column modifiers={[fillMaxWidth()]}>
         {row}
-        {footer}
+        <Reveal visible={footer != null} appear>
+          {keptFooter}
+        </Reveal>
       </Column>
     </Surface>
   );
@@ -431,6 +437,7 @@ export function ClipRow({
   time,
   latest,
   mono,
+  appear,
   onPress,
   shape,
 }: {
@@ -440,6 +447,9 @@ export function ClipRow({
   latest?: boolean;
   /** Code/command-looking text: monospace. */
   mono?: boolean;
+  /** Plays the enter transition on mount (an item that arrived while the screen was open). Fixed
+   *  per item, so the row's structure never changes under a stable key. */
+  appear?: boolean;
   onPress: () => void;
   shape?: RowShape;
 }) {
@@ -447,8 +457,8 @@ export function ClipRow({
   const bg = latest ? colors.primaryContainer : colors.surfaceContainer;
   const on = latest ? colors.onPrimaryContainer : colors.onSurface;
   const sub = latest ? withAlpha(colors.onPrimaryContainer, 0.8) : colors.onSurfaceVariant;
-  return (
-    <Surface color={bg} shape={shape ?? groupShape(true, true)} onClick={onPress} modifiers={[fillMaxWidth()]}>
+  const card = (
+    <AnimatedSurface color={bg} shape={shape ?? groupShape(true, true)} onClick={onPress} modifiers={[fillMaxWidth()]}>
       <Row
         modifiers={[fillMaxWidth(), padding(16, 16, 16, 16)]}
         horizontalArrangement={{ spacedBy: 14 }}
@@ -487,7 +497,14 @@ export function ClipRow({
           </Box>
         )}
       </Row>
-    </Surface>
+    </AnimatedSurface>
+  );
+  return appear ? (
+    <Reveal visible appear>
+      {card}
+    </Reveal>
+  ) : (
+    card
   );
 }
 
