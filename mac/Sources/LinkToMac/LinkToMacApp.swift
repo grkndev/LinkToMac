@@ -43,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The main dashboard window. Built lazily and reused (the app is now a regular Dock app, so
     /// the window is the primary surface; the menu-bar extra is the quick-glance companion).
     private var dashboardWindow: NSWindow?
+    /// The dashboard's sub-screen stack, shared by `DashboardView` and the titlebar Back button.
+    private let dashboardNav = DashboardNav()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         client.connect()
@@ -143,7 +145,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 proximity: proximity,
                 appearance: appearance,
                 onApplyLan: { [weak self] in self?.applyLanSettings() }, // LAN port/enabled may have changed
-                onCheckForUpdates: { [weak self] in self?.checkForUpdates() }
+                onCheckForUpdates: { [weak self] in self?.checkForUpdates() },
+                nav: dashboardNav
             )
             let hosting = NSHostingController(rootView: root)
             // We pin the window size ourselves (below); stop the hosting controller from imposing
@@ -167,6 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.minSize = fixedSize
             window.maxSize = fixedSize
             window.appearance = NSAppearance(named: .darkAqua)
+            // The Back button sits in the titlebar beside the traffic lights (see DashboardWindow).
+            window.addTitlebarAccessoryViewController(makeDashboardBackAccessory(nav: dashboardNav))
             window.center()
             dashboardWindow = window
         }

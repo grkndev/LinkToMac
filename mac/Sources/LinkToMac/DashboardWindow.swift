@@ -3,9 +3,10 @@ import SwiftUI
 /// Root view of the main dashboard window (hosted by `AppDelegate.showDashboardWindow()`). A
 /// two-column layout matching the reference design: `PhonePanel` on the left, `FeaturePanel` on
 /// the right. The Clipboard / Settings / About sub-screens (which replaced the three standalone
-/// `NSWindow`s) are shown via an **explicit `path` stack with a custom back bar** rather than a
-/// `NavigationStack` — a hosted `NSHostingController` window doesn't render the navigation
-/// titlebar back button, so we draw our own.
+/// `NSWindow`s) are shown via an **explicit `path` stack (`DashboardNav`) with our own Back
+/// button** rather than a `NavigationStack` — a hosted `NSHostingController` window doesn't render
+/// the navigation titlebar back button. The button is a titlebar accessory
+/// (`makeDashboardBackAccessory`), which is why the stack lives in a shared object.
 ///
 /// Force-dark (`.preferredColorScheme(.dark)`) to match the design; the window also sets a
 /// `.darkAqua` appearance so the titlebar follows. **Phase 1: the panels show placeholder
@@ -17,8 +18,13 @@ struct DashboardView: View {
     let onApplyLan: () -> Void
     let onCheckForUpdates: () -> Void
 
-    /// Sub-screen stack. Empty == the dashboard home. Push appends, the back bar pops.
-    @State private var path: [DashRoute] = []
+    /// Sub-screen stack, shared with the titlebar's Back button (an AppKit accessory outside this
+    /// view tree — see `TitlebarBackView`). Empty == the dashboard home.
+    let nav: DashboardNav
+    private var path: [DashRoute] {
+        get { nav.path }
+        nonmutating set { nav.path = newValue }
+    }
 
     var body: some View {
         ZStack {
@@ -30,16 +36,20 @@ struct DashboardView: View {
                 .opacity(path.isEmpty ? 1 : 0)
                 .allowsHitTesting(path.isEmpty)
             if let route = path.last {
-                VStack(spacing: 0) {
-                    backBar(title: title(for: route))
-                    Divider().overlay(M3.outlineVariant)
-                    screen(for: route)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-                .background(M3.surface)
-                // Let the back bar rise into the titlebar region so it sits level with the traffic
-                // lights instead of below the top safe-area inset.
-                .ignoresSafeArea(.container, edges: .top)
+                screen(for: route)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(M3.surface)
+                    // Same top clearance as `home`. The Back button lives in the titlebar (next to
+                    // the traffic lights), not here: drawn from SwiftUI into the titlebar band it
+                    // vanished on macOS 27, because that band is painted over the content.
+                    .padding(.top, 40)
+                    // ⌘[ — the standard "back". A zero-size hidden button, so it works wherever
+                    // the titlebar button is or isn't.
+                    .background {
+                        Button("Back", action: nav.pop)
+                            .keyboardShortcut("[", modifiers: .command)
+                            .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+                    }
             }
         }
         // Drag any file onto the window and the whole dashboard becomes the drop target; the same
@@ -84,32 +94,66 @@ struct DashboardView: View {
         }
     }
 
-    private func backBar(title: String) -> some View {
-        HStack(spacing: 12) {
-            Button { if !path.isEmpty { path.removeLast() } } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.left").font(.system(size: 14, weight: .semibold))
-                    Text("Back").font(M3.labelLarge)
-                }
-                .foregroundStyle(M3.onSurfaceVariant)
-            }
-            .buttonStyle(.plain)
-            Text(title).font(M3.titleMedium).foregroundStyle(M3.onSurface)
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, 80)  // start just right of the traffic lights
-        .padding(.trailing, 16)
-        .frame(height: 30)      // ≈ titlebar height, so content lines up with the traffic lights
-        .frame(maxWidth: .infinity)
-        .background(M3.surface)
-    }
+}
 
-    private func title(for route: DashRoute) -> String {
-        switch route {
+// MARK: - Navigation state + titlebar Back button
+
+/// The sub-screen stack, pulled out of `DashboardView`'s `@State` so a view *outside* its tree —
+/// the titlebar accessory below — can read and pop it.
+@MainActor @Observable
+final class DashboardNav {
+    var path: [DashRoute] = []
+    func pop() { if !path.isEmpty { path.removeLast() } }
+}
+
+extension DashRoute {
+    var title: String {
+        switch self {
         case .clipboard: return "Clipboard History"
         case .settings: return "Settings"
         case .relay: return "Relay Server"
         case .about: return "About"
         }
     }
+}
+
+/// "‹ Back  <screen title>", shown only while a sub-screen is open (the home screen leaves it
+/// empty). Hosted in a titlebar accessory so it sits beside the traffic lights.
+private struct TitlebarBackView: View {
+    let nav: DashboardNav
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let route = nav.path.last {
+                Button(action: nav.pop) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
+                        Text("Back").font(M3.labelLarge)
+                    }
+                    .foregroundStyle(M3.onSurfaceVariant)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Text(route.title).font(M3.titleMedium).foregroundStyle(M3.onSurface)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// A `.leading` titlebar accessory — AppKit places it in the titlebar row next to the traffic
+/// lights. Used instead of drawing the button from SwiftUI because the dashboard's titlebar is
+/// transparent over full-size content, and SwiftUI content laid out into that band is not shown.
+@MainActor
+func makeDashboardBackAccessory(nav: DashboardNav) -> NSTitlebarAccessoryViewController {
+    let host = NSHostingView(rootView: TitlebarBackView(nav: nav))
+    host.sizingOptions = []                      // keep the frame below; don't resize to content
+    host.frame = NSRect(x: 0, y: 0, width: 360, height: 28)
+    let accessory = NSTitlebarAccessoryViewController()
+    accessory.view = host
+    accessory.layoutAttribute = .leading
+    return accessory
 }
