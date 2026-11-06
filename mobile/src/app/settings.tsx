@@ -49,7 +49,7 @@ const BLOCKED_HINT =
 const MODE_LABELS = { system: "System", light: "Light", dark: "Dark" } as const;
 
 export default function SettingsScreen() {
-  const onTitleLayout = useCollapsingTitle("Settings");
+  const { onTitleLayout, topInset, backdrop } = useCollapsingTitle("Settings");
   const router = useRouter();
   const { unpair, server } = usePairing();
   const colors = useM3Colors();
@@ -113,7 +113,7 @@ export default function SettingsScreen() {
 
   return (
     <>
-      <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
+      <M3Screen paddingTop={topInset + Spacing.one} spacing={Spacing.four}>
         <LargeTitle colors={colors} onLayoutChange={onTitleLayout}>
           Settings
         </LargeTitle>
@@ -241,6 +241,7 @@ export default function SettingsScreen() {
           />
         </Group>
       </M3Screen>
+      {backdrop}
       <ConfirmSheet
         visible={confirmingUnpair}
         onDismiss={() => setConfirmingUnpair(false)}

@@ -15,7 +15,7 @@ import { usePermissionSettings } from "@/features/selfadb/use-permission-setting
  * mirroring to the Mac, with the per-app picker (notification-apps.tsx) while mirroring is on.
  */
 export default function NotificationsScreen() {
-  const onTitleLayout = useCollapsingTitle("Notifications");
+  const { onTitleLayout, topInset, backdrop } = useCollapsingTitle("Notifications");
   const router = useRouter();
   const colors = useM3Colors();
   const icons = useIcons();
@@ -46,55 +46,58 @@ export default function NotificationsScreen() {
     ) : undefined;
 
   return (
-    <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
-      <LargeTitle colors={colors} onLayoutChange={onTitleLayout}>
-        Notifications
-      </LargeTitle>
+    <>
+      <M3Screen paddingTop={topInset + Spacing.one} spacing={Spacing.four}>
+        <LargeTitle colors={colors} onLayoutChange={onTitleLayout}>
+          Notifications
+        </LargeTitle>
 
-      <Section colors={colors} label="On this phone">
-        <SwitchRow
-          colors={colors}
-          icon={icons.notificationsActive}
-          tone="primary"
-          label="Show notification icon"
-          hint="A notification icon will be displayed in the status bar."
-          value={notifIconVisible}
-          onValueChange={toggleNotifIcon}
-        />
-        {notifGranted === false ? (
-          <ActionRow
+        <Section colors={colors} label="On this phone">
+          <SwitchRow
             colors={colors}
             icon={icons.notificationsActive}
-            label="Grant notification permission"
-            hint="Without permission, connection status notifications cannot be displayed."
-            onPress={requestNotifPermission}
-          />
-        ) : null}
-      </Section>
-
-      <Section colors={colors} label="On your Mac">
-        <SwitchRow
-          colors={colors}
-          icon={icons.screenShare}
-          tone="primary"
-          label="Mirror notifications"
-          hint="Show this phone's notifications on your Mac"
-          value={notifMirrorOn}
-          onValueChange={toggleNotifMirror}
-          footer={accessNotice}
-        />
-        {notifMirrorOn ? (
-          <ActionRow
-            colors={colors}
-            icon={icons.apps}
             tone="primary"
-            label="Select apps"
-            hint={filterSummary ?? "Choose which apps are mirrored to your Mac."}
-            onPress={() => router.push("/notification-apps")}
-            chevron
+            label="Show notification icon"
+            hint="A notification icon will be displayed in the status bar."
+            value={notifIconVisible}
+            onValueChange={toggleNotifIcon}
           />
-        ) : null}
-      </Section>
-    </M3Screen>
+          {notifGranted === false ? (
+            <ActionRow
+              colors={colors}
+              icon={icons.notificationsActive}
+              label="Grant notification permission"
+              hint="Without permission, connection status notifications cannot be displayed."
+              onPress={requestNotifPermission}
+            />
+          ) : null}
+        </Section>
+
+        <Section colors={colors} label="On your Mac">
+          <SwitchRow
+            colors={colors}
+            icon={icons.screenShare}
+            tone="primary"
+            label="Mirror notifications"
+            hint="Show this phone's notifications on your Mac"
+            value={notifMirrorOn}
+            onValueChange={toggleNotifMirror}
+            footer={accessNotice}
+          />
+          {notifMirrorOn ? (
+            <ActionRow
+              colors={colors}
+              icon={icons.apps}
+              tone="primary"
+              label="Select apps"
+              hint={filterSummary ?? "Choose which apps are mirrored to your Mac."}
+              onPress={() => router.push("/notification-apps")}
+              chevron
+            />
+          ) : null}
+        </Section>
+      </M3Screen>
+    {backdrop}
+    </>
   );
 }
