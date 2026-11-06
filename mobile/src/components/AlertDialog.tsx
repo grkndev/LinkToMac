@@ -3,10 +3,10 @@ import {
   Host,
   AlertDialog as ComposeAlertDialog,
   TextButton,
-  Text,
   Icon,
   Button,
 } from "@expo/ui/jetpack-compose";
+import { Text } from "@/components/text";
 import { ImageSourcePropType } from "react-native";
 import { useM3Colors } from "./m3";
 

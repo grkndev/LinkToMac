@@ -1,26 +1,23 @@
 import {
   Box,
-  Column,
   Icon,
   Row,
   Shape,
   Surface,
-  Text,
-} from "@expo/ui/jetpack-compose";
+  } from "@expo/ui/jetpack-compose";
+import { Text } from "@/components/text";
 import {
-  background,
-  clip,
-  fillMaxSize,
   fillMaxWidth,
-  padding,
-  Shapes,
+  height,
   size,
+  weight,
 } from "@expo/ui/jetpack-compose/modifiers";
 import { useRouter } from "expo-router";
 
-import { ButtonGroup, Group, useM3Colors } from "@/components/m3";
+import { Group, useM3Colors } from "@/components/m3";
 import { M3Screen } from "@/components/m3-screen";
-import { ActionTile, NavRow } from "@/components/rows";
+import { NavRow, QuickTile } from "@/components/rows";
+import { StatusCard, type StatTileData } from "@/components/status-card";
 import { useIcons } from "@/components/icons";
 import { Spacing } from "@/constants/theme";
 import { haptic } from "@/lib/haptics";
@@ -29,25 +26,17 @@ import SelfAdb from "@/features/selfadb/client";
 import { useClipHistory } from "@/features/clip-history/use-clip-history";
 import { useFileHistory } from "@/features/files/use-file-history";
 import { useMacBattery } from "@/features/telemetry/use-mac-battery";
-import {
-  macDistanceLabel,
-  useMacDistance,
-} from "@/features/telemetry/use-mac-distance";
+import { useMacDistance } from "@/features/telemetry/use-mac-distance";
 import { usePairing } from "@/features/pairing/pairing-context";
 import { useConnectionStatus } from "@/features/connection/use-connection-status";
 import { useRelayStatus } from "@/features/connection/use-relay-status";
 
-/** 28dp "extra-large" rounded square for the expressive hero tile. */
-const HERO_SHAPE = Shape.RoundedCorner({
-  cornerRadii: { topStart: 28, topEnd: 28, bottomStart: 28, bottomEnd: 28 },
+/** The round settings button in the top bar. */
+const BUTTON_SHAPE = Shape.RoundedCorner({
+  cornerRadii: { topStart: 24, topEnd: 24, bottomStart: 24, bottomEnd: 24 },
 });
 
-/** Pill for the LAN/Relay transport chip next to the connection status. */
-const CHIP_SHAPE = Shape.RoundedCorner({
-  cornerRadii: { topStart: 8, topEnd: 8, bottomStart: 8, bottomEnd: 8 },
-});
-
-/** Home: paired Mac's identity + connection state, plus quick actions. */
+/** Home: the paired Mac and its live status in one card, plus quick actions and entry points. */
 export default function HomeScreen() {
   const router = useRouter();
   const colors = useM3Colors();
@@ -79,193 +68,102 @@ export default function HomeScreen() {
       ? ""
       : "No items received yet";
 
+  // Stat tiles: only what the Mac has actually reported (a desktop Mac never sends a battery;
+  // distance needs the Mac's proximity auto-lock on and this phone in range).
+  const stats: StatTileData[] = [];
+  if (status.transportLabel) {
+    stats.push({
+      key: "transport",
+      icon: status.transportLabel === "LAN" ? icons.wifi : icons.dns,
+      value: status.transportLabel,
+      label: "Transport",
+    });
+  }
+  if (battery) {
+    stats.push({
+      key: "battery",
+      icon: icons.battery,
+      value: `${battery.level}%`,
+      label: battery.charging ? "Charging" : "Battery",
+      accent: battery.charging,
+    });
+  }
+  if (distance) {
+    stats.push({
+      key: "distance",
+      icon: icons.sensors,
+      value: distance.prox === "near" ? "Near" : "Away",
+      label: distance.rssi != null ? `${distance.rssi} dBm` : "In range",
+    });
+  }
+
   return (
-    <M3Screen safeTop spacing={Spacing.five}>
-        {/* Top bar: settings entry point. */}
-        <Row modifiers={[fillMaxWidth()]} horizontalArrangement="end">
-          <Surface
-            color={colors.surfaceContainerHigh}
-            shape={HERO_SHAPE}
-            onClick={() => router.push("/settings")}
-            modifiers={[size(44, 44)]}
-          >
-            <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
-              <Icon
-                source={icons.settings}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            </Box>
-          </Surface>
-        </Row>
-
-        {/* Hero: the paired Mac's identity + live connection status. */}
-        <Column
-          modifiers={[fillMaxWidth()]}
-          horizontalAlignment="center"
-          verticalArrangement={{ spacedBy: Spacing.two }}
+    <M3Screen safeTop paddingTop={0} spacing={Spacing.three}>
+      {/* Top bar: title + settings entry point. */}
+      <Row
+        modifiers={[fillMaxWidth(), height(64)]}
+        verticalAlignment="center"
+      >
+        <Text
+          modifiers={[weight(1)]}
+          color={colors.onSurface}
+          style={{ typography: "titleLarge", fontSize: 22, fontWeight: "500" }}
         >
-          <Surface
-            color={colors.secondaryContainer}
-            shape={HERO_SHAPE}
-            modifiers={[size(96, 96)]}
-          >
-            <Box contentAlignment="center" modifiers={[fillMaxSize()]}>
-              <Icon
-                source={icons.laptop}
-                size={46}
-                tint={colors.onSecondaryContainer}
-              />
-            </Box>
-          </Surface>
-          <Text
-            color={colors.onSurface}
-            style={{
-              typography: "headlineSmall",
-              fontWeight: "600",
-              textAlign: "center",
-            }}
-          >
-            {pairing?.name ?? "Mac"}
-          </Text>
-         
-          <Row
-            verticalAlignment="center"
-            horizontalArrangement={{ spacedBy: Spacing.two }}
-          >
-            {connected && status.transportLabel ? (
-              <Surface color={colors.secondaryContainer} shape={CHIP_SHAPE}>
-                <Box
-                  modifiers={[
-                    padding(Spacing.two, Spacing.one, Spacing.two, Spacing.one),
-                  ]}
-                >
-                  <Text
-                    color={colors.onSecondaryContainer}
-                    style={{ typography: "labelMedium", fontWeight: "700" }}
-                  >
-                    {status.transportLabel}
-                  </Text>
-                </Box>
-              </Surface>
-            ) : null}
-            {/* Mac battery — only when connected and the Mac has reported one (desktop Macs never do).
-                A charging Mac uses the tertiary tone so plugged-in reads at a glance. */}
-            {connected && battery ? (
-              <Surface
-                color={
-                  battery.charging
-                    ? colors.tertiaryContainer
-                    : colors.secondaryContainer
-                }
-                shape={CHIP_SHAPE}
-              >
-                <Row
-                  verticalAlignment="center"
-                  horizontalArrangement={{ spacedBy: Spacing.one }}
-                  modifiers={[
-                    padding(Spacing.two, Spacing.one, Spacing.two, Spacing.one),
-                  ]}
-                >
-                  <Icon
-                    source={icons.battery}
-                    size={14}
-                    tint={
-                      battery.charging
-                        ? colors.onTertiaryContainer
-                        : colors.onSecondaryContainer
-                    }
-                  />
-                  <Text
-                    color={
-                      battery.charging
-                        ? colors.onTertiaryContainer
-                        : colors.onSecondaryContainer
-                    }
-                    style={{ typography: "labelMedium", fontWeight: "700" }}
-                  >
-                    {`${battery.level}%`}
-                  </Text>
-                </Row>
-              </Surface>
-            ) : null}
-          </Row>
+          Link to Mac
+        </Text>
+        <Surface
+          color={colors.surfaceContainer}
+          shape={BUTTON_SHAPE}
+          onClick={() => router.push("/settings")}
+          modifiers={[size(48, 48)]}
+        >
+          <Box contentAlignment="center" modifiers={[size(48, 48)]}>
+            <Icon source={icons.settings} size={24} tint={colors.onSurface} />
+          </Box>
+        </Surface>
+      </Row>
 
-          {/* BLE distance the Mac measured for this phone (it can't measure that itself — it only
-              advertises). Sits between the connection type (chips) and status; only present while
-              the Mac's proximity auto-lock is on and the phone is in range. */}
-          {connected && distance ? (
-            <Row
-              verticalAlignment="center"
-              horizontalArrangement={{ spacedBy: Spacing.one }}
-            >
-              <Icon
-                source={icons.sensors}
-                size={16}
-                tint={colors.onSurfaceVariant}
-              />
-              <Text
-                color={colors.onSurfaceVariant}
-                style={{ typography: "labelLarge", fontWeight: "600" }}
-              >
-                {macDistanceLabel(distance)}
-              </Text>
-            </Row>
-          ) : null}
+      <StatusCard
+        colors={colors}
+        name={pairing?.name ?? "Mac"}
+        connected={connected}
+        statusLabel={status.label}
+        statusColor={status.color}
+        stats={stats}
+      />
 
-           <Row
-            verticalAlignment="center"
-            horizontalArrangement={{ spacedBy: Spacing.two }}
-          >
-            <Box
-              modifiers={[
-                size(8, 8),
-                clip(Shapes.Circle),
-                background(status.color),
-              ]}
-            />
-            <Text
-              color={colors.onSurfaceVariant}
-              style={{ typography: "labelLarge", fontWeight: "600" }}
-            >
-              {status.label}
-            </Text>
-          </Row>
-        </Column>
+      {/* Quick actions — Lock Mac is live (needs a connected Mac); Cast is a "Soon" placeholder. */}
+      <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: Spacing.two }}>
+        <QuickTile
+          colors={colors}
+          icon={icons.lock}
+          label="Lock Mac"
+          variant="filled"
+          enabled={connected}
+          onPress={() => {
+            haptic();
+            SelfAdb.sendCommand("lock").catch(() => {});
+          }}
+        />
+        <QuickTile colors={colors} icon={icons.cast} label="Cast Screen" badge="Soon" />
+      </Row>
 
-        {/* Quick actions — Lock Mac is live (needs a connected Mac); Cast is still a placeholder. */}
-        <ButtonGroup>
-          <ActionTile
-            colors={colors}
-            icon={icons.lock}
-            label="Lock Mac"
-            enabled={connected}
-            onPress={() => {
-              haptic();
-              SelfAdb.sendCommand("lock").catch(() => {});
-            }}
-          />
-          <ActionTile colors={colors} icon={icons.cast} label="Cast Screen" />
-        </ButtonGroup>
-          
-
-        {/* Info list — same grouped-list language as Settings. */}
-        <Group>
-          <NavRow
-            colors={colors}
-            icon={icons.folder}
-            label="Files"
-            value={filesValue}
-            onClick={() => router.push("/files")}
-          />
-          <NavRow
-            colors={colors}
-            icon={icons.clipboard}
-            label="Clipboard"
-            value={clipValue}
-            onClick={() => router.push("/clipboard-history")}
-          />
-        </Group>
+      <Group>
+        <NavRow
+          colors={colors}
+          icon={icons.folder}
+          label="Files"
+          value={filesValue}
+          onClick={() => router.push("/files")}
+        />
+        <NavRow
+          colors={colors}
+          icon={icons.clipboard}
+          label="Clipboard"
+          value={clipValue}
+          onClick={() => router.push("/clipboard-history")}
+        />
+      </Group>
     </M3Screen>
   );
 }

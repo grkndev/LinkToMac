@@ -1,21 +1,23 @@
 import { useRouter } from "expo-router";
 
 import { useIcons } from "@/components/icons";
-import { ActionRow, SwitchRow } from "@/components/rows";
-import { Group, useM3Colors } from "@/components/m3";
+import { ActionRow, InlineNotice, SwitchRow } from "@/components/rows";
+import { LargeTitle, Section, useM3Colors } from "@/components/m3";
 import { M3Screen } from "@/components/m3-screen";
 import { Spacing } from "@/constants/theme";
 import SelfAdb from "@/features/selfadb/client";
+import { useNotifFilterSummary } from "@/features/selfadb/use-notification-app-filter";
 import { usePermissionSettings } from "@/features/selfadb/use-permission-settings";
 
 /**
- * Notification settings: the status-bar icon + mirroring toggles (moved out of Settings), plus
- * the entry point to the per-app mirroring picker (notification-apps.tsx) while mirroring is on.
+ * Notification settings, split by where the effect lands: the status-bar icon (this phone) and
+ * mirroring to the Mac, with the per-app picker (notification-apps.tsx) while mirroring is on.
  */
 export default function NotificationsScreen() {
   const router = useRouter();
   const colors = useM3Colors();
   const icons = useIcons();
+  const filterSummary = useNotifFilterSummary();
   const {
     notifIconVisible,
     toggleNotifIcon,
@@ -26,12 +28,30 @@ export default function NotificationsScreen() {
     notifAccess,
   } = usePermissionSettings();
 
+  const accessNotice =
+    notifMirrorOn && notifAccess === false ? (
+      <InlineNotice
+        colors={colors}
+        tone="tertiary"
+        icon={icons.key}
+        title="Grant notification access"
+        message="Opens Android's Notification access settings"
+        trailingIcon={icons.openInNew}
+        onClick={() => {
+          SelfAdb.openNotificationAccessSettings().catch(() => {});
+        }}
+      />
+    ) : undefined;
+
   return (
-    <M3Screen paddingTop={Spacing.three}>
-      <Group>
+    <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
+      <LargeTitle colors={colors}>Notifications</LargeTitle>
+
+      <Section colors={colors} label="On this phone">
         <SwitchRow
           colors={colors}
-          icon={icons.notifications}
+          icon={icons.notificationsActive}
+          tone="primary"
           label="Show notification icon"
           hint="A notification icon will be displayed in the status bar."
           value={notifIconVisible}
@@ -46,35 +66,31 @@ export default function NotificationsScreen() {
             onPress={requestNotifPermission}
           />
         ) : null}
+      </Section>
+
+      <Section colors={colors} label="On your Mac">
         <SwitchRow
           colors={colors}
-          icon={icons.notificationsActive}
+          icon={icons.screenShare}
+          tone="primary"
           label="Mirror notifications"
-          hint="Forward this phone's notifications to your Mac. Requires notification access."
+          hint="Show this phone's notifications on your Mac"
           value={notifMirrorOn}
           onValueChange={toggleNotifMirror}
+          footer={accessNotice}
         />
-        {notifMirrorOn && notifAccess === false ? (
-          <ActionRow
-            colors={colors}
-            icon={icons.notifications}
-            label="Grant notification access"
-            hint="Allow Link to macOS to read notifications so they can be mirrored to your Mac."
-            onPress={() => {
-              SelfAdb.openNotificationAccessSettings().catch(() => {});
-            }}
-          />
-        ) : null}
         {notifMirrorOn ? (
           <ActionRow
             colors={colors}
             icon={icons.apps}
+            tone="primary"
             label="Select apps"
-            hint="Choose which apps are mirrored to your Mac."
+            hint={filterSummary ?? "Choose which apps are mirrored to your Mac."}
             onPress={() => router.push("/notification-apps")}
+            chevron
           />
         ) : null}
-      </Group>
+      </Section>
     </M3Screen>
   );
 }

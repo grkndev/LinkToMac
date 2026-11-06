@@ -4,6 +4,8 @@
     "": {
       "name": "mobile",
       "dependencies": {
+        "@expo-google-fonts/google-sans-flex": "^0.4.7",
+        "@expo-google-fonts/jetbrains-mono": "^0.4.1",
         "@expo/ui": "~56.0.17",
         "@expo/vector-icons": "^15.0.2",
         "expo": "~56.0.11",
@@ -218,6 +220,10 @@
     "@eslint/object-schema": ["@eslint/object-schema@2.1.7", "", {}, "sha512-VtAOaymWVfZcmZbp6E2mympDIHvyjXs/12LqWYjVw6qjrfF+VK+fyG33kChz3nnK+SU5/NeHOqrTEHS8sXO3OA=="],
 
     "@eslint/plugin-kit": ["@eslint/plugin-kit@0.4.1", "", { "dependencies": { "@eslint/core": "^0.17.0", "levn": "^0.4.1" } }, "sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA=="],
+
+    "@expo-google-fonts/google-sans-flex": ["@expo-google-fonts/google-sans-flex@0.4.7", "", {}, "sha512-cTovtkO/qy7Hi6uaMqtRtEyuVshXbfc8ugWLzg1ykJrUsN4kBsBCP3pKVTlTqNwG1ihnew3vUK5QGdKzpa62mw=="],
+
+    "@expo-google-fonts/jetbrains-mono": ["@expo-google-fonts/jetbrains-mono@0.4.1", "", {}, "sha512-CslACrtMOcRwoWXCO7OMEI+9w3fukWSoBtvNz46OqPoogEuuoY0tkDY1O8sFumk8t0pC6Cx0Xr95O0TOQhpkug=="],
 
     "@expo-google-fonts/material-symbols": ["@expo-google-fonts/material-symbols@0.4.38", "", {}, "sha512-IJkBtN1o8u9BW5fvSii1MyHPQ7Q0HxbWcVBvOrOzgMLpVtZw7R2w94wBTVR7kZwv3w1JNTESMmLA5Sqn1+Z36A=="],
 

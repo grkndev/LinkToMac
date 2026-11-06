@@ -1,10 +1,18 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { Column, Icon, Row, Surface, Shape, } from '@expo/ui/jetpack-compose';
+import { Text } from "@/components/text";
+import { fillMaxSize, fillMaxWidth, padding, weight } from '@expo/ui/jetpack-compose/modifiers';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Share, Text, View } from 'react-native';
+import { Share } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ToolButton } from '@/components/buttons';
+import { useIcons } from '@/components/icons';
+import { LogView } from '@/components/log-view';
+import { useM3Colors } from '@/components/m3';
+import { M3Host } from '@/components/m3-screen';
+import { Spacing } from '@/constants/theme';
 import SelfAdb, { CLIP_PORT } from '@/features/selfadb/client';
 import { TimeoutError, withTimeout } from '@/lib/async';
-import { useTheme } from '@/hooks/use-theme';
 
 // JS-side backstops. The native calls are now internally bounded (libadb connect is capped and
 // a busy op returns immediately), so these only fire if something unforeseen wedges — without
@@ -26,6 +34,9 @@ function describeError(e: unknown): string {
  * once, so the app can't time individual lines). "Restart" reloads a rebuilt dex without a reboot.
  */
 export default function DaemonLogsScreen() {
+  const colors = useM3Colors();
+  const icons = useIcons();
+  const insets = useSafeAreaInsets();
   const [text, setText] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -61,71 +72,61 @@ export default function DaemonLogsScreen() {
     Share.share({ message: text ?? '' }).catch(() => {});
   }, [text]);
 
-  const lines = (text ?? '').split('\n');
+  // An error/timeout lands in `text` as "Error: …" / "Restart error: …" — show it as a banner
+  // (tap = try again) rather than as a log line.
+  const failure = text && /^(Restart error|Error): /.test(text) ? text.replace(/^(Restart error|Error): /, '') : null;
+  const lines = failure || !text ? [] : text.split('\n');
 
   return (
-    <View className="flex-1 gap-4 bg-background p-4">
-      <View className="flex-row gap-2">
-        <ToolbarButton icon="refresh" label="Refresh" onPress={fetchLog} busy={fetching} />
-        <ToolbarButton icon="restart-alt" label="Restart" onPress={restartDaemon} busy={restarting} />
-        <ToolbarButton icon="share" label="Share" onPress={shareAll} />
-      </View>
-
-      <FlatList
-        data={lines}
-        keyExtractor={(_, i) => String(i)}
-        className="flex-1 rounded-2xl bg-background-element"
-        contentContainerClassName="gap-0.5 p-4"
-        renderItem={({ item }) => (
-          <Text
-            className={`font-[monospace] text-[11px] font-medium leading-4 ${lineClass(item)}`}>
-            {item || ' '}
-          </Text>
-        )}
-        ListEmptyComponent={
-          <Text className="font-[monospace] text-[11px] text-foreground-secondary">
-            {fetching ? 'Fetching daemon log…' : 'No daemon log.'}
-          </Text>
-        }
-      />
-    </View>
-  );
-}
-
-/** Tint high-signal lines so failures/successes stand out while scanning. */
-function lineClass(line: string): string {
-  const l = line.toLowerCase();
-  if (l.includes('error') || l.includes('hata') || l.includes('fail') || l.includes('exception')) {
-    return 'text-[#e5484d]';
-  }
-  if (l.includes('captured') || l.includes('context ready') || l.includes('-> emit') || l.includes('-> mac')) {
-    return 'text-[#2ecc71]';
-  }
-  return 'text-foreground-secondary';
-}
-
-function ToolbarButton({
-  icon,
-  label,
-  onPress,
-  busy,
-}: {
-  icon: keyof typeof MaterialIcons.glyphMap;
-  label: string;
-  onPress: () => void;
-  busy?: boolean;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable onPress={onPress} disabled={busy} className="flex-1 active:opacity-60">
-      <View className="flex-row items-center justify-center gap-2 rounded-2xl bg-background-element py-4">
-        {busy ? (
-          <ActivityIndicator size="small" color={theme.text} />
-        ) : (
-          <MaterialIcons name={icon} size={22} color={theme.text} />
-        )}
-        <Text className="text-sm font-medium text-foreground">{label}</Text>
-      </View>
-    </Pressable>
+    <M3Host>
+      <Column
+        modifiers={[
+          fillMaxSize(),
+          padding(Spacing.three, Spacing.one, Spacing.three, insets.bottom + Spacing.three),
+        ]}
+        verticalArrangement={{ spacedBy: 12 }}
+      >
+        <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: Spacing.two }}>
+          <ToolButton colors={colors} icon={icons.retry} label="Refresh" grow busy={fetching} onPress={fetchLog} />
+          <ToolButton
+            colors={colors}
+            icon={icons.restartAlt}
+            label="Restart"
+            grow
+            busy={restarting}
+            onPress={restartDaemon}
+          />
+          <ToolButton colors={colors} icon={icons.share} tone="neutral" onPress={shareAll} />
+        </Row>
+        {failure ? (
+          <Surface
+            color={colors.errorContainer}
+            shape={Shape.RoundedCorner({
+              cornerRadii: { topStart: 20, topEnd: 20, bottomStart: 20, bottomEnd: 20 },
+            })}
+            onClick={fetchLog}
+            modifiers={[fillMaxWidth()]}
+          >
+            <Row
+              modifiers={[fillMaxWidth(), padding(16, 14, 16, 14)]}
+              horizontalArrangement={{ spacedBy: 12 }}
+              verticalAlignment="top"
+            >
+              <Icon source={icons.error} size={20} tint={colors.onErrorContainer} />
+              <Text modifiers={[weight(1)]} color={colors.onErrorContainer} style={{ typography: 'bodyMedium' }}>
+                {failure}
+              </Text>
+            </Row>
+          </Surface>
+        ) : null}
+        <Column modifiers={[fillMaxWidth(), weight(1)]}>
+          <LogView
+            colors={colors}
+            lines={lines}
+            empty={fetching ? 'Fetching daemon log…' : 'No daemon log.'}
+          />
+        </Column>
+      </Column>
+    </M3Host>
   );
 }

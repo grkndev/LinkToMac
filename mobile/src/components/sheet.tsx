@@ -1,4 +1,5 @@
-import { Button, Column, Text, type MaterialColors } from "@expo/ui/jetpack-compose";
+import { Button, Column, Icon, Row, type MaterialColors } from "@expo/ui/jetpack-compose";
+import { Text } from "@/components/text";
 import { fillMaxWidth } from "@expo/ui/jetpack-compose/modifiers";
 
 import { type IconSource } from "@/components/icons";
@@ -7,11 +8,11 @@ import { Spacing } from "@/constants/theme";
 
 /**
  * Shared vocabulary for the app's modal bottom sheets (the unpair ConfirmSheet and the
- * UpdateModal): the tonal icon badge, the centered headline + consequence line, and the
+ * UpdateModal): the tonal icon badge, the start-aligned headline + consequence line, and the
  * house Button configuration — so every sheet reads as the same M3 design language.
  */
 
-/** Centered headline + consequence line. */
+/** Start-aligned headline + consequence line (the design's sheets are left-aligned). */
 export function SheetText({
   colors,
   title,
@@ -23,22 +24,25 @@ export function SheetText({
 }) {
   return (
     <Column
-      horizontalAlignment="center"
+      modifiers={[fillMaxWidth()]}
+      horizontalAlignment="start"
       verticalArrangement={{ spacedBy: Spacing.two }}
     >
       <Text
         color={colors.onSurface}
         style={{
           typography: "headlineSmall",
-          fontWeight: "bold",
-          textAlign: "center",
+          fontSize: 26,
+          lineHeight: 32,
+          fontWeight: "600",
+          textAlign: "start",
         }}
       >
         {title}
       </Text>
       <Text
         color={colors.onSurfaceVariant}
-        style={{ typography: "bodyMedium", textAlign: "center" }}
+        style={{ typography: "bodyMedium", fontSize: 15, lineHeight: 22, textAlign: "start" }}
       >
         {message}
       </Text>
@@ -89,6 +93,7 @@ export function SheetButton({
   width,
   fontSize,
   shape,
+  icon,
 }: {
   colors: MaterialColors;
   variant?: "filled" | "tonal" | "destructive" | "text";
@@ -98,6 +103,8 @@ export function SheetButton({
   width?: number;
   fontSize?: number;
   shape?: RowShape;
+  /** Optional leading glyph (e.g. download), tinted with the button's content colour. */
+  icon?: IconSource;
 }) {
   const palette = {
     filled: { containerColor: colors.primary, contentColor: colors.onPrimary },
@@ -116,9 +123,12 @@ export function SheetButton({
       modifiers={width != null ? [fillMaxWidth(width)] : undefined}
       shape={shape}
     >
-      <Text style={{ fontWeight: "600", ...(fontSize != null ? { fontSize } : {}) }}>
-        {label}
-      </Text>
+      <Row horizontalArrangement={{ spacedBy: Spacing.two }} verticalAlignment="center">
+        {icon ? <Icon source={icon} size={22} tint={palette.contentColor} /> : null}
+        <Text style={{ fontWeight: "600", ...(fontSize != null ? { fontSize } : {}) }}>
+          {label}
+        </Text>
+      </Row>
     </Button>
   );
 }

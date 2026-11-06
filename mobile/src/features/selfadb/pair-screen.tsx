@@ -1,15 +1,42 @@
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Box,
+  Column,
+  Icon,
+  OutlinedTextField,
+  Row,
+  Shape,
+  Surface,
+  useNativeState,
+  type MaterialColors,
+  type TextFieldRef,
+} from '@expo/ui/jetpack-compose';
+import { Text } from "@/components/text";
+import {
+  fillMaxSize,
+  fillMaxWidth,
+  imePadding,
+  padding,
+  size,
+  verticalScroll,
+  weight,
+} from '@expo/ui/jetpack-compose/modifiers';
+import { useRef, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { LinkButton, PrimaryButton } from '@/components/buttons';
+import { useIcons } from '@/components/icons';
+import { Group, useM3Colors, withAlpha } from '@/components/m3';
+import { M3Host } from '@/components/m3-screen';
+import { GroupRow } from '@/components/rows';
+import { Spacing, StatusColors } from '@/constants/theme';
+import { MONO } from '@/constants/typography';
 import SelfAdb from '@/features/selfadb/client';
 import type { ClipBoot } from '@/features/selfadb/use-clip-boot';
 
 const CODE_LENGTH = 6;
+
+const radius = (r: number) =>
+  Shape.RoundedCorner({ cornerRadii: { topStart: r, topEnd: r, bottomStart: r, bottomEnd: r } });
 
 /**
  * Setup screen for *automatic* clipboard capture (self-ADB -> shell-UID daemon). Reachable from
@@ -21,8 +48,12 @@ const CODE_LENGTH = 6;
  *                it yet -> ask the user to turn it back on, then retry
  */
 export function PairScreen({ boot }: { boot: ClipBoot }) {
-  const theme = useTheme();
+  const colors = useM3Colors();
+  const icons = useIcons();
+  const insets = useSafeAreaInsets();
   const [code, setCode] = useState('');
+  const codeText = useNativeState('');
+  const codeRef = useRef<TextFieldRef>(null);
 
   const mode =
     boot.state === 'live'
@@ -40,137 +71,202 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
     SelfAdb.openWirelessDebuggingSettings().catch(() => {});
   };
 
+  /** Digits only, capped: the number keyboard still offers `-`/`.` on some IMEs. */
+  const onCodeChange = (value: string) => {
+    const clean = value.replace(/\D/g, '').slice(0, CODE_LENGTH);
+    if (clean !== value) codeRef.current?.setText(clean).catch(() => {});
+    setCode(clean);
+  };
+
+  if (mode === 'live') {
+    return (
+      <M3Host>
+        <Column
+          modifiers={[
+            fillMaxSize(),
+            padding(Spacing.three, Spacing.one, Spacing.three, insets.bottom + Spacing.three),
+          ]}
+        >
+          <Column
+            modifiers={[fillMaxWidth(), weight(1)]}
+            horizontalAlignment="center"
+            verticalArrangement="center"
+          >
+            <Column
+              horizontalAlignment="center"
+              verticalArrangement={{ spacedBy: 14 }}
+              modifiers={[padding(Spacing.three, 0, Spacing.three, 0)]}
+            >
+              <Surface
+                color={withAlpha(StatusColors.online, 0.18)}
+                shape={radius(60)}
+                modifiers={[size(120, 120)]}
+              >
+                <Box contentAlignment="center" modifiers={[size(120, 120)]}>
+                  <Icon source={icons.checkCircle} size={64} tint={StatusColors.online} />
+                </Box>
+              </Surface>
+              <Box modifiers={[padding(0, Spacing.two, 0, 0)]}>
+                <Text
+                  color={colors.onSurface}
+                  style={{ typography: 'headlineMedium', fontSize: 30, lineHeight: 36, fontWeight: '600', textAlign: 'center' }}
+                >
+                  Capture is on
+                </Text>
+              </Box>
+              <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyLarge', textAlign: 'center' }}>
+                Anything you copy on this phone reaches your Mac on its own.
+              </Text>
+            </Column>
+          </Column>
+          <Surface color={colors.surfaceContainer} shape={radius(24)} modifiers={[fillMaxWidth()]}>
+            <Row
+              modifiers={[fillMaxWidth(), padding(16, 16, 16, 16)]}
+              horizontalArrangement={{ spacedBy: 14 }}
+              verticalAlignment="top"
+            >
+              <Icon source={icons.verifiedUser} size={22} tint={colors.primary} />
+              <Text modifiers={[weight(1)]} color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+                Everything else — the Mac link, remote lock, battery, notification and message mirroring —
+                runs without this and keeps working if it ever drops.
+              </Text>
+            </Row>
+          </Surface>
+        </Column>
+      </M3Host>
+    );
+  }
+
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.hero}>
-          <ThemedText type="title" style={styles.title}>
-            {mode === 'live' ? 'Capture is on' : mode === 'pair' ? 'Capture setup' : 'Reconnect'}
-          </ThemedText>
-          <ThemedText type="default" themeColor="textSecondary" style={styles.subtitle}>
-            {mode === 'live'
-              ? 'Anything you copy on this phone reaches your Mac on its own.'
-              : mode === 'pair'
+    <M3Host>
+      <Column modifiers={[fillMaxSize(), imePadding()]}>
+          <Column
+            modifiers={[
+              fillMaxWidth(),
+              weight(1),
+              verticalScroll(),
+              padding(Spacing.three, Spacing.two, Spacing.three, Spacing.three),
+            ]}
+            verticalArrangement={{ spacedBy: Spacing.three }}
+          >
+            <Row
+              modifiers={[fillMaxWidth(), padding(Spacing.one, 0, Spacing.one, Spacing.one)]}
+              horizontalArrangement={{ spacedBy: Spacing.three }}
+              verticalAlignment="center"
+            >
+              <Surface color={colors.tertiaryContainer} shape={radius(20)} modifiers={[size(56, 56)]}>
+                <Box contentAlignment="center" modifiers={[size(56, 56)]}>
+                  <Icon source={icons.pasteGo} size={28} tint={colors.onTertiaryContainer} />
+                </Box>
+              </Surface>
+              <Text
+                color={colors.onSurface}
+                style={{ typography: 'headlineSmall', fontSize: 28, lineHeight: 34, fontWeight: '600' }}
+              >
+                {mode === 'pair' ? 'Capture setup' : 'Reconnect'}
+              </Text>
+            </Row>
+
+            <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+              {mode === 'pair'
                 ? 'Setup is a one-time thing. Enter the pairing code and we’ll handle the rest.'
                 : 'Turn Wireless debugging back on and capture will be restored automatically.'}
-          </ThemedText>
-        </View>
+            </Text>
 
-        <ThemedView type="backgroundElement" style={styles.card}>
-          {mode === 'live' ? (
-            <ThemedText type="small" themeColor="textSecondary">
-              Everything else — the Mac link, remote lock, battery, notification and message
-              mirroring — runs without this and keeps working if it ever drops.
-            </ThemedText>
-          ) : mode === 'pair' ? (
-            <>
-              <Step n={1} text="Turn on Wireless debugging" />
-              <Step n={2} text="Tap “Pair device with pairing code”" />
-              <Step n={3} text="Enter the 6-digit code below" />
+            <Group>
+              {mode === 'pair' ? (
+                <>
+                  <Step colors={colors} n={1} text="Turn on Wireless debugging" />
+                  <Step colors={colors} n={2} text="Tap “Pair device with pairing code”" />
+                  <Step colors={colors} n={3} text="Enter the 6-digit code below" />
+                </>
+              ) : (
+                <Step colors={colors} n={1} text="Turn on Wireless debugging in Developer options" />
+              )}
+            </Group>
 
-              <TextInput
-                style={[
-                  styles.input,
-                  { color: theme.text, backgroundColor: theme.backgroundSelected },
-                ]}
-                value={code}
-                onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, CODE_LENGTH))}
-                placeholder="000000"
-                placeholderTextColor={theme.textSecondary}
-                keyboardType="number-pad"
+            {mode === 'pair' ? (
+              <OutlinedTextField
+                ref={codeRef}
+                value={codeText}
+                onValueChange={onCodeChange}
+                singleLine
+                enabled={!busy}
                 maxLength={CODE_LENGTH}
-                editable={!busy}
-                textAlign="center"
+                shape={radius(16)}
+                modifiers={[fillMaxWidth()]}
+                textStyle={{ textAlign: 'center', fontSize: 28, fontWeight: '500', fontFamily: MONO.medium, letterSpacing: 8 }}
+                keyboardOptions={{ keyboardType: 'number', imeAction: 'done' }}
+              >
+                <OutlinedTextField.Label>
+                  <Text>Pairing code</Text>
+                </OutlinedTextField.Label>
+                <OutlinedTextField.Placeholder>
+                  <Text>000000</Text>
+                </OutlinedTextField.Placeholder>
+              </OutlinedTextField>
+            ) : null}
+
+            <Row modifiers={[fillMaxWidth()]}>
+              <LinkButton
+                colors={colors}
+                icon={icons.openInNew}
+                label="Open Developer Settings"
+                enabled={!busy}
+                onPress={openSettings}
               />
-            </>
-          ) : (
-            <Step n={1} text="Turn on Wireless debugging in Developer options" />
-          )}
+            </Row>
 
-          {mode !== 'live' ? (
-            <Pressable onPress={openSettings} style={styles.linkBtn} disabled={busy}>
-              <ThemedText type="linkPrimary">Open Developer Settings</ThemedText>
-            </Pressable>
-          ) : null}
-        </ThemedView>
+            {boot.error ? (
+              <Surface color={colors.errorContainer} shape={radius(20)} modifiers={[fillMaxWidth()]}>
+                <Row
+                  modifiers={[fillMaxWidth(), padding(16, 14, 16, 14)]}
+                  horizontalArrangement={{ spacedBy: 12 }}
+                  verticalAlignment="top"
+                >
+                  <Icon source={icons.error} size={20} tint={colors.onErrorContainer} />
+                  <Text modifiers={[weight(1)]} color={colors.onErrorContainer} style={{ typography: 'bodyMedium' }}>
+                    {boot.error}
+                  </Text>
+                </Row>
+              </Surface>
+            ) : null}
+          </Column>
 
-        {boot.error ? (
-          <ThemedText type="small" style={[styles.error, { color: '#e5484d' }]}>
-            {boot.error}
-          </ThemedText>
-        ) : null}
-
-        {mode !== 'live' ? (
-          <Pressable
-            onPress={() => (mode === 'pair' ? boot.pair(code) : boot.refresh())}
-            disabled={mode === 'pair' ? !canSubmit : busy}
-            style={[
-              styles.primaryBtn,
-              { backgroundColor: theme.text },
-              (mode === 'pair' ? !canSubmit : busy) && styles.primaryBtnDisabled,
-            ]}>
-            {busy ? (
-              <ActivityIndicator color={theme.background} />
-            ) : (
-              <ThemedText type="default" style={[styles.primaryLabel, { color: theme.background }]}>
-                {mode === 'pair' ? 'Pair' : 'Try Again'}
-              </ThemedText>
-            )}
-          </Pressable>
-        ) : null}
-      </SafeAreaView>
-    </ThemedView>
+          <Box
+            modifiers={[
+              fillMaxWidth(),
+              padding(Spacing.three, Spacing.two, Spacing.three, insets.bottom + Spacing.three),
+            ]}
+          >
+            <PrimaryButton
+              colors={colors}
+              label={mode === 'pair' ? 'Pair' : 'Try Again'}
+              busy={busy}
+              enabled={mode === 'pair' ? canSubmit || busy : true}
+              onPress={() => (mode === 'pair' ? boot.pair(code) : boot.refresh())}
+            />
+          </Box>
+        </Column>
+    </M3Host>
   );
 }
 
-function Step({ n, text }: { n: number; text: string }) {
+/** One numbered instruction row: a primary bubble in the leading slot. */
+function Step({ colors, n, text }: { colors: MaterialColors; n: number; text: string }) {
   return (
-    <View style={styles.step}>
-      <ThemedText type="smallBold" themeColor="textSecondary">
-        {n}.
-      </ThemedText>
-      <ThemedText type="small" style={styles.stepText}>
-        {text}
-      </ThemedText>
-    </View>
+    <GroupRow
+      colors={colors}
+      label={text}
+      leading={
+        <Surface color={colors.primary} shape={radius(14)} modifiers={[size(28, 28)]}>
+          <Box contentAlignment="center" modifiers={[size(28, 28)]}>
+            <Text color={colors.onPrimary} style={{ typography: 'labelLarge', fontWeight: '600' }}>
+              {n}
+            </Text>
+          </Box>
+        </Surface>
+      }
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  safe: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    justifyContent: 'center',
-    gap: Spacing.five,
-  },
-  hero: { gap: Spacing.three },
-  title: { fontSize: 40, lineHeight: 44 },
-  subtitle: {},
-  card: {
-    borderRadius: Spacing.four,
-    padding: Spacing.four,
-    gap: Spacing.three,
-  },
-  step: { flexDirection: 'row', gap: Spacing.two, alignItems: 'flex-start' },
-  stepText: { flex: 1 },
-  input: {
-    marginTop: Spacing.two,
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.three,
-    fontSize: 28,
-    letterSpacing: 8,
-    fontWeight: '700',
-  },
-  linkBtn: { paddingTop: Spacing.one },
-  error: { textAlign: 'center' },
-  primaryBtn: {
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.three,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  primaryBtnDisabled: { opacity: 0.4 },
-  primaryLabel: { fontWeight: '700' },
-});

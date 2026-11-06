@@ -5,22 +5,17 @@ import {
   verticalScroll,
 } from "@expo/ui/jetpack-compose/modifiers";
 import type { ReactNode } from "react";
-import { useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SEED, useM3Colors } from "@/components/m3";
+import { useHostTheme, useM3Colors } from "@/components/m3";
 import { Spacing } from "@/constants/theme";
 
 /** The app-wide Compose root: a full-screen seeded Host painted with the M3 background. */
 export function M3Host({ children }: { children: ReactNode }) {
-  const scheme = useColorScheme();
   const colors = useM3Colors();
+  const hostTheme = useHostTheme();
   return (
-    <Host
-      style={{ flex: 1, backgroundColor: colors.background }}
-      seedColor={SEED}
-      colorScheme={scheme}
-    >
+    <Host style={{ flex: 1, backgroundColor: colors.background }} {...hostTheme}>
       {children}
     </Host>
   );

@@ -1,13 +1,14 @@
-import { Column, Text } from "@expo/ui/jetpack-compose";
-import { fillMaxWidth } from "@expo/ui/jetpack-compose/modifiers";
+import { Box, Column, Icon, Shape, Surface, } from "@expo/ui/jetpack-compose";
+import { Text } from "@/components/text";
+import { fillMaxWidth, padding, size } from "@expo/ui/jetpack-compose/modifiers";
 import Constants from "expo-constants";
 import * as Updates from "expo-updates";
-import { Image, Linking } from "react-native";
+import { Linking } from "react-native";
 
-import { useIcons } from "@/components/icons";
+import { useIcons, type IconSource } from "@/components/icons";
 import { Group, useM3Colors } from "@/components/m3";
 import { M3Screen } from "@/components/m3-screen";
-import { ActionRow, InfoRow } from "@/components/rows";
+import { GroupRow, InfoRow } from "@/components/rows";
 import { Spacing } from "@/constants/theme";
 import { useAppUpdate } from "@/features/updates/use-app-update";
 
@@ -20,7 +21,11 @@ const open = (url: string) => {
   Linking.openURL(url).catch(() => {});
 };
 
-/** About: app identity + version, developer, contact, and release notes. */
+const MARK = Shape.RoundedCorner({
+  cornerRadii: { topStart: 32, topEnd: 32, bottomStart: 32, bottomEnd: 32 },
+});
+
+/** About: app identity + version, updates, and links. */
 export default function AboutScreen() {
   const colors = useM3Colors();
   const icons = useIcons();
@@ -38,106 +43,100 @@ export default function AboutScreen() {
   // (OTA → download + restart, or a newer native APK → release download). See use-app-update.
   const { checking, checkNow } = useAppUpdate();
 
+  /** Plain (uncircled) leading glyph for the link rows — they read as links, not settings. */
+  const glyph = (source: IconSource) => (
+    <Icon source={source} size={22} tint={colors.onSurfaceVariant} />
+  );
+  const external = <Icon source={icons.openInNew} size={20} tint={colors.onSurfaceVariant} />;
+
   return (
-    <M3Screen spacing={Spacing.five}>
-        {/* Hero: app mark + name. */}
-        <Column
-          modifiers={[fillMaxWidth()]}
-          horizontalAlignment="center"
-          verticalArrangement={{ spacedBy: Spacing.two }}
-        >
-
-            <Image
-              source={require("@/assets/images/icon.png")}
-              className="aspect-square h-24"
-              resizeMode="contain"
-            />
-
-
+    <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
+      {/* Hero: app mark + name. */}
+      <Column
+        modifiers={[fillMaxWidth(), padding(0, Spacing.two, 0, Spacing.two)]}
+        horizontalAlignment="center"
+        verticalArrangement={{ spacedBy: Spacing.two }}
+      >
+        <Surface color={colors.primary} shape={MARK} modifiers={[size(96, 96)]}>
+          <Box contentAlignment="center" modifiers={[size(96, 96)]}>
+            <Icon source={icons.link} size={48} tint={colors.onPrimary} />
+          </Box>
+        </Surface>
+        <Box modifiers={[padding(0, Spacing.two, 0, 0)]}>
           <Text
             color={colors.onSurface}
-            style={{
-              typography: "headlineLarge",
-              fontWeight: "600",
-              textAlign: "center",
-            }}
+            style={{ typography: "headlineMedium", fontSize: 28, fontWeight: "600", textAlign: "center" }}
           >
             Link to Mac
           </Text>
-          <Text
-            color={colors.onSurfaceVariant}
-            style={{ typography: "bodyMedium", textAlign: "center" }}
-          >
-            Phone ↔ Mac clipboard & control
-          </Text>
-        </Column>
+        </Box>
+        <Text color={colors.onSurfaceVariant} style={{ typography: "bodyMedium", textAlign: "center" }}>
+          Phone ↔ Mac clipboard & control
+        </Text>
+      </Column>
 
-        {/* App info. */}
-        <Group>
-          <InfoRow
-            colors={colors}
-            icon={icons.info}
-            label="App Version"
-            value={version}
-          />
-          <InfoRow
-            colors={colors}
-            icon={icons.terminal}
-            label="Build number"
-            value={versionCode != null ? String(versionCode) : "—"}
-          />
-        </Group>
+      {/* App info + OTA/native updates in one block. */}
+      <Group>
+        <InfoRow colors={colors} label="App version" value={version} />
+        <InfoRow
+          colors={colors}
+          label="Build number"
+          value={versionCode != null ? String(versionCode) : "—"}
+          mono
+        />
+        <GroupRow
+          colors={colors}
+          label="Check for updates"
+          labelColor={colors.primary}
+          supporting={
+            checking
+              ? "Checking…"
+              : Updates.isEnabled
+                ? `Channel: ${
+                    Constants.expoConfig?.name.includes("Dev")
+                      ? "Development"
+                      : (Updates.channel ?? "—")
+                  }`
+                : "Checks GitHub for a new app version."
+          }
+          trailing={<Icon source={icons.systemUpdate} size={22} tint={colors.primary} />}
+          onClick={() => checkNow(true)}
+        />
+      </Group>
 
-        {/* Over-the-air updates. */}
-        <Group>
-          <ActionRow
-            colors={colors}
-            icon={icons.update}
-            label="Check for updates"
-            hint={
-              checking
-                ? "Checking…"
-                : Updates.isEnabled
-                  ? `Channel: ${
-                    Constants.expoConfig?.name.includes("Dev") ? "Development" :
-                    Updates.channel ?? "—"}`
-                  : "Checks GitHub for a new app version."
-            }
-            onPress={() => checkNow(true)}
-          />
-        </Group>
-
-        {/* Updates, source, developer, contact. */}
-        <Group>
-          <ActionRow
-            colors={colors}
-            icon={icons.sourcenotes}
-            label="Release notes"
-            hint="Changelog and latest releases on GitHub."
-            onPress={() => open(RELEASES_URL)}
-          />
-          <ActionRow
-            colors={colors}
-            icon={icons.code}
-            label="Source code"
-            hint="github.com/grkndev/LinkToMac"
-            onPress={() => open(REPO_URL)}
-          />
-          <ActionRow
-            colors={colors}
-            icon={icons.person}
-            label="Developer"
-            hint="grkndev · grkn.dev"
-            onPress={() => open(PROFILE_URL)}
-          />
-          <ActionRow
-            colors={colors}
-            icon={icons.mail}
-            label="Contact"
-            hint={CONTACT_EMAIL}
-            onPress={() => open(`mailto:${CONTACT_EMAIL}`)}
-          />
-        </Group>
+      <Group>
+        <GroupRow
+          colors={colors}
+          leading={glyph(icons.article)}
+          label="Release notes"
+          trailing={external}
+          onClick={() => open(RELEASES_URL)}
+        />
+        <GroupRow
+          colors={colors}
+          leading={glyph(icons.code)}
+          label="Source code"
+          supporting="github.com/grkndev/LinkToMac"
+          trailing={external}
+          onClick={() => open(REPO_URL)}
+        />
+        <GroupRow
+          colors={colors}
+          leading={glyph(icons.person)}
+          label="Developer"
+          supporting="grkn.dev"
+          trailing={external}
+          onClick={() => open(PROFILE_URL)}
+        />
+        <GroupRow
+          colors={colors}
+          leading={glyph(icons.mail)}
+          label="Contact"
+          supporting={CONTACT_EMAIL}
+          trailing={external}
+          onClick={() => open(`mailto:${CONTACT_EMAIL}`)}
+        />
+      </Group>
     </M3Screen>
   );
 }

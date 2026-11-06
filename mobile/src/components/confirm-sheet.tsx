@@ -1,12 +1,12 @@
 import { useRef } from "react";
 import { Column, Host, ModalBottomSheet } from "@expo/ui/jetpack-compose";
 import type { ModalBottomSheetRef } from "@expo/ui/jetpack-compose";
-import { padding } from "@expo/ui/jetpack-compose/modifiers";
+import { fillMaxWidth, padding } from "@expo/ui/jetpack-compose/modifiers";
 import * as Haptics from "expo-haptics";
 
 import { Spacing } from "@/constants/theme";
 import { useIcons } from "./icons";
-import { ButtonGroup, useM3Colors } from "./m3";
+import { useHostTheme, useM3Colors } from "./m3";
 import { SheetButton, SheetHeader } from "./sheet";
 
 /**
@@ -34,6 +34,7 @@ export default function ConfirmSheet({
   cancelLabel?: string;
 }) {
   const colors = useM3Colors();
+  const hostTheme = useHostTheme();
   const icons = useIcons();
   const sheetRef = useRef<ModalBottomSheetRef>(null);
 
@@ -54,7 +55,7 @@ export default function ConfirmSheet({
   return (
     // The sheet renders in its own window, so the Host only anchors it. Keep the Host
     // fixed-size: matchContents can NPE if the screen unmounts mid-measure.
-    <Host style={{ width: 1, height: 1 }}>
+    <Host style={{ width: 1, height: 1 }} {...hostTheme}>
       {visible && (
         <ModalBottomSheet
           ref={sheetRef}
@@ -64,11 +65,12 @@ export default function ConfirmSheet({
           skipPartiallyExpanded
         >
           <Column
-            horizontalAlignment="center"
-            verticalArrangement={{ spacedBy: Spacing.three }}
             modifiers={[
-              padding(Spacing.four, Spacing.two, Spacing.four, Spacing.five),
+              fillMaxWidth(),
+              padding(Spacing.four, Spacing.two, Spacing.four, Spacing.four),
             ]}
+            horizontalAlignment="start"
+            verticalArrangement={{ spacedBy: Spacing.three }}
           >
             <SheetHeader
               colors={colors}
@@ -77,14 +79,11 @@ export default function ConfirmSheet({
               title={title}
               message={message}
             />
-            <ButtonGroup>
-              <SheetButton
-                colors={colors}
-                variant="tonal"
-                label={cancelLabel}
-                onClick={cancel}
-                width={0.5}
-              />
+            {/* Stacked, full width: the destructive action first, then a quiet Cancel. */}
+            <Column
+              modifiers={[fillMaxWidth()]}
+              verticalArrangement={{ spacedBy: Spacing.two }}
+            >
               <SheetButton
                 colors={colors}
                 variant="destructive"
@@ -92,7 +91,14 @@ export default function ConfirmSheet({
                 onClick={confirm}
                 width={1}
               />
-            </ButtonGroup>
+              <SheetButton
+                colors={colors}
+                variant="text"
+                label={cancelLabel}
+                onClick={cancel}
+                width={1}
+              />
+            </Column>
           </Column>
         </ModalBottomSheet>
       )}

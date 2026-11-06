@@ -2,8 +2,8 @@ import {
   Box,
   Column,
   LoadingIndicator,
-  Text,
-} from "@expo/ui/jetpack-compose";
+  } from "@expo/ui/jetpack-compose";
+import { Text } from "@/components/text";
 import {
   fillMaxSize,
   fillMaxWidth,
@@ -24,7 +24,7 @@ import { Spacing } from "@/constants/theme";
 import { useClipHistory } from "@/features/clip-history/use-clip-history";
 import SelfAdb from "@/features/selfadb/client";
 import { haptic } from "@/lib/haptics";
-import { formatRelative, preview } from "@/lib/text";
+import { formatAgo, looksLikeCode, preview } from "@/lib/text";
 
 /** Clipboard items received from the paired Mac — newest first, tap any to copy it back. */
 export default function ClipboardHistoryScreen() {
@@ -62,7 +62,10 @@ export default function ClipboardHistoryScreen() {
 
   const copyBack = (text: string) => {
     SelfAdb.writeClipboard(text)
-      .then(haptic)
+      .then(() => {
+        haptic();
+        ToastAndroid.show("Copied to this phone", ToastAndroid.SHORT);
+      })
       .catch(() =>
         ToastAndroid.show(
           "Couldn't copy — connection not ready",
@@ -116,6 +119,11 @@ export default function ClipboardHistoryScreen() {
             ),
           ]}
         >
+          <Box modifiers={[fillMaxWidth(), padding(Spacing.one, 0, Spacing.one, Spacing.three)]}>
+            <Text color={colors.onSurfaceVariant} style={{ typography: "bodyMedium" }}>
+              Copied on your Mac. Tap an item to copy it to this phone.
+            </Text>
+          </Box>
           {/* Bounded (≤100) grouped list — a plain Column, not LazyColumn, since it lives inside
               the outer verticalScroll() (infinite-height constraints crash a LazyColumn). */}
           <Group>
@@ -123,10 +131,10 @@ export default function ClipboardHistoryScreen() {
               <ClipRow
                 key={`${item.ts}-${i}`}
                 colors={colors}
-                icon={icons.clipboard}
-                trailingIcon={icons.contentCopy}
-                text={preview(item.text, 100)}
-                time={formatRelative(item.ts)}
+                latest={i === 0}
+                text={preview(item.text, 200)}
+                time={formatAgo(item.ts)}
+                mono={looksLikeCode(item.text)}
                 onPress={() => copyBack(item.text)}
               />
             ))}

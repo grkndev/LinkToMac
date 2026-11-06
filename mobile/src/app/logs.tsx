@@ -1,10 +1,17 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { Column, Row } from '@expo/ui/jetpack-compose';
+import { fillMaxSize, fillMaxWidth, padding, weight } from '@expo/ui/jetpack-compose/modifiers';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Share, Text, View } from 'react-native';
+import { Share } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ToolButton } from '@/components/buttons';
+import { useIcons } from '@/components/icons';
+import { LogView } from '@/components/log-view';
+import { useM3Colors } from '@/components/m3';
+import { M3Host } from '@/components/m3-screen';
+import { Spacing } from '@/constants/theme';
 import SelfAdb from '@/features/selfadb/client';
-import { useTheme } from '@/hooks/use-theme';
 import { preview } from '@/lib/text';
 
 const MAX_LINES = 500;
@@ -22,6 +29,9 @@ function clock(): string {
  * Restart-daemon action — lives on the separate "Daemon Log" screen (`daemon-logs.tsx`).
  */
 export default function LogsScreen() {
+  const colors = useM3Colors();
+  const icons = useIcons();
+  const insets = useSafeAreaInsets();
   // Newest-first: index 0 is the latest line, so the list reads top-down with no per-render
   // reverse and no forced scroll — maintainVisibleContentPosition keeps the reader in place.
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -77,75 +87,29 @@ export default function LogsScreen() {
   }, []);
 
   return (
-    <View className="flex-1 gap-4 bg-background p-4">
-      <View className="flex-row gap-2">
-        <ToolbarButton
-          icon="phonelink"
-          label="Daemon Log"
-          onPress={() => router.push('/daemon-logs')}
-        />
-        <ToolbarButton icon="share" label="Share" onPress={shareAll} />
-        <ToolbarButton icon="delete-outline" label="Clear" onPress={clear} destructive />
-      </View>
-
-      <FlatList
-        data={lines}
-        keyExtractor={(line) => String(line.id)}
-        className="flex-1 rounded-2xl"
-        contentContainerClassName="gap-0.5 p-4"
-        // Pinned to the newest line while at the top; stable (no jump) while reading older lines.
-        maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 16 }}
-        renderItem={({ item }) => (
-          <Text
-            className={`font-[monospace] text-[11px] font-medium leading-4 ${lineClass(item.text)}`}>
-            {item.text}
-          </Text>
-        )}
-      />
-    </View>
-  );
-}
-
-/** Tint a few high-signal lines so failures stand out while scanning. */
-function lineClass(line: string): string {
-  const l = line.toLowerCase();
-  if (l.includes('error') || l.includes('hata') || l.includes('fail') || l.includes('retry')) {
-    return 'text-[#e5484d]';
-  }
-  if (l.includes('clip ⬆') || l.includes('-> clipboard') || l.includes('captured')) {
-    return 'text-[#2ecc71]';
-  }
-  return 'text-foreground-secondary';
-}
-
-function ToolbarButton({
-  icon,
-  label,
-  onPress,
-  busy,
-  destructive,
-}: {
-  icon: keyof typeof MaterialIcons.glyphMap;
-  label: string;
-  onPress: () => void;
-  busy?: boolean;
-  destructive?: boolean;
-}) {
-  const theme = useTheme();
-  // MaterialIcons / ActivityIndicator take a `color` prop (not a style), so resolve it in JS.
-  const color = destructive ? '#e5484d' : theme.text;
-  return (
-    <Pressable onPress={onPress} disabled={busy} className="flex-1 active:opacity-60">
-      <View className="flex-row items-center justify-center gap-2 rounded-2xl bg-background-element py-4">
-        {busy ? (
-          <ActivityIndicator size="small" color={color} />
-        ) : (
-          <MaterialIcons name={icon} size={22} color={color} />
-        )}
-        <Text className={`text-sm font-medium ${destructive ? 'text-[#e5484d]' : 'text-foreground'}`}>
-          {label}
-        </Text>
-      </View>
-    </Pressable>
+    <M3Host>
+      <Column
+        modifiers={[
+          fillMaxSize(),
+          padding(Spacing.three, Spacing.one, Spacing.three, insets.bottom + Spacing.three),
+        ]}
+        verticalArrangement={{ spacedBy: 12 }}
+      >
+        <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: Spacing.two }}>
+          <ToolButton
+            colors={colors}
+            icon={icons.terminal}
+            label="Daemon log"
+            grow
+            onPress={() => router.push('/daemon-logs')}
+          />
+          <ToolButton colors={colors} icon={icons.share} tone="neutral" onPress={shareAll} />
+          <ToolButton colors={colors} icon={icons.delete} tone="error" onPress={clear} />
+        </Row>
+        <Column modifiers={[fillMaxWidth(), weight(1)]}>
+          <LogView colors={colors} lines={lines.map((l) => l.text)} empty="(no logs yet)" />
+        </Column>
+      </Column>
+    </M3Host>
   );
 }

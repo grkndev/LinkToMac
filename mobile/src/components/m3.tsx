@@ -1,15 +1,29 @@
-import { Box, Column, Icon, Row, Shape, getMaterialColors, type MaterialColors } from '@expo/ui/jetpack-compose';
+import {
+  Box,
+  Column,
+  Icon,
+  Row,
+  Shape,
+  Surface,
+  type MaterialColors,
+} from '@expo/ui/jetpack-compose';
+import { Text } from "@/components/text";
 import {
   background,
   clip,
   fillMaxWidth,
+  padding,
   Shapes,
   size,
+  weight,
 } from '@expo/ui/jetpack-compose/modifiers';
-import { Children, cloneElement, isValidElement, useMemo, type ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, type ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
 
-import { type IconSource } from './icons';
+import { Spacing } from '@/constants/theme';
+import { useAppearance } from '@/features/appearance/appearance-context';
+
+import { useIcons, type IconSource } from './icons';
 
 /**
  * Shared Material 3 Expressive primitives used across the native (Jetpack Compose) screens —
@@ -17,21 +31,25 @@ import { type IconSource } from './icons';
  * one place is what makes Settings and Home read as the same design language.
  */
 
-/** Brand blue (app.json notification color) — seeds the whole Material 3 palette. */
-export const SEED = '#208AEF';
-
 /**
- * Stable, scheme-keyed Material 3 palette. `useMaterialColors({ seedColor })` makes a
- * synchronous native call and returns a *new* object on every render (see @expo/ui colors.ts),
- * which churns the whole native `Host` subtree on each re-render. Memoizing by color scheme
- * keeps the reference stable and only re-resolves when light/dark actually flips.
+ * Stable Material 3 palette for the current scheme + accent colour. `getMaterialColors` makes a
+ * synchronous native call and returns a *new* object each time (see @expo/ui colors.ts), which would
+ * churn the whole native `Host` subtree — so it is resolved ONCE in `AppearanceProvider` (memoized on
+ * scheme + seed) and shared here through context, not recomputed by each caller.
  */
 export function useM3Colors(): MaterialColors {
-  const scheme = useColorScheme();
-  return useMemo(
-    () => getMaterialColors({ scheme: scheme === 'dark' ? 'dark' : 'light', seedColor: SEED }),
-    [scheme],
-  );
+  return useAppearance().colors;
+}
+
+/**
+ * The `seedColor` + `colorScheme` every Compose `<Host>` must be given so the native components
+ * (Switch, Checkbox, ripples, sheets…) are themed from the same palette as {@link useM3Colors}.
+ * Spread it: `<Host {...useHostTheme()}>`.
+ */
+export function useHostTheme() {
+  const colorScheme = useColorScheme();
+  const { seedColor } = useAppearance();
+  return { seedColor, colorScheme };
 }
 
 /**
@@ -49,9 +67,9 @@ const R_INNER = 6;
 export type RowShape = ReturnType<typeof Shape.RoundedCorner>;
 
 /** Position-aware corner radii for a row inside its group. */
-export function groupShape(isFirst: boolean, isLast: boolean): RowShape {
-  const top = isFirst ? R_OUTER : R_INNER;
-  const bottom = isLast ? R_OUTER : R_INNER;
+export function groupShape(isFirst: boolean, isLast: boolean, outer: number = R_OUTER): RowShape {
+  const top = isFirst ? outer : R_INNER;
+  const bottom = isLast ? outer : R_INNER;
   return Shape.RoundedCorner({
     cornerRadii: { topStart: top, topEnd: top, bottomStart: bottom, bottomEnd: bottom },
   });
@@ -70,14 +88,21 @@ export function groupShapeH(isFirst: boolean, isLast: boolean): RowShape {
  * One continuous grouped list: clones each rendered row with position-aware corner radii.
  * Any child row must accept a `shape?: RowShape` prop.
  */
-export function Group({ children }: { children: ReactNode }) {
+export function Group({
+  children,
+  outerRadius = R_OUTER,
+}: {
+  children: ReactNode;
+  /** Radius of the group's outer corners (24 by default; the Files history uses 20). */
+  outerRadius?: number;
+}) {
   // toArray drops the `null`s from conditionally-rendered rows, so first/last land correctly.
   const rows = Children.toArray(children);
   return (
     <Column modifiers={[fillMaxWidth()]} verticalArrangement={{ spacedBy: GROUP_GAP }}>
       {rows.map((row, i) =>
         isValidElement<{ shape?: RowShape }>(row)
-          ? cloneElement(row, { shape: groupShape(i === 0, i === rows.length - 1) })
+          ? cloneElement(row, { shape: groupShape(i === 0, i === rows.length - 1, outerRadius) })
           : row,
       )}
     </Column>
@@ -102,13 +127,20 @@ export function ButtonGroup({ children }: { children: ReactNode }) {
   );
 }
 
-export type Tone = 'secondary' | 'error';
+export type Tone = 'secondary' | 'primary' | 'tertiary' | 'error';
 
 /** Tonal container + on-container pair for the expressive leading icon circle. */
 export function tonal(colors: MaterialColors, tone: Tone) {
-  return tone === 'error'
-    ? { container: colors.errorContainer, on: colors.onErrorContainer }
-    : { container: colors.secondaryContainer, on: colors.onSecondaryContainer };
+  switch (tone) {
+    case 'error':
+      return { container: colors.errorContainer, on: colors.onErrorContainer };
+    case 'primary':
+      return { container: colors.primaryContainer, on: colors.onPrimaryContainer };
+    case 'tertiary':
+      return { container: colors.tertiaryContainer, on: colors.onTertiaryContainer };
+    default:
+      return { container: colors.secondaryContainer, on: colors.onSecondaryContainer };
+  }
 }
 
 /** The signature M3 Expressive leading element: an icon inside a tonal circle. */
@@ -133,4 +165,110 @@ export function IconCircle({
       <Icon source={source} size={iconSize} tint={on} />
     </Box>
   );
+}
+
+/** Section heading above a grouped list: primary-coloured, 14sp medium (Settings, Files, Appearance…). */
+export function SectionLabel({ colors, children }: { colors: MaterialColors; children: string }) {
+  return (
+    <Box modifiers={[fillMaxWidth(), padding(Spacing.one, 0, Spacing.one, 0)]}>
+      <Text color={colors.primary} style={{ typography: 'labelLarge', fontWeight: '500' }}>
+        {children}
+      </Text>
+    </Box>
+  );
+}
+
+/** Small filled status dot (connected / reconnecting / error). */
+export function StatusDot({ color, diameter = 8 }: { color: string; diameter?: number }) {
+  return <Box modifiers={[size(diameter, diameter), clip(Shapes.Circle), background(color)]} />;
+}
+
+/**
+ * One segment of a connected 2-up selector (Appearance mode, Select-apps mode) — a tonal tile in
+ * the {@link ButtonGroup} language. Deliberately NOT an M3 SegmentedButton: its check animation
+ * freezes mid-flight while a heavy list flushes on the UI thread, so the selected state is a plain
+ * container-colour flip plus a static check glyph.
+ */
+export function ModeTile({
+  colors,
+  label,
+  selected,
+  onPress,
+  shape = groupShapeH(true, true),
+}: {
+  colors: MaterialColors;
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  shape?: RowShape;
+}) {
+  const icons = useIcons();
+  const content = selected ? colors.onPrimary : colors.onSurfaceVariant;
+  return (
+    <Surface
+      color={selected ? colors.primary : colors.surfaceContainerHigh}
+      shape={shape}
+      onClick={onPress}
+      modifiers={[weight(1)]}
+    >
+      <Row
+        modifiers={[
+          fillMaxWidth(),
+          padding(Spacing.two, Spacing.three, Spacing.two, Spacing.three),
+        ]}
+        horizontalArrangement={{ spacedBy: Spacing.one }}
+        verticalAlignment="center"
+      >
+        <Box modifiers={[weight(1)]} contentAlignment="center">
+          <Row verticalAlignment="center" horizontalArrangement={{ spacedBy: Spacing.one }}>
+            {selected ? <Icon source={icons.check} size={20} tint={content} /> : null}
+            <Text color={content} style={{ typography: 'labelLarge', fontWeight: '600' }}>
+              {label}
+            </Text>
+          </Row>
+        </Box>
+      </Row>
+    </Surface>
+  );
+}
+
+/** Large 34sp screen title rendered in the body (Settings, Notifications) under a title-less header. */
+export function LargeTitle({ colors, children }: { colors: MaterialColors; children: string }) {
+  return (
+    <Box modifiers={[fillMaxWidth(), padding(Spacing.one, Spacing.one, Spacing.one, Spacing.two)]}>
+      <Text
+        color={colors.onSurface}
+        style={{ typography: 'headlineLarge', fontSize: 34, lineHeight: 40, fontWeight: '600' }}
+      >
+        {children}
+      </Text>
+    </Box>
+  );
+}
+
+/** A titled section: primary {@link SectionLabel} above a {@link Group} of rows. */
+export function Section({
+  colors,
+  label,
+  children,
+}: {
+  colors: MaterialColors;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <Column modifiers={[fillMaxWidth()]} verticalArrangement={{ spacedBy: Spacing.two }}>
+      <SectionLabel colors={colors}>{label}</SectionLabel>
+      <Group>{children}</Group>
+    </Column>
+  );
+}
+
+/** `#RRGGBBAA` palette colour with its alpha replaced (palette values always carry an alpha pair). */
+export function withAlpha(color: string, alpha: number): string {
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+    .toString(16)
+    .padStart(2, '0')
+    .toUpperCase();
+  return `${color.slice(0, 7)}${a}`;
 }

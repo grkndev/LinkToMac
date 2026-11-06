@@ -34,3 +34,30 @@ export function formatRelative(ts: number): string {
   if (day < 7) return `${day}d`;
   return new Date(ts).toLocaleDateString();
 }
+
+/** "just now" / "2 min ago" / "3 h ago" / "Yesterday" / "4 d ago", else a short date (Clipboard rows). */
+export function formatAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} h ago`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return 'Yesterday';
+  if (day < 7) return `${day} d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+const COMMAND_START =
+  /^(?:\$\s|sudo |npm |npx |bun |yarn |pnpm |pip3? |brew |git |cd |ls |cat |curl |wget |docker |kubectl |adb |ssh |scp |cargo |go |python3? |node |xcodebuild |xcrun |make |chmod |chown |rm |mv |cp |mkdir )/;
+
+/**
+ * Whether a copied string reads like a shell command / code (so Clipboard can show it monospace):
+ * starts with a common command, carries a CLI flag, or has code punctuation. Prose and bare URLs stay sans.
+ */
+export function looksLikeCode(text: string): boolean {
+  const t = text.trim();
+  if (!t || /^https?:\/\//i.test(t)) return false;
+  return COMMAND_START.test(t) || /\s--?[a-z][\w-]*/i.test(t) || /(?:=>|;\s*$|[{}]\s*$)/.test(t);
+}

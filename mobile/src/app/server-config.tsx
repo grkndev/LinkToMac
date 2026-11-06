@@ -1,37 +1,52 @@
-import { Host, Switch } from "@expo/ui/jetpack-compose";
+import {
+  Box,
+  Column,
+  Icon,
+  IconButton,
+  OutlinedTextField,
+  Row,
+  Shape,
+  Switch,
+  useNativeState,
+} from "@expo/ui/jetpack-compose";
+import { Text } from "@/components/text";
+import { fillMaxSize, fillMaxWidth, imePadding, padding, verticalScroll, weight, width } from "@expo/ui/jetpack-compose/modifiers";
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import {
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  useColorScheme,
-  View,
-  type TextInputProps,
-} from "react-native";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SEED, useM3Colors } from "@/components/m3";
+import { PrimaryButton } from "@/components/buttons";
+import { useIcons } from "@/components/icons";
+import { Group, useM3Colors } from "@/components/m3";
+import { M3Host } from "@/components/m3-screen";
+import { GroupRow } from "@/components/rows";
 import { Spacing } from "@/constants/theme";
+import { SANS } from "@/constants/typography";
 import { usePairing } from "@/features/pairing/pairing-context";
 import { blankServerConfig } from "@/features/connection/server-config";
 import { haptic } from "@/lib/haptics";
 
-type M3Colors = ReturnType<typeof useM3Colors>;
+/** 12dp outlined-field corners, per the design. */
+/** Typed text inside the outlined fields — same face as the rest of the UI. */
+const FIELD_TEXT = { fontFamily: SANS.regular, fontSize: 16 };
+
+const FIELD_SHAPE = Shape.RoundedCorner({
+  cornerRadii: { topStart: 12, topEnd: 12, bottomStart: 12, bottomEnd: 12 },
+});
 
 /**
- * Manual relay server configuration: host / port / password / TLS. Seeds from the saved
- * ServerConfig (which a v2 QR scan can fill in for you) or the defaults, and re-pushes the
- * native relay connection on save. RN form (controlled TextInputs) with the native Jetpack
- * Compose Switch for the TLS toggle. This screen is also the entry point the future LAN-direct
- * mode reuses (type a local IP, toggle TLS off, or pin a self-signed cert).
+ * Manual relay server configuration: host / port / password / TLS + the LAN-direct params. Seeds
+ * from the saved ServerConfig (which a v2 QR scan can fill in for you) or the defaults, and
+ * re-pushes the native relay connection on save. Native Compose text fields: each keeps its text
+ * in a native state seeded once from the saved value, and mirrors it into React state for
+ * validation on Save. `imePadding()` on the root Column lifts the pinned Save button above the
+ * keyboard and shrinks the scroll area.
  */
 export default function ServerConfigScreen() {
   const router = useRouter();
   const colors = useM3Colors();
+  const icons = useIcons();
   const insets = useSafeAreaInsets();
   const { server, setServer } = usePairing();
 
@@ -43,7 +58,15 @@ export default function ServerConfigScreen() {
   const [lanEnabled, setLanEnabled] = useState(initial.lanEnabled ?? true);
   const [lanPort, setLanPort] = useState(String(initial.lanPort ?? 53124));
   const [lanHost, setLanHost] = useState(initial.lanHost ?? "");
+  const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Native text state, seeded once (a controlled value would fight the IME on every keystroke).
+  const hostText = useNativeState(initial.host);
+  const portText = useNativeState(String(initial.port));
+  const tokenText = useNativeState(initial.token);
+  const lanPortText = useNativeState(String(initial.lanPort ?? 53124));
+  const lanHostText = useNativeState(initial.lanHost ?? "");
 
   const onSave = async () => {
     const trimmedHost = host.trim();
@@ -87,199 +110,153 @@ export default function ServerConfigScreen() {
   };
 
   return (
-    <KeyboardAwareScrollView
-      style={[styles.root, { backgroundColor: colors.background }]}
-      contentContainerStyle={{ padding: Spacing.four, paddingBottom: insets.bottom + Spacing.five, gap: Spacing.four }}
-      keyboardShouldPersistTaps="handled"
-      // Park the focused input this many px above the keyboard (auto-scrolls on focus).
-      bottomOffset={Spacing.three}
-    >
-        <Text style={[styles.intro, { color: colors.onSurfaceVariant }]}>
-          On the same Wi-Fi the app connects straight to your Mac (LAN-direct, no relay). A relay
-          server is only needed to sync while you&apos;re away — leave it blank for LAN-only. The
-          password must match the server&apos;s password; use TLS (wss://) over the internet.
-        </Text>
+    <M3Host>
+      <Column modifiers={[fillMaxSize(), imePadding()]}>
+          <Column
+            modifiers={[
+              fillMaxWidth(),
+              weight(1),
+              verticalScroll(),
+              padding(Spacing.three, Spacing.one, Spacing.three, Spacing.three),
+            ]}
+            verticalArrangement={{ spacedBy: 18 }}
+          >
+            <Box modifiers={[fillMaxWidth(), padding(Spacing.one, 0, Spacing.one, 0)]}>
+              <Text color={colors.onSurfaceVariant} style={{ typography: "bodyMedium" }}>
+                On the same Wi‑Fi your phone reaches your Mac directly over LAN. The relay is only used to
+                sync when you’re away. Leave the address empty to use LAN only.
+              </Text>
+            </Box>
 
-        <TextField
-          colors={colors}
-          label="Server address"
-          hint="Domain (for TLS) or IP — optional if LAN-direct is on"
-          value={host}
-          onChangeText={setHost}
-          placeholder="relay.example.com"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-        />
+            <OutlinedTextField
+              value={hostText}
+              onValueChange={setHost}
+              singleLine
+              shape={FIELD_SHAPE}
+                textStyle={FIELD_TEXT}
+              modifiers={[fillMaxWidth()]}
+              keyboardOptions={{ keyboardType: "uri", autoCorrectEnabled: false, capitalization: "none" }}
+            >
+              <OutlinedTextField.Label>
+                <Text>Server address</Text>
+              </OutlinedTextField.Label>
+              <OutlinedTextField.Placeholder>
+                <Text>relay.example.com</Text>
+              </OutlinedTextField.Placeholder>
+            </OutlinedTextField>
 
-        <TextField
-          colors={colors}
-          label="Port"
-          value={port}
-          onChangeText={setPort}
-          placeholder="8080"
-          keyboardType="number-pad"
-        />
+            <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 10 }} verticalAlignment="top">
+              <OutlinedTextField
+                value={portText}
+                onValueChange={setPort}
+                singleLine
+                shape={FIELD_SHAPE}
+                textStyle={FIELD_TEXT}
+                modifiers={[width(110)]}
+                keyboardOptions={{ keyboardType: "number" }}
+              >
+                <OutlinedTextField.Label>
+                  <Text>Port</Text>
+                </OutlinedTextField.Label>
+              </OutlinedTextField>
 
-        <TextField
-          colors={colors}
-          label="Password"
-          hint="The server's password"
-          value={token}
-          onChangeText={setToken}
-          placeholder="shared relay password"
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-        />
+              <OutlinedTextField
+                value={tokenText}
+                onValueChange={setToken}
+                singleLine
+                shape={FIELD_SHAPE}
+                textStyle={FIELD_TEXT}
+                modifiers={[weight(1)]}
+                visualTransformation={showToken ? "none" : "password"}
+                keyboardOptions={{ keyboardType: "password", autoCorrectEnabled: false, capitalization: "none" }}
+              >
+                <OutlinedTextField.Label>
+                  <Text>Password</Text>
+                </OutlinedTextField.Label>
+                <OutlinedTextField.TrailingIcon>
+                  <IconButton onClick={() => setShowToken((v) => !v)}>
+                    <Icon
+                      source={showToken ? icons.visibilityOff : icons.visibility}
+                      size={22}
+                      tint={colors.onSurfaceVariant}
+                    />
+                  </IconButton>
+                </OutlinedTextField.TrailingIcon>
+              </OutlinedTextField>
+            </Row>
 
-        <SwitchCard
-          colors={colors}
-          label="Use TLS (wss://)"
-          hint="Encrypts the connection. Required over the internet; turn off only on a trusted LAN."
-          value={secure}
-          onChange={setSecure}
-        />
+            <Group>
+              <GroupRow
+                colors={colors}
+                label="Use TLS (wss://)"
+                supporting="Pinned certificate from QR is kept"
+                checked={secure}
+                onCheckedChange={setSecure}
+                trailing={<Switch value={secure} />}
+              />
+              <GroupRow
+                colors={colors}
+                label="LAN-direct"
+                supporting="Connect without the relay on the same network"
+                checked={lanEnabled}
+                onCheckedChange={setLanEnabled}
+                trailing={<Switch value={lanEnabled} />}
+              />
+            </Group>
 
-        <SwitchCard
-          colors={colors}
-          label="LAN-direct"
-          hint="Connect straight to the Mac on the same network (preferred over the relay). The Mac is found automatically; set a Mac IP below only if discovery is blocked."
-          value={lanEnabled}
-          onChange={setLanEnabled}
-        />
+            {lanEnabled ? (
+              <>
+                <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 10 }} verticalAlignment="top">
+                  <OutlinedTextField
+                    value={lanPortText}
+                    onValueChange={setLanPort}
+                    singleLine
+                    shape={FIELD_SHAPE}
+                textStyle={FIELD_TEXT}
+                    modifiers={[width(110)]}
+                    keyboardOptions={{ keyboardType: "number" }}
+                  >
+                    <OutlinedTextField.Label>
+                      <Text>LAN port</Text>
+                    </OutlinedTextField.Label>
+                  </OutlinedTextField>
 
-        {lanEnabled ? (
-          <>
-            <TextField
+                  <OutlinedTextField
+                    value={lanHostText}
+                    onValueChange={setLanHost}
+                    singleLine
+                    shape={FIELD_SHAPE}
+                textStyle={FIELD_TEXT}
+                    modifiers={[weight(1)]}
+                    keyboardOptions={{ keyboardType: "text", autoCorrectEnabled: false, capitalization: "none" }}
+                  >
+                    <OutlinedTextField.Label>
+                      <Text>Mac IP (optional)</Text>
+                    </OutlinedTextField.Label>
+                    <OutlinedTextField.Placeholder>
+                      <Text>Auto</Text>
+                    </OutlinedTextField.Placeholder>
+                    <OutlinedTextField.SupportingText>
+                      <Text>Found via mDNS when empty</Text>
+                    </OutlinedTextField.SupportingText>
+                  </OutlinedTextField>
+                </Row>
+              </>
+            ) : null}
+          </Column>
+
+          <Box modifiers={[fillMaxWidth(), padding(Spacing.three, Spacing.two, Spacing.three, insets.bottom + Spacing.three)]}>
+            <PrimaryButton
               colors={colors}
-              label="LAN port"
-              hint="Must match the Mac's LAN port (default 53124)"
-              value={lanPort}
-              onChangeText={setLanPort}
-              placeholder="53124"
-              keyboardType="number-pad"
+              label="Save"
+              busy={saving}
+              onPress={() => {
+                haptic();
+                onSave();
+              }}
             />
-
-            <TextField
-              colors={colors}
-              label="Mac IP (optional)"
-              hint="Leave blank to auto-discover over the network"
-              value={lanHost}
-              onChangeText={setLanHost}
-              placeholder="192.168.1.42"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="numbers-and-punctuation"
-            />
-          </>
-        ) : null}
-
-        <Pressable
-          onPress={onSave}
-          disabled={saving}
-          style={[styles.save, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
-        >
-          <Text style={[styles.saveText, { color: colors.onPrimary }]}>Save</Text>
-        </Pressable>
-    </KeyboardAwareScrollView>
+          </Box>
+        </Column>
+    </M3Host>
   );
 }
-
-/** Labeled form input in the house style (tonal rounded field, optional hint below). */
-function TextField({
-  label,
-  hint,
-  colors,
-  ...input
-}: {
-  label: string;
-  hint?: string;
-  colors: M3Colors;
-} & TextInputProps) {
-  return (
-    <View style={{ gap: Spacing.two }}>
-      <Text style={[styles.label, { color: colors.onSurface }]}>{label}</Text>
-      <TextInput
-        placeholderTextColor={colors.onSurfaceVariant}
-        {...input}
-        style={[styles.input, { backgroundColor: colors.surfaceContainerHigh, color: colors.onSurface }]}
-      />
-      {hint ? <Text style={[styles.hint, { color: colors.onSurfaceVariant }]}>{hint}</Text> : null}
-    </View>
-  );
-}
-
-/**
- * Rounded card with a label/hint block and a native Compose Switch. Tapping anywhere on the
- * row (or the switch) sets the same target value + haptic, matching the Settings rows. Both
- * paths call the same handler with the new value, so a stray double-fire is idempotent.
- */
-function SwitchCard({
-  label,
-  hint,
-  value,
-  onChange,
-  colors,
-}: {
-  label: string;
-  hint: string;
-  value: boolean;
-  onChange: (next: boolean) => void;
-  colors: M3Colors;
-}) {
-  const scheme = useColorScheme();
-  const change = (next: boolean) => {
-    onChange(next);
-    haptic();
-  };
-  return (
-    <Pressable
-      onPress={() => change(!value)}
-      style={({ pressed }) => [
-        styles.switchRow,
-        { backgroundColor: colors.surfaceContainerHigh, opacity: pressed ? 0.9 : 1 },
-      ]}
-    >
-      <View style={styles.switchText}>
-        <Text style={[styles.switchLabel, { color: colors.onSurface }]}>{label}</Text>
-        <Text style={[styles.hint, { color: colors.onSurfaceVariant }]}>{hint}</Text>
-      </View>
-      <Host style={styles.switchHost} seedColor={SEED} colorScheme={scheme}>
-        <Switch value={value} onCheckedChange={change} />
-      </Host>
-    </Pressable>
-  );
-}
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  intro: { fontSize: 14, lineHeight: 20 },
-  label: { fontSize: 15, fontWeight: "600" },
-  hint: { fontSize: 13, lineHeight: 18 },
-  input: {
-    borderRadius: 16,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-    fontSize: 16,
-  },
-  switchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.three,
-    borderRadius: 20,
-    padding: Spacing.three,
-  },
-  switchText: { flex: 1, gap: Spacing.one },
-  switchLabel: { fontSize: 15, fontWeight: "600" },
-  // Fixed-size Host for the native Jetpack Compose Switch (~52x32dp). Fixed (not matchContents)
-  // to avoid the @expo/ui Host NPE when a short-lived screen unmounts mid-measure.
-  switchHost: { width: 56, height: 36, backgroundColor: "transparent" },
-  save: {
-    borderRadius: 999,
-    paddingVertical: Spacing.three,
-    alignItems: "center",
-    marginTop: Spacing.two,
-  },
-  saveText: { fontSize: 16, fontWeight: "600" },
-});

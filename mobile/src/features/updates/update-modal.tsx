@@ -1,12 +1,16 @@
 import {
+  Box,
   Column,
   Host,
+  Icon,
   LinearProgressIndicator,
   ModalBottomSheet,
-  Text,
+  Shape,
+  Surface,
   type MaterialColors,
   type ModalBottomSheetRef,
 } from "@expo/ui/jetpack-compose";
+import { Text } from "@/components/text";
 import {
   background,
   clip,
@@ -16,15 +20,21 @@ import {
   padding,
   paddingAll,
   Shapes,
+  size,
   verticalScroll,
 } from "@expo/ui/jetpack-compose/modifiers";
 import { useRef } from "react";
 
 import { useIcons } from "@/components/icons";
-import { IconCircle, tonal, useM3Colors } from "@/components/m3";
+import { useHostTheme, useM3Colors } from "@/components/m3";
 import { SheetButton, SheetText } from "@/components/sheet";
 import { Spacing } from "@/constants/theme";
 import { useAppUpdate, type PendingUpdate } from "./use-app-update";
+
+/** 20dp-radius rounded-square tile behind the sheet's icon (the design's update badge). */
+const TILE = Shape.RoundedCorner({
+  cornerRadii: { topStart: 20, topEnd: 20, bottomStart: 20, bottomEnd: 20 },
+});
 
 // Vertical scale of the progress bar. The M3 *expressive* LinearProgressIndicator draws at a
 // fixed track thickness (~4dp) and ignores a height modifier, so to thin it we shrink the drawn
@@ -59,8 +69,7 @@ export function UpdateModal() {
     dismiss,
   } = useAppUpdate();
   const colors = useM3Colors();
-  const icons = useIcons();
-  const tone = tonal(colors, "secondary");
+  const hostTheme = useHostTheme();
   const sheetRef = useRef<ModalBottomSheetRef>(null);
 
   // Animate the sheet away, then fire the action (which unmounts it). The hide() is raced
@@ -77,7 +86,7 @@ export function UpdateModal() {
   };
 
   return (
-    <Host style={{ width: 1, height: 1 }}>
+    <Host style={{ width: 1, height: 1 }} {...hostTheme}>
       {update != null && (
         <ModalBottomSheet
           ref={sheetRef}
@@ -88,6 +97,8 @@ export function UpdateModal() {
           // One dynamic snap point at full content height — the default partial snap cut the
           // release notes + Download button off mid-sheet.
           skipPartiallyExpanded
+          // No handle while updating: the sheet can't be swiped away then, so don't offer the grip.
+          showDragHandle={!applyingOta}
           sheetGesturesEnabled={!applyingOta}
           properties={{
             shouldDismissOnBackPress: !applyingOta,
@@ -95,20 +106,13 @@ export function UpdateModal() {
           }}
         >
           <Column
-            horizontalAlignment="center"
+            horizontalAlignment="start"
             verticalArrangement={{ spacedBy: Spacing.three }}
             modifiers={[
+              fillMaxWidth(),
               padding(Spacing.four, Spacing.two, Spacing.four, Spacing.five),
             ]}
           >
-            <IconCircle
-              source={icons.update}
-              container={tone.container}
-              on={tone.on}
-              diameter={56}
-              iconSize={28}
-            />
-
             {applyingOta ? (
               <ApplyingOta
                 colors={colors}
@@ -163,9 +167,10 @@ function ApplyingOta({
 
       <SheetButton
         colors={colors}
-        variant="text"
+        variant="tonal"
         label="Continue in background"
         onClick={onContinueInBackground}
+        width={1}
       />
     </>
   );
@@ -184,8 +189,14 @@ function UpdateAvailable({
   onLater: () => void;
 }) {
   const native = update.kind === "native" ? update : null;
+  const icons = useIcons();
   return (
     <>
+      <Surface color={colors.primaryContainer} shape={TILE} modifiers={[size(56, 56)]}>
+        <Box contentAlignment="center" modifiers={[size(56, 56)]}>
+          <Icon source={icons.systemUpdate} size={28} tint={colors.onPrimaryContainer} />
+        </Box>
+      </Surface>
       <SheetText
         colors={colors}
         title={native ? "New version available" : "Update available"}
@@ -202,7 +213,7 @@ function UpdateAvailable({
             fillMaxWidth(),
             height(150),
             clip(Shapes.RoundedCorner(16)),
-            background(colors.surfaceContainer),
+            background(colors.surfaceContainerHigh),
             verticalScroll(),
           ]}
         >
@@ -228,7 +239,8 @@ function UpdateAvailable({
         <SheetButton
           colors={colors}
           variant="filled"
-          label={native ? "Download" : "Update & Restart"}
+          icon={native ? icons.download : undefined}
+          label={native ? "Download" : "Update & restart"}
           onClick={onPrimary}
           width={1}
         />
@@ -237,7 +249,7 @@ function UpdateAvailable({
           variant="text"
           label="Later"
           onClick={onLater}
-          fontSize={12}
+          width={1}
         />
       </Column>
     </>

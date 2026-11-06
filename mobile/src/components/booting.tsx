@@ -6,37 +6,32 @@ import {
   Surface,
 } from "@expo/ui/jetpack-compose";
 import { fillMaxSize, size } from "@expo/ui/jetpack-compose/modifiers";
-import { StyleSheet, useColorScheme } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
-import { SEED, useM3Colors } from "@/components/m3";
-import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
+import { useHostTheme, useM3Colors } from "@/components/m3";
 import { Spacing } from "@/constants/theme";
 
 /** Full-screen spinner badge shown while boot + SecureStore settle (gates the whole Stack). */
 export function Booting() {
   const colors = useM3Colors();
-  const scheme = useColorScheme();
+  const hostTheme = useHostTheme();
   return (
-    <ThemedView
-      style={[styles.booting, { backgroundColor: colors.background }]}
-    >
+    <View style={[styles.booting, { backgroundColor: colors.background }]}>
       {/* Fixed-size Host on purpose — matchContents can NPE if this short-lived screen
           unmounts mid-measure. */}
       <Host
-        style={{ width: 64, height: 64, backgroundColor: "transparent" }}
-        seedColor={SEED}
-        colorScheme={scheme}
+        style={{ width: 72, height: 72, backgroundColor: "transparent" }}
+        {...hostTheme}
       >
         <Surface
-          color={colors.secondaryContainer}
-          modifiers={[size(64, 64)]}
+          color={colors.primaryContainer}
+          modifiers={[size(72, 72)]}
           shape={Shape.RoundedCorner({
             cornerRadii: {
-              bottomEnd: 32,
-              topStart: 32,
-              bottomStart: 32,
-              topEnd: 32,
+              bottomEnd: 36,
+              topStart: 36,
+              bottomStart: 36,
+              topEnd: 36,
             },
           })}
         >
@@ -45,10 +40,10 @@ export function Booting() {
           </Box>
         </Surface>
       </Host>
-      <ThemedText type="default" themeColor="textSecondary">
-        Connecting to Mac...
-      </ThemedText>
-    </ThemedView>
+      <Text style={{ fontSize: 16, color: colors.onSurfaceVariant }}>
+        Connecting to Mac…
+      </Text>
+    </View>
   );
 }
 
@@ -57,6 +52,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: Spacing.three,
+    gap: Spacing.four,
   },
 });

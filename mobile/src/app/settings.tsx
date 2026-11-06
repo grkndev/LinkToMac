@@ -1,18 +1,21 @@
+import { Icon } from "@expo/ui/jetpack-compose";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 
 import { useIcons } from "@/components/icons";
 import ConfirmSheet from "@/components/confirm-sheet";
-import { ActionRow, InfoRow, SwitchRow } from "@/components/rows";
-import { Group, useM3Colors } from "@/components/m3";
+import { ActionRow, InfoRow, InlineNotice, SwitchRow } from "@/components/rows";
+import { Group, LargeTitle, Section, useM3Colors } from "@/components/m3";
 import { M3Screen } from "@/components/m3-screen";
-import { Spacing } from "@/constants/theme";
+import { Spacing, StatusColors } from "@/constants/theme";
+import { COLOR_LABELS } from "@/features/appearance/appearance-store";
+import { useAppearance } from "@/features/appearance/appearance-context";
 import { usePairing } from "@/features/pairing/pairing-context";
 import SelfAdb from "@/features/selfadb/client";
 import { useClipBootContext } from "@/features/selfadb/clip-boot-context";
 import type { CaptureState } from "@/features/selfadb/use-clip-boot";
 import { usePermissionSettings } from "@/features/selfadb/use-permission-settings";
-import { Icon } from "@expo/ui/jetpack-compose";
 
 /** Row hint per capture state — the self-ADB pipeline's health, reported not gated on. */
 const CAPTURE_HINT: Record<CaptureState, string> = {
@@ -23,15 +26,33 @@ const CAPTURE_HINT: Record<CaptureState, string> = {
   error: "Off. Something went wrong — tap for details.",
 };
 
-/** Shown on the SMS grant rows once Android has refused to prompt (see usePermissionSettings). */
+/** The status dot beside the capture hint: green when on, amber while working, red on error. */
+function captureDot(state: CaptureState, neutral: string): string {
+  switch (state) {
+    case "live":
+      return StatusColors.online;
+    case "starting":
+    case "pairing":
+      return StatusColors.warn;
+    case "error":
+      return StatusColors.error;
+    default:
+      return neutral;
+  }
+}
+
+/** Shown in the SMS notice once Android has refused to prompt (see usePermissionSettings). */
 const BLOCKED_HINT =
-  "Finish in App info: allow restricted settings if offered, then Permissions → SMS → Allow.";
+  "Android blocked the prompt. Finish in App info: allow restricted settings, then grant SMS.";
+
+const MODE_LABELS = { system: "System", light: "Light", dark: "Dark" } as const;
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { unpair } = usePairing();
+  const { unpair, server } = usePairing();
   const colors = useM3Colors();
   const icons = useIcons();
+  const appearance = useAppearance();
   const [confirmingUnpair, setConfirmingUnpair] = useState(false);
   const capture = useClipBootContext();
   const {
@@ -47,177 +68,172 @@ export default function SettingsScreen() {
     toggleProximity,
   } = usePermissionSettings();
 
+  // One notice at a time under "Mirror messages": reading first, then replying.
+  const smsNotice =
+    smsMirrorOn && smsAccess === false ? (
+      <InlineNotice
+        colors={colors}
+        icon={icons.gppMaybe}
+        title="Grant SMS access"
+        message={
+          smsBlocked
+            ? BLOCKED_HINT
+            : "Allow Link to macOS to read your messages and contacts so they can be shown on your Mac."
+        }
+        actionLabel={smsBlocked ? "Open App info" : "Grant access"}
+        onClick={
+          smsBlocked ? () => SelfAdb.openAppSettings().catch(() => {}) : requestSmsPermission
+        }
+      />
+    ) : smsMirrorOn && sendSmsAccess === false ? (
+      <InlineNotice
+        colors={colors}
+        icon={icons.gppMaybe}
+        title="Grant SMS Send Access"
+        message={
+          smsBlocked
+            ? BLOCKED_HINT
+            : "Allow Link to macOS to send text messages so you can reply from your Mac."
+        }
+        actionLabel={smsBlocked ? "Open App info" : "Grant access"}
+        onClick={
+          smsBlocked
+            ? () => SelfAdb.openAppSettings().catch(() => {})
+            : requestSendSmsPermission
+        }
+      />
+    ) : undefined;
+
+  const relayHint = `${server?.host ? server.host : "LAN only"} · LAN-direct ${
+    server?.lanEnabled === false ? "off" : "on"
+  }`;
+  const appearanceHint = `${MODE_LABELS[appearance.mode]} · ${COLOR_LABELS[appearance.color]}`;
+
   return (
     <>
-      {/* One continuous Google-style grouped list — every row is a segment of a single rounded
-        block (no section labels, no dividers). */}
-      <M3Screen paddingTop={Spacing.three}>
-        <Group>
+      <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
+        <LargeTitle colors={colors}>Settings</LargeTitle>
+
+        <Section colors={colors} label="Mirroring">
           <ActionRow
             colors={colors}
             icon={icons.notifications}
+            tone="primary"
             label="Notifications"
             hint="Status-bar icon, mirroring to your Mac, and which apps are mirrored."
             onPress={() => router.push("/notifications")}
-            trailing={
-              <Icon
-                source={icons.chevronRight}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            }
+            chevron
           />
           <SwitchRow
             colors={colors}
-            icon={icons.chat}
+            icon={icons.sms}
+            tone="primary"
             label="Mirror messages"
-            hint="Read this phone's text messages on your Mac. Requires SMS access."
+            hint="Show SMS on your Mac"
             value={smsMirrorOn}
             onValueChange={toggleSmsMirror}
+            footer={smsNotice}
           />
-          {smsMirrorOn && smsAccess === false ? (
-            <ActionRow
-              colors={colors}
-              icon={icons.chat}
-              label="Grant SMS access"
-              hint={
-                smsBlocked
-                  ? BLOCKED_HINT
-                  : "Allow Link to macOS to read your messages and contacts so they can be shown on your Mac."
-              }
-              onPress={requestSmsPermission}
-            />
-          ) : null}
-          {smsMirrorOn && sendSmsAccess === false ? (
-            <ActionRow
-              colors={colors}
-              icon={icons.chat}
-              label="Grant SMS Send Access"
-              hint={
-                smsBlocked
-                  ? BLOCKED_HINT
-                  : "Allow Link to macOS to send text messages so you can reply from your Mac."
-              }
-              onPress={requestSendSmsPermission}
-            />
-          ) : null}
           <ActionRow
             colors={colors}
-            icon={icons.clipboard}
+            icon={icons.pasteGo}
+            tone="primary"
             label="Automatic capture"
             hint={CAPTURE_HINT[capture.state]}
+            supportingDot={captureDot(capture.state, colors.outline)}
             onPress={() => router.push("/adb-setup")}
-            trailing={
-              <Icon
-                source={icons.chevronRight}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            }
+            chevron
           />
+        </Section>
+
+        <Section colors={colors} label="Mac">
           <SwitchRow
             colors={colors}
-            icon={icons.lock}
+            icon={icons.lockClock}
+            tone="tertiary"
             label="Auto-lock"
-            hint="Your Mac locks when this phone leaves range. Turn on the matching switch on your Mac too."
+            hint="Lock your Mac when this phone leaves range. Turn it on on your Mac too."
             value={proximityOn}
             onValueChange={toggleProximity}
+          />
+        </Section>
+
+        <Section colors={colors} label="Connection">
+          <ActionRow
+            colors={colors}
+            icon={icons.dns}
+            label="Relay server"
+            hint={relayHint}
+            onPress={() => router.push("/server-config")}
+            chevron
+          />
+          <ActionRow
+            colors={colors}
+            icon={icons.qr}
+            label="Re-pair"
+            hint="Scan the QR code again"
+            onPress={() => router.push("/qr-scan")}
+            chevron
+          />
+        </Section>
+
+        <Section colors={colors} label="System">
+          <ActionRow
+            colors={colors}
+            icon={icons.palette}
+            label="Appearance"
+            hint={appearanceHint}
+            onPress={() => router.push("/appearance")}
+            chevron
           />
           {batteryOk === false ? (
             <ActionRow
               colors={colors}
-              icon={icons.battery}
+              icon={icons.batterySaver}
               label="Disable battery optimization"
-              hint="Required for uninterrupted background operation."
+              hint="Keeps the link alive in the background"
               onPress={() => {
                 SelfAdb.requestIgnoreBatteryOptimizations().catch(() => {});
               }}
               trailing={
-                <Icon
-                  source={icons.chevronRight}
-                  size={24}
-                  tint={colors.onSurfaceVariant}
-                />
+                <Icon source={icons.openInNew} size={20} tint={colors.onSurfaceVariant} />
               }
             />
           ) : (
             <InfoRow
               colors={colors}
-              icon={icons.battery}
-              label="Battery Optimization"
+              icon={icons.batterySaver}
+              label="Battery optimization"
               value={batteryOk ? "Disabled" : "—"}
             />
           )}
-          <ActionRow
-            colors={colors}
-            icon={icons.cast}
-            label="Relay server"
-            hint="Set the server configuration."
-            onPress={() => router.push("/server-config")}
-            trailing={
-              <Icon
-                source={icons.chevronRight}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            }
-          />
-          <ActionRow
-            colors={colors}
-            icon={icons.qr}
-            label="Re-pair (Scan QR)"
-            hint="Scan the Pairing QR from your Mac."
-            onPress={() => router.push("/qr-scan")}
-            trailing={
-              <Icon
-                source={icons.chevronRight}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            }
-          />
-          <ActionRow
-            colors={colors}
-            icon={icons.linkOff}
-            label="Remove Pairing"
-            hint="Disconnect and remove the pairing."
-            destructive
-            onPress={() => setConfirmingUnpair(true)}
-            trailing={
-              <Icon
-                source={icons.chevronRight}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            }
-          />
+        </Section>
+
+        <Section colors={colors} label="Support">
           <ActionRow
             colors={colors}
             icon={icons.terminal}
             label="Logs"
-            hint="View ADB and device logs."
             onPress={() => router.push("/logs")}
-            trailing={
-              <Icon
-                source={icons.chevronRight}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            }
+            chevron
           />
           <ActionRow
             colors={colors}
             icon={icons.info}
             label="About"
-            hint="Version, developer, and contact."
+            hint={`Version ${Constants.expoConfig?.version ?? "—"}`}
             onPress={() => router.push("/about")}
-            trailing={
-              <Icon
-                source={icons.chevronRight}
-                size={24}
-                tint={colors.onSurfaceVariant}
-              />
-            }
+            chevron
+          />
+        </Section>
+
+        <Group>
+          <ActionRow
+            colors={colors}
+            icon={icons.linkOff}
+            label="Remove pairing"
+            destructive
+            onPress={() => setConfirmingUnpair(true)}
           />
         </Group>
       </M3Screen>

@@ -1,3 +1,4 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import SelfAdb, { type InstalledApp, type NotifFilterMode } from './client';
@@ -71,4 +72,35 @@ export function useNotificationAppFilter() {
 
 function persist(mode: NotifFilterMode, include: Set<string>, exclude: Set<string>) {
   SelfAdb.setNotifAppFilter(mode, [...include], [...exclude]).catch(() => {});
+}
+
+/**
+ * One-line summary of the persisted per-app filter for the Notifications screen's "Select apps"
+ * row: "All apps · 3 kept off your Mac" / "Only 5 apps". Reads just the saved sets (not the
+ * installed-app list, which is heavy) and re-reads whenever the screen regains focus, so it is
+ * right again after coming back from the picker. `null` until the first read.
+ */
+export function useNotifFilterSummary(): string | null {
+  const [summary, setSummary] = useState<string | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      SelfAdb.getNotifAppFilter()
+        .then((f) => {
+          if (!alive) return;
+          if (f.mode === 'include') {
+            const n = f.include.length;
+            setSummary(n === 0 ? 'Only selected apps · none yet' : `Only ${n} app${n === 1 ? '' : 's'}`);
+          } else {
+            const n = f.exclude.length;
+            setSummary(n === 0 ? 'All apps' : `All apps · ${n} kept off your Mac`);
+          }
+        })
+        .catch(() => {});
+      return () => {
+        alive = false;
+      };
+    }, []),
+  );
+  return summary;
 }
