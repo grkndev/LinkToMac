@@ -587,6 +587,61 @@ the events.
 `NotificationListener.isOurs` makes each skip *both* packages' notifications, or each would mirror the
 other's transfer notifications to the Mac.
 
+### 3.9 Native self-update (`AppUpdater`, `InstallActivity`, `PackageReplacedReceiver`)
+
+OTA (`expo-updates`) covers JS-only changes. A new APK is a *native* update: the `appVersion` runtime
+policy means `expo-updates` never sees it, so it comes from the GitHub `releases/latest` feed (the
+same release the Mac's Sparkle appcast is published with). The goal is that the user's whole part is
+**one tap on the system installer** — find it, download it and verify it without them.
+
+**The app never installs anything itself.** It downloads, verifies, and then opens the *system*
+installer, where the user presses Update. That is deliberate (no silent install, no
+`USER_ACTION_NOT_REQUIRED`), and it is also what Android allows an ordinary app.
+
+```
+ClipForegroundService ──schedule()──▶ AppUpdater   (first check ~60 s after start, then every 6 h;
+(or JS checkAppUpdate / app launch)                one retry after 15 min if the probe failed)
+        │ GET releases/latest → newer than the installed versionName?
+        ▼
+  download to cacheDir/updates/<v>.apk.part   (OkHttp, Range-resumed, progress → onAppUpdate)
+        │ rename → verify: SHA-256 (asset `digest`), same package, higher versionCode,
+        ▼                   a signing certificate shared with the installed app
+  READY ──▶ UpdateNotifier: "Update ready — tap to install"        (or the sheet's Install button)
+        ▼
+  InstallActivity ─▶ [Install unknown apps, first time] ─▶ PackageInstaller session ─▶ system "Update" screen
+        ▼ the OS replaces the app
+  PackageReplacedReceiver: reset() the record + files, restart ClipForegroundService
+```
+
+- **Why a notification tap.** Android 10+ stops a background app from starting an Activity, so with the
+  app swiped away "open the installer when the download finishes" is not possible. A notification tap is
+  a user action, which is. With the app open, the update sheet offers the same thing as an **Install** button.
+- **"Install unknown apps".** Even opening the installer needs `REQUEST_INSTALL_PACKAGES` *and* the
+  per-app switch. `InstallActivity` checks `canRequestPackageInstalls()` and, if it is off, sends the user
+  to `ACTION_MANAGE_UNKNOWN_APP_SOURCES` for this package, then carries on from `onResume`. It
+  deliberately has **no `noHistory`**, which would finish it on the trip to settings.
+- **Verification before "ready".** Android refuses a wrongly-signed APK at install anyway; checking first
+  means "ready" is never announced for a file that can't install. It is also what stops a **dev** build
+  (`….dev`, a different package) from being offered the release APK. A failure that another attempt can't
+  fix (wrong package/key/checksum) is stored `retryable = false`: the periodic check does **not**
+  re-download that version every six hours; the sheet's Download still tries on request.
+- **Why `MY_PACKAGE_REPLACED`.** An update kills the process and the system does *not* restart the
+  foreground service for a replaced package — without the receiver the link to the Mac stays down until the
+  app is opened by hand. The broadcast is exempt from the Android 12 background-FGS-start ban. The receiver
+  only restarts the service when a relay pairing exists (`ClipForegroundService.isConfigured`).
+- **State.** `UpdateRecord` (version, notes, state `idle|downloading|ready|failed`, progress, path, error,
+  `retryable`) lives in the `linktomac_update` prefs file as one JSON blob, so the service, JS and the
+  notification agree across restarts; a record found `downloading` belonged to a dead process and reads as
+  `idle`. Changes reach JS through `ClipBus.onAppUpdate` → the `onAppUpdate` module event. The partial
+  `.part` file survives a restart and resumes (`UpdateLogic.resumeOffset`).
+- **Settings.** `getAutoUpdate`/`setAutoUpdate` (default on) gate only the *automatic* path; a manual
+  check from the About screen / the sheet still downloads on request.
+- **Rehearsing it.** A debuggable build honours `setUpdateFeedForTesting(url)`: point it at a local HTTP
+  server that serves a fake `releases/latest` JSON and an APK with the same package, a higher `versionCode`
+  and the same signing key (cleartext is permitted), to exercise download → notification → installer
+  without publishing a release. `UpdateLogic` (version compare, release parsing, resume offset, the record)
+  is covered by `AppUpdateTest` (`./gradlew :selfadb:testDebugUnitTest`).
+
 ---
 
 ## 4. macOS: the menu-bar app (`mac/`)
@@ -1336,12 +1391,17 @@ mobile/modules/selfadb/android/src/main/java/expo/modules/selfadb/
   FileHistory.kt            the persisted Files-screen history (store + the app-wide object that emits onFileTransfer)
   ShareActivity.kt          share-sheet targets (Send to Clipboard / Send as a File, single or multiple)
   PickActivity.kt           system file / folder picker for the Files screen (persistent read grant)
+  AppUpdate.kt              platform-free update logic: ReleaseInfo, UpdateRecord, version compare, release parsing, resume offset (JVM-tested)
+  AppUpdater.kt             finds a newer GitHub release, downloads + verifies its APK in the background (§3.9)
+  UpdateNotifier.kt         the download-progress and "Update ready" notifications
+  InstallActivity.kt        hands the verified APK to the system installer (PackageInstaller session)
+  PackageReplacedReceiver.kt  after an update: restart the foreground service, forget the installed update
   ProcessTextActivity.kt / ClipboardReadActivity.kt   the two ADB-free manual capture paths
   NotificationListener.kt   NotificationListenerService → note frames (skips both app variants)
   SmsMirror.kt              FGS-owned SMS reader/sender → sms frames
   BleAdvertiser.kt          BLE presence beacon
   ClipBus.kt                service ↔ module bridge + ring buffers + file-transfer event
-mobile/modules/selfadb/android/src/test/…/   JUnit: FileFrameVectorTest, FileInboxTest, FileSinkTest, FolderWalkerTest, FileHistoryTest
+mobile/modules/selfadb/android/src/test/…/   JUnit: FileFrameVectorTest, FileInboxTest, FileSinkTest, FolderWalkerTest, FileHistoryTest, AppUpdateTest
 
 mobile/native-src/clipboard-agent/
   ClipboardAgent.java       the privileged daemon source
