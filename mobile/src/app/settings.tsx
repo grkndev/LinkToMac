@@ -1,7 +1,7 @@
 import { Icon } from "@expo/ui/jetpack-compose";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useCollapsingTitle } from "@/components/collapsing-title";
 import { useIcons } from "@/components/icons";
@@ -69,6 +69,20 @@ export default function SettingsScreen() {
     proximityOn,
     toggleProximity,
   } = usePermissionSettings();
+
+  // Automatic app-update downloads (native AppUpdater). Null until read — and stays null on a
+  // binary that predates the updater, which hides the row instead of showing a dead switch.
+  const [autoUpdate, setAutoUpdate] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (typeof SelfAdb.getAutoUpdate !== "function") return;
+    let cancelled = false;
+    SelfAdb.getAutoUpdate()
+      .then((v) => !cancelled && setAutoUpdate(v))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // One notice at a time under "Mirror messages": reading first, then replying.
   const smsNotice =
@@ -190,6 +204,19 @@ export default function SettingsScreen() {
             onPress={() => router.push("/appearance")}
             chevron
           />
+          {autoUpdate !== null ? (
+            <SwitchRow
+              colors={colors}
+              icon={icons.systemUpdate}
+              label="Download updates automatically"
+              hint="Fetches new versions in the background. You still confirm the install."
+              value={autoUpdate}
+              onValueChange={(v) => {
+                setAutoUpdate(v);
+                SelfAdb.setAutoUpdate(v).catch(() => {});
+              }}
+            />
+          ) : null}
           {batteryOk === false ? (
             <ActionRow
               colors={colors}

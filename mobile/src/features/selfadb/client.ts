@@ -15,6 +15,9 @@ export type { AutoStartState };
 // Re-export the native event payload types so feature code never reaches into
 // modules/selfadb with deep relative paths.
 export type {
+  AppUpdateCheck,
+  AppUpdateState,
+  AppUpdateStatus,
   ClipEvent,
   FileTransferEntry,
   FileTransferStatus,

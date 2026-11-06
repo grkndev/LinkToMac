@@ -27,8 +27,10 @@ import { useRef } from "react";
 
 import { useIcons } from "@/components/icons";
 import { useHostTheme, useM3Colors } from "@/components/m3";
+import { SmoothProgress } from "@/components/motion";
 import { SheetButton, SheetText } from "@/components/sheet";
 import { Spacing } from "@/constants/theme";
+import type { NativeUpdate } from "./check";
 import { useAppUpdate, type PendingUpdate } from "./use-app-update";
 
 /** 20dp-radius rounded-square tile behind the sheet's icon (the design's update badge). */
@@ -48,12 +50,15 @@ const PROGRESS_SCALE_Y = 0.5;
  * Host is fixed-size (never `matchContents`): the sheet renders in its own window, and a
  * matchContents Host can NPE if it unmounts mid-measure.
  *
- * Three shapes, one component:
- *  - **native** — a newer APK exists; the primary action opens the download (release notes shown).
+ * Shapes, one component:
+ *  - **native** — a newer APK exists. The background updater usually has fetched it already, so
+ *    the primary action is **Install** (opens the system installer, where the user confirms). If it
+ *    hasn't (automatic download off, or it failed) the action is **Download**, which fetches it
+ *    here and flips the sheet to a progress state; with no APK asset it falls back to the browser.
  *  - **ota** — a JS update exists; the primary action fetches it and restarts the app in place.
- *  - **updating** — once the OTA fetch is in flight (`applyingOta`), the sheet switches to an
- *    "App is updating" state with an indeterminate progress bar and a "Continue in background"
- *    escape hatch; swipe/back/scrim dismissal is disabled so that hatch is the only way out.
+ *  - **updating** — an OTA fetch in flight (`applyingOta`) or a native APK download, with a
+ *    progress bar and a "Continue in background" escape hatch; swipe/back/scrim dismissal is
+ *    disabled so that hatch is the only way out.
  *
  * Every hook action ends in `setUpdate(null)`, which unmounts the sheet instantly — so each
  * button animates `hide()` first, then fires the action. "Update & restart" is the exception:
@@ -65,12 +70,15 @@ export function UpdateModal() {
     applyingOta,
     applyOta,
     continueInBackground,
-    openDownload,
+    startNativeUpdate,
     dismiss,
   } = useAppUpdate();
   const colors = useM3Colors();
   const hostTheme = useHostTheme();
   const sheetRef = useRef<ModalBottomSheetRef>(null);
+  const downloadingNative = update?.kind === "native" && update.state === "downloading";
+  // Either kind of in-flight fetch pins the sheet open (see the escape hatch above).
+  const busy = applyingOta || downloadingNative;
 
   // Animate the sheet away, then fire the action (which unmounts it). The hide() is raced
   // against a timeout because Compose's sheetState.hide() SUSPENDS FOREVER while
@@ -91,18 +99,18 @@ export function UpdateModal() {
         <ModalBottomSheet
           ref={sheetRef}
           onDismissRequest={() => {
-            if (!applyingOta) dismiss();
+            if (!busy) dismiss();
           }}
           containerColor={colors.surfaceContainerLow}
           // One dynamic snap point at full content height — the default partial snap cut the
           // release notes + Download button off mid-sheet.
           skipPartiallyExpanded
           // No handle while updating: the sheet can't be swiped away then, so don't offer the grip.
-          showDragHandle={!applyingOta}
-          sheetGesturesEnabled={!applyingOta}
+          showDragHandle={!busy}
+          sheetGesturesEnabled={!busy}
           properties={{
-            shouldDismissOnBackPress: !applyingOta,
-            shouldDismissOnClickOutside: !applyingOta,
+            shouldDismissOnBackPress: !busy,
+            shouldDismissOnClickOutside: !busy,
           }}
         >
           <Column
@@ -118,14 +126,25 @@ export function UpdateModal() {
                 colors={colors}
                 onContinueInBackground={() => hideThen(continueInBackground)}
               />
+            ) : update.kind === "native" && update.state === "downloading" ? (
+              <DownloadingNative
+                colors={colors}
+                version={update.version}
+                progress={update.progress}
+                onContinueInBackground={() => hideThen(continueInBackground)}
+              />
             ) : (
               <UpdateAvailable
                 colors={colors}
                 update={update}
                 onPrimary={
-                  update.kind === "native"
-                    ? () => hideThen(openDownload)
-                    : () => applyOta()
+                  update.kind !== "native"
+                    ? () => applyOta()
+                    : // Download keeps the sheet up (it becomes the progress state); Install and the
+                      // browser fallback hand off to something else, so the sheet leaves first.
+                      update.state !== "ready" && update.downloadable
+                      ? startNativeUpdate
+                      : () => hideThen(startNativeUpdate)
                 }
                 onLater={() => hideThen(dismiss)}
               />
@@ -176,6 +195,42 @@ function ApplyingOta({
   );
 }
 
+/** A native APK download in flight: percentage, a determinate bar, and the background escape hatch. */
+function DownloadingNative({
+  colors,
+  version,
+  progress,
+  onContinueInBackground,
+}: {
+  colors: MaterialColors;
+  version: string;
+  progress: number;
+  onContinueInBackground: () => void;
+}) {
+  return (
+    <>
+      <SheetText
+        colors={colors}
+        title={`Downloading ${progress}%`}
+        message={`Version ${version} is downloading. You'll get a notification when it's ready to install.`}
+      />
+      <SmoothProgress
+        progress={progress / 100}
+        color={colors.primary}
+        trackColor={colors.secondaryContainer}
+        thickness={6}
+      />
+      <SheetButton
+        colors={colors}
+        variant="tonal"
+        label="Continue in background"
+        onClick={onContinueInBackground}
+        width={1}
+      />
+    </>
+  );
+}
+
 /** The prompt state: headline, optional release notes, and the stacked action buttons. */
 function UpdateAvailable({
   colors,
@@ -199,10 +254,10 @@ function UpdateAvailable({
       </Surface>
       <SheetText
         colors={colors}
-        title={native ? "New version available" : "Update available"}
+        title={native ? (native.state === "ready" ? "Update ready to install" : "New version available") : "Update available"}
         message={
           native
-            ? `Version ${native.version} is ready. Download the new app to update — your settings and pairing are kept.`
+            ? nativeMessage(native)
             : "A new update is ready. Download it and restart the app to apply it."
         }
       />
@@ -239,8 +294,8 @@ function UpdateAvailable({
         <SheetButton
           colors={colors}
           variant="filled"
-          icon={native ? icons.download : undefined}
-          label={native ? "Download" : "Update & restart"}
+          icon={native ? (native.state === "ready" ? icons.systemUpdate : icons.download) : undefined}
+          label={native ? (native.state === "ready" ? "Install" : "Download") : "Update & restart"}
           onClick={onPrimary}
           width={1}
         />
@@ -254,4 +309,19 @@ function UpdateAvailable({
       </Column>
     </>
   );
+}
+
+/** The body text for a native update, by how far the background updater got. */
+function nativeMessage(u: NativeUpdate): string {
+  const kept = "your settings and pairing are kept";
+  switch (u.state) {
+    case "ready":
+      return `Version ${u.version} is downloaded. Tap Install and confirm in the system dialog — ${kept}.`;
+    case "failed":
+      return `Version ${u.version} couldn't be downloaded automatically${u.error ? ` (${u.error})` : ""}. Download it again to update — ${kept}.`;
+    default:
+      return u.downloadable
+        ? `Version ${u.version} is available. Download it here and install with one tap — ${kept}.`
+        : `Version ${u.version} is available. Download the new app to update — ${kept}.`;
+  }
 }

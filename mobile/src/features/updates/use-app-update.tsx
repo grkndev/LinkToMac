@@ -10,7 +10,9 @@ import {
 } from 'react';
 import { Alert, Linking } from 'react-native';
 
-import { checkForAppUpdate, type AppUpdate } from './check';
+import SelfAdb from '@/features/selfadb/client';
+
+import { checkForAppUpdate, toNativeUpdate, type AppUpdate } from './check';
 
 export type PendingUpdate = Exclude<AppUpdate, { kind: 'none' } | { kind: 'failed' }>;
 
@@ -27,8 +29,12 @@ type UpdateState = {
   applyOta: () => Promise<void>;
   /** Let the in-flight OTA download finish in the background; it applies on the next launch. */
   continueInBackground: () => void;
-  /** Open the APK download (or release page) for a native update. */
-  openDownload: () => void;
+  /**
+   * The native update's primary action. Ready → open the system installer (the user confirms
+   * there). Downloadable but not fetched → start the in-app download; the sheet stays up and shows
+   * its progress. No APK the app can fetch → the browser fallback.
+   */
+  startNativeUpdate: () => void;
   /** Dismiss the modal ("Later"). */
   dismiss: () => void;
 };
@@ -54,6 +60,9 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   // Set when the user taps "Continue in background": the fetch keeps running but we
   // skip the forced reload (and stay silent on failure) since they've left the dialog.
   const background = useRef(false);
+  // The version the user already waved off ("Later" / "Continue in background"): a download that
+  // finishes while the app is open must not pop the sheet back up for it.
+  const dismissed = useRef<string | null>(null);
 
   const checkNow = useCallback(async (manual = false) => {
     if (inFlight.current) return;
@@ -70,7 +79,11 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
         if (manual) Alert.alert("You're up to date", 'No new version is available.');
         return;
       }
-      setUpdate(result);
+      // A manual check is a request to see it, so it overrides an earlier "Later".
+      if (manual || result.kind !== 'native' || dismissed.current !== result.version) {
+        dismissed.current = null;
+        setUpdate(result);
+      }
     } catch {
       if (manual) {
         Alert.alert('Check failed', "Couldn't check for updates. Try again later.");
@@ -94,6 +107,21 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [checkNow]);
+
+  // The native updater reports progress/state as it works (also while the app was closed and is now
+  // reopened). Patch the open sheet, or raise it when a background download just became ready.
+  useEffect(() => {
+    if (typeof SelfAdb.addListener !== 'function') return;
+    const sub = SelfAdb.addListener('onAppUpdate', (state) => {
+      const next = toNativeUpdate(state);
+      setUpdate((cur) => {
+        if (cur?.kind === 'native') return next ? { ...cur, ...next } : cur;
+        if (cur == null && next?.state === 'ready' && dismissed.current !== next.version) return next;
+        return cur;
+      });
+    });
+    return () => sub.remove();
+  }, []);
 
   const applyOta = useCallback(async () => {
     // Flip into the "applying" state first so the modal can show the "App is updating"
@@ -125,21 +153,44 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const continueInBackground = useCallback(() => {
-    // Leave fetchUpdateAsync() running; just release the dialog. The staged update
-    // applies on the next app launch (see applyOta).
+    // Leave fetchUpdateAsync() running (or the native APK download); just release the dialog. The
+    // staged OTA applies on the next launch (see applyOta); a finished APK announces itself with
+    // the "Update ready" notification.
     background.current = true;
+    if (update?.kind === 'native') dismissed.current = update.version;
     setApplyingOta(false);
-    setUpdate(null);
-  }, []);
-
-  const openDownload = useCallback(() => {
-    // Side effect OUTSIDE the setState updater: React may invoke updaters twice (StrictMode),
-    // which double-opened the download.
-    if (update?.kind === 'native') Linking.openURL(update.url).catch(() => {});
     setUpdate(null);
   }, [update]);
 
-  const dismiss = useCallback(() => setUpdate(null), []);
+  const startNativeUpdate = useCallback(() => {
+    if (update?.kind !== 'native') return;
+    // Side effects OUTSIDE the setState updaters: React may invoke updaters twice (StrictMode),
+    // which double-fired them.
+    if (update.state === 'ready') {
+      SelfAdb.installAppUpdate()
+        .then((opened) => {
+          if (!opened) Alert.alert('Update not ready', 'The download is no longer available. Check again.');
+        })
+        .catch(() => Alert.alert('Update failed', "Couldn't open the installer."));
+      // The system installer takes over; the sheet's job is done either way.
+      dismissed.current = update.version;
+      setUpdate(null);
+      return;
+    }
+    if (update.downloadable) {
+      // Flip to the downloading state now; the native events keep the progress current.
+      setUpdate({ ...update, state: 'downloading', progress: 0, error: null });
+      SelfAdb.downloadAppUpdate().catch(() => {});
+      return;
+    }
+    Linking.openURL(update.url).catch(() => {});
+    setUpdate(null);
+  }, [update]);
+
+  const dismiss = useCallback(() => {
+    if (update?.kind === 'native') dismissed.current = update.version;
+    setUpdate(null);
+  }, [update]);
 
   return (
     <Ctx.Provider
@@ -150,7 +201,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
         checkNow,
         applyOta,
         continueInBackground,
-        openDownload,
+        startNativeUpdate,
         dismiss,
       }}
     >
