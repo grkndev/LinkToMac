@@ -16,10 +16,11 @@
 - [x] Updates — Sparkle on the Mac; the Android app finds new releases on GitHub
 - [x] Shared protocol test vectors + Swift and Kotlin test suites, so the hand-mirrored wire formats can't silently drift
 ### Upcoming
-- [ ] Finder ▸ Share ▸ "Send to Phone" — the extension is written and ships in the bundle, but macOS (amfid) refuses to run an **ad-hoc signed** app extension: `AppleMobileFileIntegrityError -423`. It registers and appears in the Share menu, then its context is torn down before `viewDidLoad`. Unblocked only by signing with a real Developer ID, or by replacing it with an `NSServices` entry (which the app provides itself, so it never hits that gate).
+- [x] Finder ▸ Share ▸ "Send to Phone" — needs a real certificate chain (macOS/amfid refuses an **ad-hoc signed** app extension: `AppleMobileFileIntegrityError -423`), so it runs only in Developer-ID builds from `build-release.sh`; verified on the first notarized build. The hand-off to the app is `NSWorkspace.open(linktomac://…)` — `NSExtensionContext.open` silently does nothing for a Finder share extension.
+- [ ] Notarized build, still to check: run it on a clean Mac and re-check screen lock (`SACLockScreenImmediate`), BLE proximity, LAN server, notifications and a Sparkle update from the last ad-hoc build, all under the hardened runtime.
 - [ ] Drag from Mail / Photos / Safari's download list onto the Mac — they hand over a *file promise*, not a file URL, so the drop is reported as unsupported today; resolving promises (`NSFilePromiseReceiver`) would fix it.
 - [ ] Send folders from the phone's **share sheet** — Android's share sheet never offers a folder, so today a folder goes through the Files screen's picker only.
-- [ ] Gate (or remove) the Mac's `linktomac://send` URL scheme — any local app or page can ask it to send a file to the paired phone; it exists only for the inert Share extension.
+- [ ] Gate (or remove) the Mac's `linktomac://send` URL scheme — any local app or page can ask it to send a file to the paired phone; it exists only for the Finder Share extension.
 - [ ] FCM push-wake for minimum background battery — while the Mac is offline, drop the persistent relay socket (no idle ping all day) and let a high-priority push wake the phone when the Mac reconnects. Only way to reach ~0 idle battery; relay-path only (not LAN). Big lift: GMS/FCM dependency + the relay must be able to push.
 - [ ] Mirror your Android screen to Mac
 - [ ] Access Phone Gallery from Mac

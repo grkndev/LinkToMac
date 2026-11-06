@@ -602,9 +602,10 @@ leaves the app alive; a Dock click reopens it. The window is a fixed 1280×760 w
 bar. Swift 6 with complete strict concurrency; everything observable is `@MainActor`-isolated and async
 loops hop back to the main actor on each step. **The only third-party dependency is Sparkle**
 (auto-update); everything else is system frameworks. Built reproducibly from `project.yml` via XcodeGen
-and ad-hoc signed (`CODE_SIGN_IDENTITY: "-"`, hardened runtime off) so it runs locally without a
-Developer team — which is also why the Finder Share extension cannot run (`amfid` refuses an ad-hoc
-signed app extension; see `RoadMap.md`).
+and ad-hoc signed in `project.yml` (`CODE_SIGN_IDENTITY: "-"`) so local/Debug builds need no Developer
+team. **Release builds are re-signed by `scripts/build-release.sh`** with a Developer ID Application
+certificate + hardened runtime, notarized and stapled (see `mac/CLAUDE.md`). The Finder Share
+extension cannot run while ad-hoc signed (`amfid` refuses it); it works in the Developer ID build.
 
 The UI is **Material 3-flavoured** (mirroring the mobile app): the popover is a compact phone-identity
 card (phone render, name, live status dot, tonal transport/battery chips), and the dashboard hosts the
@@ -631,7 +632,7 @@ phone panel, a Notifications / Messages tab strip, clip history and Settings.
 | `LoginItem.swift` | `SMAppService` auto-start at login |
 | `MenuPanel.swift`, `DashboardWindow.swift`, `PhonePanel.swift`, `FeaturePanel.swift`, `ClipHistoryScreen.swift` | The popover and the dashboard: phone identity, Notifications/Messages tabs (the Messages tab has the reply composer), clip history |
 | `SettingsScreen.swift`, `AppearanceSettings.swift`, `RelayScreen.swift`, `ServerSettingsView.swift`, `AboutView.swift`, `DashboardComponents.swift`, `PanelComponents.swift` | Settings, appearance, relay, about, shared M3 components |
-| `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — **inert**: it is sandboxed (so it hands the path over via `linktomac://`) and ad-hoc signing can't run it |
+| `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — sandboxed, so it hands the path over via `linktomac://` (`NSWorkspace.open`; `NSExtensionContext.open` does nothing for a Finder share extension). Inert under ad-hoc signing, runs in the Developer-ID build |
 
 ### 4.1 RelayClient (Swift)
 
@@ -678,7 +679,7 @@ The wire side is §5.4; this is how the Mac implements it.
 dashboard window and popover (`.phoneFileDrop`: an `.onDrop` that resolves **every** provider through a
 lock-guarded box, reporting items that carry no file URL — Mail/Photos "file promises" — instead of
 ignoring them), the menu-bar icon (`StatusDropView.performDragOperation`, file URLs only), and a
-`linktomac://send?path=…` URL (the inert Share extension, or `open` from a shell). A folder is allowed.
+`linktomac://send?path=…` URL (the Share extension, or `open` from a shell). A folder is allowed.
 
 **Planning.** `FileBatchPlanner.plan` flattens the drop off the main actor: folders are walked with
 `FileManager.enumerator` (hidden files and nested symlinks skipped, packages sent as trees, at most 1,000
@@ -1164,13 +1165,16 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   `RELAY_AUTH_TOKEN`. Rotating the password means updating `server/.env` and re-scanning the QR
   (or re-entering it in the app); nothing sensitive sits in tracked source.
 - 🟡 **The Mac's `linktomac://send?path=…` URL scheme can be invoked by any local app or web page**
-  (it exists for the inert Share extension, §4). It checks the path exists but not who asked, so a page
+  (it exists for the Share extension, §4). It checks the path exists but not who asked, so a page
   could make the Mac send a chosen file *to the paired phone* — never anywhere else, but still a
   surprise on the phone. Gating it (a confirmation, or removing the scheme until the extension can run)
   is open.
-- 🟡 **The Mac app is ad-hoc signed, not notarized.** First launch on another Mac needs right-click → Open;
-  Sparkle updates are EdDSA-verified, but Gatekeeper never vets the app. This is also why the Finder
-  Share extension cannot run (`amfid` refuses an ad-hoc signed app extension).
+- 🟡 **Mac release signing is new.** Releases are Developer ID signed + notarized (`build-release.sh`);
+  releases up to 0.11.0 were ad-hoc (right-click → Open, and no Share extension). Signing, notarization,
+  stapling, Gatekeeper and the Finder Share extension are verified on a real build. **Still unverified
+  under the hardened runtime:** the private `SACLockScreenImmediate` `dlopen`, BLE proximity (needs the
+  `com.apple.security.device.bluetooth` entitlement in `Resources/LinkToMac.entitlements`), and the
+  LAN server — re-check these from a notarized build.
 - 🟠 **Wireless Debugging is a device-wide loosening.** Any client on the network holding an
   authorized key can reach adbd. Mitigation here is that it's your own device and the only
   trusted key lives in the app; the app turns Wireless Debugging back *off* after deploying.
@@ -1263,9 +1267,9 @@ v1 links **one phone and one Mac**. Implemented:
   reply composer for 1:1 threads that sends a real SMS from the phone.
 - **Updates** — Sparkle on the Mac; the Android app points at the GitHub release.
 
-Not working today: **Finder ▸ Share ▸ "Send to Phone"** — the extension ships in the bundle but macOS
-(`amfid`) refuses to run an *ad-hoc signed* app extension (`AppleMobileFileIntegrityError -423`); it needs a
-Developer ID, or an `NSServices` entry the app provides itself. On the roadmap (`RoadMap.md`): FCM push-wake
+**Finder ▸ Share ▸ "Send to Phone"** works in Developer-ID builds; macOS (`amfid`) refuses to run an
+*ad-hoc signed* app extension (`AppleMobileFileIntegrityError -423`), so older releases and `--adhoc`
+builds don't have it. On the roadmap (`RoadMap.md`): FCM push-wake
 for minimum idle battery, screen mirroring, and read-only access to the gallery and calls from the Mac.
 
 ---
@@ -1313,7 +1317,7 @@ mac/
     MenuPanel.swift / DashboardWindow.swift / PhonePanel.swift / FeaturePanel.swift / ClipHistoryScreen.swift   popover + dashboard
     SettingsScreen.swift / AppearanceSettings.swift / RelayScreen.swift / ServerSettingsView.swift / AboutView.swift   settings surfaces
     DashboardComponents.swift / PanelComponents.swift   shared M3 components
-  ShareExtension/                Finder ▸ Share ▸ "Send to Phone" (inert: ad-hoc signing; hands the path over via linktomac://)
+  ShareExtension/                Finder ▸ Share ▸ "Send to Phone" (needs a Developer ID build to run; hands the path over via linktomac://)
   Tests/                         swift-testing: AckWindow, FileSender (resume), FileInbox, FileBatchPlanner, FileFrame, FileFrameVectors, BurstCounter
 
 mobile/modules/selfadb/android/src/main/java/expo/modules/selfadb/

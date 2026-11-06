@@ -118,9 +118,11 @@ cd server && npm run typecheck && npm run smoke                # smoke needs `np
 ### Building a release (beta)
 
 - **macOS** — `cd mac && ./scripts/build-release.sh` → `build/release/LinkToMac-<version>.dmg`
-  (universal, ad-hoc signed). The app is **not notarized** (no Apple Developer team), so on a
-  _different_ Mac the first launch must be **right-click → Open** once — or run
-  `xattr -dr com.apple.quarantine /Applications/LinkToMac.app` after dragging it in.
+  (universal, signed with a Developer ID certificate and **notarized**, so it opens on any Mac with no
+  Gatekeeper workaround). Needs a "Developer ID Application" certificate in the Keychain and a
+  `notarytool` profile — setup is in the header of `mac/scripts/build-release.sh`. `--adhoc` makes a
+  local-only unsigned build instead (not distributable; older releases were ad-hoc, and those needed
+  right-click → Open on first launch).
 - **Android** — `cd mobile && eas login && eas build --platform android --profile preview --local`
   → an installable **APK** (sideload). This `preview` profile **is** the public-release build: it
   bakes in the `preview` EAS Update channel, so OTA JS patches must be published to the same
@@ -197,8 +199,9 @@ v1 links **one phone and one Mac**. Shipping today:
   persisted history and retry on the phone)
 - ✅ **Updates** — Sparkle on the Mac, in-app release check on Android
 
-Known gaps: **Finder ▸ Share ▸ "Send to Phone"** doesn't work (macOS won't run an ad-hoc signed app
-extension), and dragging from Mail/Photos isn't supported (use Finder). On the roadmap: FCM push-wake
+**Finder ▸ Share ▸ "Send to Phone"** works in the signed releases (macOS won't run an app extension
+that is ad-hoc signed, so older releases and `--adhoc` builds don't have it). Known gap: dragging from
+Mail/Photos isn't supported (use Finder). On the roadmap: FCM push-wake
 for minimum idle battery, **screen mirroring**, and read-only **Calls / Photos** tabs. A separate
 technical document ([`TECHNICAL.md`](TECHNICAL.md)) covers the internals in depth; per-release notes
 are in [`release-notes/`](release-notes/) and the [`CHANGELOG`](CHANGELOG.md).
