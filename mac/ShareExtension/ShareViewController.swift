@@ -1,16 +1,20 @@
 import Cocoa
+import os
 import UniformTypeIdentifiers
 
-/// **This does not run today, and it is not a bug in this file.** `amfid` refuses the binary with
-/// `AppleMobileFileIntegrityError -423` ("The file is adhoc signed or signed by an unknown
-/// certificate chain"): macOS requires app extensions to carry a real certificate chain, and this
-/// app is deliberately ad-hoc signed (no Apple Developer account — the same choice that lets the
-/// private `SACLockScreenImmediate` work). The extension registers fine and the menu entry appears
-/// — registration (`pluginkit`) and execution (`amfid`) are separate gates — but the process is
-/// torn down before `viewDidLoad`, so the menu item silently does nothing. Kept here, inert, for
-/// whenever a signing identity exists; the alternative that needs no identity is an `NSServices`
-/// entry on the app itself. Verify with:
+/// **Needs a real certificate chain to run.** Under the old ad-hoc signature `amfid` refused the
+/// binary (`AppleMobileFileIntegrityError -423`) and the menu item silently did nothing; with a
+/// Developer ID signature the process runs. Registration (`pluginkit`) and execution (`amfid`) are
+/// separate gates. Debug with:
 ///     log show --last 5m --predicate 'process == "SendToPhone"' --info --debug
+/// NSLog is redacted to `<private>` in the unified log, so this file reports through `Logger` with
+/// `privacy: .public` — filter on `subsystem == "dev.grkn.LinkToMac.ShareExtension"`.
+///
+/// **The hand-off must go through `NSWorkspace`, not `NSExtensionContext.open`.** Verified on the
+/// first Developer-ID build: `extensionContext.open` was called and returned instantly, but the app
+/// never received the URL (the same `linktomac://` opened from Terminal reached it fine). Apple
+/// leaves it to each extension point whether `open` does anything, and a Finder share extension
+/// evidently doesn't honor it. `extensionContext.open` is kept only as a fallback.
 ///
 /// The Finder "Share ▸ Send to Phone" entry — the Mac-side mirror of the phone's share-sheet
 /// targets. Right-click any file, share it, and it goes to the phone's Downloads.
@@ -63,11 +67,30 @@ final class ShareViewController: NSViewController {
                 DispatchQueue.main.async { self?.complete() }
                 return
             }
-            NSLog("[SendToPhone] opening %@", handoff.absoluteString)
+            Self.log.info("handing off \(handoff.absoluteString, privacy: .public)")
+            DispatchQueue.main.async { self?.handOff(handoff) }
+        }
+    }
+
+    private static let log = Logger(subsystem: "dev.grkn.LinkToMac.ShareExtension", category: "handoff")
+
+    /// Opens the `linktomac://` URL with `NSWorkspace` (see the type comment for why), falling back
+    /// to `extensionContext.open`. The request is completed only once the attempt has resolved —
+    /// completing first can tear the extension process down before LaunchServices has the URL.
+    private func handOff(_ url: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = false // the file is already on its way; don't pull the app to the front
+        NSWorkspace.shared.open(url, configuration: config) { [weak self] _, error in
             DispatchQueue.main.async {
-                self?.extensionContext?.open(handoff) { ok in
-                    NSLog("[SendToPhone] open returned %@", ok ? "true" : "false")
-                    self?.complete()
+                guard let self else { return }
+                if error == nil {
+                    Self.log.info("NSWorkspace.open succeeded")
+                    return self.complete()
+                }
+                Self.log.error("NSWorkspace.open failed: \(error!.localizedDescription, privacy: .public); trying extensionContext.open")
+                self.extensionContext?.open(url) { ok in
+                    Self.log.info("extensionContext.open returned \(ok, privacy: .public)")
+                    self.complete()
                 }
             }
         }
