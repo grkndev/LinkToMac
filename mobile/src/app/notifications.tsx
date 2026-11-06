@@ -1,5 +1,6 @@
 import { useRouter } from "expo-router";
 
+import { useCollapsingTitle } from "@/components/collapsing-title";
 import { useIcons } from "@/components/icons";
 import { ActionRow, InlineNotice, SwitchRow } from "@/components/rows";
 import { LargeTitle, Section, useM3Colors } from "@/components/m3";
@@ -14,6 +15,7 @@ import { usePermissionSettings } from "@/features/selfadb/use-permission-setting
  * mirroring to the Mac, with the per-app picker (notification-apps.tsx) while mirroring is on.
  */
 export default function NotificationsScreen() {
+  const onTitleVisible = useCollapsingTitle("Notifications");
   const router = useRouter();
   const colors = useM3Colors();
   const icons = useIcons();
@@ -45,7 +47,9 @@ export default function NotificationsScreen() {
 
   return (
     <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
-      <LargeTitle colors={colors}>Notifications</LargeTitle>
+      <LargeTitle colors={colors} onVisibleChange={onTitleVisible}>
+        Notifications
+      </LargeTitle>
 
       <Section colors={colors} label="On this phone">
         <SwitchRow

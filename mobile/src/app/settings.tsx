@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 
+import { useCollapsingTitle } from "@/components/collapsing-title";
 import { useIcons } from "@/components/icons";
 import ConfirmSheet from "@/components/confirm-sheet";
 import { ActionRow, InfoRow, InlineNotice, SwitchRow } from "@/components/rows";
@@ -48,6 +49,7 @@ const BLOCKED_HINT =
 const MODE_LABELS = { system: "System", light: "Light", dark: "Dark" } as const;
 
 export default function SettingsScreen() {
+  const onTitleVisible = useCollapsingTitle("Settings");
   const router = useRouter();
   const { unpair, server } = usePairing();
   const colors = useM3Colors();
@@ -112,7 +114,9 @@ export default function SettingsScreen() {
   return (
     <>
       <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
-        <LargeTitle colors={colors}>Settings</LargeTitle>
+        <LargeTitle colors={colors} onVisibleChange={onTitleVisible}>
+          Settings
+        </LargeTitle>
 
         <Section colors={colors} label="Mirroring">
           <ActionRow

@@ -13,6 +13,7 @@ import {
   clip,
   fillMaxWidth,
   graphicsLayer,
+  onVisibilityChanged,
   padding,
   Shapes,
   size,
@@ -256,9 +257,27 @@ export function ModeTile({
 }
 
 /** Large 34sp screen title rendered in the body (Settings, Notifications) under a title-less header. */
-export function LargeTitle({ colors, children }: { colors: MaterialColors; children: string }) {
+export function LargeTitle({
+  colors,
+  children,
+  onVisibleChange,
+}: {
+  colors: MaterialColors;
+  children: string;
+  /** Fires as the title scrolls out of / back into view (see `useCollapsingTitle`). It counts as
+   *  visible while at least 40% of it shows. Keep it present or absent for a screen's lifetime. */
+  onVisibleChange?: (visible: boolean) => void;
+}) {
   return (
-    <Box modifiers={[fillMaxWidth(), padding(Spacing.one, Spacing.one, Spacing.one, Spacing.two)]}>
+    <Box
+      modifiers={[
+        fillMaxWidth(),
+        padding(Spacing.one, Spacing.one, Spacing.one, Spacing.two),
+        ...(onVisibleChange
+          ? [onVisibilityChanged(onVisibleChange, { minFractionVisible: 0.4 })]
+          : []),
+      ]}
+    >
       <Text
         color={colors.onSurface}
         style={{ typography: 'headlineLarge', fontSize: 34, lineHeight: 40, fontWeight: '600' }}
