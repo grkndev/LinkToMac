@@ -16,7 +16,9 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.11.0"
     CURRENT_PROJECT_VERSION: "15"
-    # Ad-hoc signing so the app builds/runs locally without a Developer team.
+    # Ad-hoc signing so Debug/local builds need no Developer team. Release builds are NOT shipped
+    # from this: scripts/build-release.sh re-signs every bundle with Developer ID + hardened runtime
+    # and notarizes it (entitlements: Resources/LinkToMac.entitlements).
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGNING_REQUIRED: "NO"
@@ -32,8 +34,8 @@ targets:
       Release: Config.xcconfig
     dependencies:
       - package: Sparkle
-      # Embedded into Contents/PlugIns so Finder's Share menu can find it. The release script's
-      # `codesign --deep` covers it; there is no separate signing step.
+      # Embedded into Contents/PlugIns so Finder's Share menu can find it. The release script signs
+      # it explicitly, with its own entitlements, before signing the app around it.
       - target: LinkToMacShareExtension
         embed: true
     sources:

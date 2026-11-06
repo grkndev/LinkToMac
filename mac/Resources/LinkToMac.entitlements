@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Entitlements for the main app, applied by scripts/build-release.sh when it signs the release
+	  build with Developer ID. The app is NOT sandboxed (it needs the private lock-screen call, a
+	  LAN server, the whole filesystem for drops) — but it is signed with the HARDENED RUNTIME,
+	  which notarization requires, and the hardened runtime puts hardware access back behind
+	  explicit entitlements. Bluetooth is the only one this app uses (proximity auto-lock scans for
+	  the phone's BLE beacon). Without it CoreBluetooth silently reports no peripherals in the
+	  released build while a local ad-hoc build works fine.
+	-->
+	<key>com.apple.security.device.bluetooth</key>
+	<true/>
+</dict>
+</plist>
