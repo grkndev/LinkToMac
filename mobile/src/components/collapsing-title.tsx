@@ -9,7 +9,7 @@ import { SANS } from "@/constants/typography";
 /** Where the large title sits, in window dp (what `onGloballyPositioned` reports). */
 export type TitleLayout = { x: number; y: number; width: number; height: number };
 
-/** Eased fade stops (position %, alpha): solid behind the status bar, gone at the bottom edge. */
+/** Eased fade stops (position %, alpha): solid at the top edge, gone at the bottom. */
 const FADE_STOPS: readonly (readonly [number, number])[] = [
   [0, 1],
   [25, 0.97],
@@ -32,6 +32,9 @@ function headerGradient(color: string): string {
   return `linear-gradient(to bottom, ${stops.join(", ")})`;
 }
 
+/** Height of the soft fade BELOW the (solid) toolbar. */
+const FADE_HEIGHT = 28;
+
 /** The Android toolbar height react-native-screens (and expo-router's own `defaultHeaderHeight`) assume. */
 const TOOLBAR_HEIGHT = 56;
 
@@ -47,19 +50,21 @@ const TOOLBAR_HEIGHT = 56;
  * driving the header title's opacity + translateY. The header title is set ONCE through
  * `setOptions` and only ever driven by the value, so scrolling never re-renders it.
  *
- * The header is also made transparent, and the screen paints its own gradient over the header
- * area: `background` at the top (status bar side) fading to transparent at the bottom edge. A
- * translucent native header lets the body extend underneath it, so content scrolling up fades out
- * softly beneath the title bar instead of being cut off at a hard edge. The gradient lives inside the
- * screen because navigation's `headerBackground` is drawn BEHIND the screen content, i.e. behind our
- * opaque Compose Host. Because the body now starts at the top of the screen, `topInset` (status bar
- * + toolbar) must be added to the body's top padding.
+ * The header is also made transparent, and the screen paints its own cover over the header area:
+ * solid `background` across the status bar + toolbar (so the title and back arrow never sit over
+ * scrolling content), then a soft gradient fading to transparent just BELOW the toolbar, so content
+ * sliding up dissolves instead of being cut at a hard edge. The fade strip's opacity follows the
+ * scroll (0 at rest → 1 after `FADE_HEIGHT`), because at rest the large title sits right under the
+ * toolbar and must not be faded. A translucent native header lets the body extend underneath, and
+ * the cover lives inside the screen because navigation's `headerBackground` is drawn BEHIND the
+ * screen content, i.e. behind our opaque Compose Host. Because the body now starts at the top of the
+ * screen, `topInset` (status bar + toolbar) must be added to the body's top padding.
  *
  * The value is fed from JS (`setValue`) into a native-driven style, so the animation itself runs on
  * the UI thread; the only latency is the event's hop through JS (about a frame).
  *
  * Wire it up: `onTitleLayout` → `<LargeTitle onLayoutChange>`, `topInset` → the body's top padding,
- * and render `backdrop` (the gradient) as a sibling AFTER the body so it draws above it.
+ * and render `backdrop` (the cover) as a sibling AFTER the body so it draws above it.
  */
 export function useCollapsingTitle(title: string): {
   onTitleLayout: (layout: TitleLayout) => void;
@@ -71,6 +76,7 @@ export function useCollapsingTitle(title: string): {
   const insets = useSafeAreaInsets();
   const topInset = insets.top + TOOLBAR_HEIGHT;
   const [progress] = useState(() => new Animated.Value(0));
+  const [fadeOpacity] = useState(() => new Animated.Value(0));
   // Resting (scroll 0) window `y` of the title: the highest it has ever been. Overscroll or a late
   // layout can only raise it, which is the right direction to correct in.
   const restY = useRef<number | null>(null);
@@ -109,22 +115,25 @@ export function useCollapsingTitle(title: string): {
       const from = height * 0.3;
       const to = height * 0.85;
       progress.setValue(Math.min(1, Math.max(0, (scrolled - from) / (to - from))));
+      fadeOpacity.setValue(Math.min(1, Math.max(0, scrolled / FADE_HEIGHT)));
     },
-    [progress],
+    [progress, fadeOpacity],
   );
 
   const backdrop = (
     <View
       pointerEvents="none"
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: topInset,
-        experimental_backgroundImage: headerGradient(colors.background),
-      }}
-    />
+      style={{ position: "absolute", top: 0, left: 0, right: 0, height: topInset + FADE_HEIGHT }}
+    >
+      <View style={{ height: topInset, backgroundColor: colors.background }} />
+      <Animated.View
+        style={{
+          height: FADE_HEIGHT,
+          opacity: fadeOpacity,
+          experimental_backgroundImage: headerGradient(colors.background),
+        }}
+      />
+    </View>
   );
 
   return { onTitleLayout, topInset, backdrop };
