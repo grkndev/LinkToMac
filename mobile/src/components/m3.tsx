@@ -13,7 +13,7 @@ import {
   clip,
   fillMaxWidth,
   graphicsLayer,
-  onVisibilityChanged,
+  onGloballyPositioned,
   padding,
   Shapes,
   size,
@@ -260,22 +260,21 @@ export function ModeTile({
 export function LargeTitle({
   colors,
   children,
-  onVisibleChange,
+  onLayoutChange,
 }: {
   colors: MaterialColors;
   children: string;
-  /** Fires as the title scrolls out of / back into view (see `useCollapsingTitle`). It counts as
-   *  visible while at least 40% of it shows. Keep it present or absent for a screen's lifetime. */
-  onVisibleChange?: (visible: boolean) => void;
+  /** Reports the title's window position + size, re-fired as it scrolls (see `useCollapsingTitle`,
+   *  which turns that into a scroll-scrubbed header title). Keep it present or absent for a
+   *  screen's lifetime — a modifier list must keep its shape. */
+  onLayoutChange?: (layout: { x: number; y: number; width: number; height: number }) => void;
 }) {
   return (
     <Box
       modifiers={[
         fillMaxWidth(),
         padding(Spacing.one, Spacing.one, Spacing.one, Spacing.two),
-        ...(onVisibleChange
-          ? [onVisibilityChanged(onVisibleChange, { minFractionVisible: 0.4 })]
-          : []),
+        ...(onLayoutChange ? [onGloballyPositioned(onLayoutChange)] : []),
       ]}
     >
       <Text

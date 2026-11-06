@@ -1,27 +1,37 @@
 import { useNavigation } from "expo-router";
-import { useCallback, useLayoutEffect, useState } from "react";
-import { Animated, Easing } from "react-native";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { Animated } from "react-native";
 
 import { useM3Colors } from "@/components/m3";
 import { SANS } from "@/constants/typography";
 
+/** Where the large title sits, in window dp (what `onGloballyPositioned` reports). */
+export type TitleLayout = { x: number; y: number; width: number; height: number };
+
 /**
  * Collapsing large title for screens that draw a `LargeTitle` in the body under a title-less native
- * header (Settings, Notifications): once the big title has scrolled mostly out of view, the same
- * text slides + fades into the header, next to the back arrow.
+ * header (Settings, Notifications): as the big title scrolls away, the same text slides + fades
+ * into the header next to the back arrow — scrubbed by the scroll position, not timed.
  *
- * Compose gives us no scroll offset, but `onVisibilityChanged` fires when the title leaves/enters
- * the viewport — so the trigger is binary (not scrubbed with the finger) and the slide itself is an
- * RN `Animated` timing on the native driver. The header title is set ONCE through `setOptions` and
- * driven by an `Animated.Value`, so toggling never re-renders it (a re-created `headerTitle`
- * function would remount and restart the animation).
+ * Compose exposes no scroll offset, but the title's own window position IS the scroll offset: it
+ * only moves because the column scrolls. `LargeTitle` reports it (`onGloballyPositioned`, which
+ * Compose re-fires as the node is re-placed during a scroll); the largest `y` seen is the resting
+ * position, and `restY - y` is how far we've scrolled. That maps to an `Animated.Value` (0 → 1)
+ * driving the header title's opacity + translateY. The header title is set ONCE through
+ * `setOptions` and only ever driven by the value, so scrolling never re-renders it.
  *
- * Pass the returned handler to `<LargeTitle onVisibleChange={…}>`.
+ * The value is fed from JS (`setValue`) into a native-driven style, so the animation itself runs on
+ * the UI thread; the only latency is the event's hop through JS (about a frame).
+ *
+ * Pass the returned handler to `<LargeTitle onLayoutChange={…}>`.
  */
-export function useCollapsingTitle(title: string): (visible: boolean) => void {
+export function useCollapsingTitle(title: string): (layout: TitleLayout) => void {
   const navigation = useNavigation();
   const colors = useM3Colors();
   const [progress] = useState(() => new Animated.Value(0));
+  // Resting (scroll 0) window `y` of the title: the highest it has ever been. Overscroll or a late
+  // layout can only raise it, which is the right direction to correct in.
+  const restY = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -45,13 +55,14 @@ export function useCollapsingTitle(title: string): (visible: boolean) => void {
   }, [navigation, progress, title, colors.onSurface]);
 
   return useCallback(
-    (visible: boolean) => {
-      Animated.timing(progress, {
-        toValue: visible ? 0 : 1,
-        duration: 200,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
+    ({ y, height }: TitleLayout) => {
+      if (restY.current === null || y > restY.current) restY.current = y;
+      const scrolled = restY.current - y;
+      // Start once ~30% of the title is gone, finished when ~85% is — so the header text arrives
+      // as the big one leaves, not before it has begun to.
+      const from = height * 0.3;
+      const to = height * 0.85;
+      progress.setValue(Math.min(1, Math.max(0, (scrolled - from) / (to - from))));
     },
     [progress],
   );

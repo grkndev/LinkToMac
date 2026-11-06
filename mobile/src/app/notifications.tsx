@@ -15,7 +15,7 @@ import { usePermissionSettings } from "@/features/selfadb/use-permission-setting
  * mirroring to the Mac, with the per-app picker (notification-apps.tsx) while mirroring is on.
  */
 export default function NotificationsScreen() {
-  const onTitleVisible = useCollapsingTitle("Notifications");
+  const onTitleLayout = useCollapsingTitle("Notifications");
   const router = useRouter();
   const colors = useM3Colors();
   const icons = useIcons();
@@ -47,7 +47,7 @@ export default function NotificationsScreen() {
 
   return (
     <M3Screen paddingTop={Spacing.one} spacing={Spacing.four}>
-      <LargeTitle colors={colors} onVisibleChange={onTitleVisible}>
+      <LargeTitle colors={colors} onLayoutChange={onTitleLayout}>
         Notifications
       </LargeTitle>
 
