@@ -62,7 +62,7 @@ fourth is a stock-Android system service the Android app talks to through a tric
 | **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Both ways (Mac↔Phone) |
 | **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Message (SMS) mirroring + replies** | WebSocket `sms` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac (mirror); Mac → phone (reply request), phone → Mac (ack) |
-| **App updates** | Sparkle appcast (Mac) / GitHub "latest release" API (Android) | No — GitHub | GitHub → app |
+| **App updates** | Sparkle appcast (Mac) / GitHub "latest release" API (Android: the app downloads the APK itself, §3.9) | No — GitHub | GitHub → app |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
 | **Proximity distance** | BLE measure → `stat` frame | Yes — *or* LAN-direct (§5.1) | Mac measures → Phone shows |
 
@@ -76,7 +76,7 @@ proximity path is completely independent — it works with no internet at all.
 |---|---|---|
 | `server/` | Node ≥ 20, TypeScript (ESM) | `ws`, `pino`, `dotenv` |
 | `mac/` | Swift 6 (strict concurrency), SwiftUI + AppKit | AppKit, Network (`NWListener`), CoreBluetooth, CryptoKit, Security, ServiceManagement, UserNotifications, IOKit — system frameworks; the **only third-party dependency is Sparkle** (auto-update) |
-| `mobile/` (JS) | Expo SDK 56, React Native 0.85, Expo Router, React 19 | `@expo/ui` (Jetpack Compose), `expo-secure-store`, `expo-camera`, `expo-updates`, `react-native-keyboard-controller`, `uniwind` |
+| `mobile/` (JS) | Expo SDK 56, React Native 0.85, Expo Router, React 19 | `@expo/ui` (**every screen is native Jetpack Compose**, §3.10), `expo-secure-store`, `expo-camera`, `expo-updates` (OTA), `expo-haptics`, Google Sans Flex + JetBrains Mono (`@expo-google-fonts/*`), `react-native-keyboard-controller`. `uniwind` and Reanimated are still installed but no screen uses them (a `<Host>`'s Compose tree isn't an RN view tree, so Reanimated can't drive it) |
 | `mobile/modules/selfadb` (native) | Kotlin (Expo Module) | `libadb-android` 3.1.1, BouncyCastle, Conscrypt, OkHttp 4.12 |
 | tests | swift-testing (`mac/Tests`), JUnit 4 (`…/selfadb/android/src/test`) | `protocol-vectors/` run by both |
 | `clipboard-agent` | Java → dex | none (reflects into framework `IClipboard`) |
@@ -528,7 +528,7 @@ within milliseconds of the JS timeout instead of however long is left on its own
 The Expo module only exists while the JS runtime is alive; the foreground service outlives it.
 **`ClipBus`** is the process-wide bridge: the service always posts events here, and the module
 attaches/detaches its `onClip` / `onMacClip` / `onMacStat` / `onLog` / `onRelay` /
-`onFileTransfer` callbacks in `OnCreate`/`OnDestroy`. It also holds bounded ring buffers — 400 log lines and 100 Mac-clip
+`onFileTransfer` / `onAppUpdate` callbacks in `OnCreate`/`OnDestroy`. It also holds bounded ring buffers — 400 log lines and 100 Mac-clip
 entries — so the Logs and Clipboard-History screens can show events that happened *before* the
 JS runtime attached (e.g. an FGS reconnect while the app was swiped away). `lastRelay` and
 `lastStat` let a late-attaching UI query the current relay status and Mac battery immediately.
@@ -641,6 +641,36 @@ ClipForegroundService ──schedule()──▶ AppUpdater   (first check ~60 s 
   and the same signing key (cleartext is permitted), to exercise download → notification → installer
   without publishing a release. `UpdateLogic` (version compare, release parsing, resume offset, the record)
   is covered by `AppUpdateTest` (`./gradlew :selfadb:testDebugUnitTest`).
+
+### 3.10 The UI layer: native Compose (`@expo/ui`)
+
+None of the clipboard/file/link logic lives in JS; the JS side is a thin control plane over the module, and
+since 0.12.0 it draws **only** Jetpack Compose (Material 3, M3 Expressive shapes): each screen is an Expo
+Router route whose body is a `<Host>` (`M3Host` / `M3Screen`). A few rules came from the native source and
+are easy to break:
+
+- **Theme.** The palette is resolved **once** in `AppearanceProvider` (Settings ▸ Appearance: system / light /
+  dark + an accent seed, or the wallpaper colour) and shared through context; every `<Host>` must get
+  `useHostTheme()`, every colour comes from `useM3Colors()`. Text goes through `components/text.tsx`, which
+  picks the font by *family name* (Compose ignores `fontWeight` on a custom `Typeface`).
+- **Motion is native, not Reanimated** (`components/motion.tsx`): `animated()`, `background({animationSpec})`,
+  `AnimatedVisibility` and `animateContentSize` run on the UI thread. They animate only when a value
+  *changes* (the first composition starts at the target); they call composables, so a modifier list must keep
+  the **same shape between renders**; `Surface.color` isn't animatable (`AnimatedSurface` fakes it with a
+  background box); `AnimatedVisibility` doesn't play its enter on first mount (`Reveal appear`); the exit runs
+  after `visible` flips, so content is *latched* (`useLatched`); and a hidden `Reveal` is a zero-height child
+  that a parent `Column`'s `spacedBy` still pads around.
+- **No scroll offset from Compose.** The collapsing title on Settings / Notifications
+  (`components/collapsing-title.tsx`) reads the title's *window position* (`onGloballyPositioned` re-fires as it
+  is re-placed during a scroll): `restY − y` is the scroll offset, fed to an RN `Animated.Value` that drives the
+  native header's title. The header is made transparent and the screen paints its own cover (solid across the
+  status bar + toolbar, a gradient strip below) because navigation's `headerBackground` is drawn *behind* the
+  opaque Host. The toolbar height is assumed to be 56 dp.
+- **Long lists.** A `LazyColumn` defers only composition; React Native still creates every child's native view,
+  so long lists (Select apps) hand it rows in batches after the screen transition. Bounded lists inside a
+  `verticalScroll()` are plain `Column`s (infinite-height constraints crash a `LazyColumn`).
+- **Short-lived `matchContents` Hosts** can NPE when unmounted mid-measure — Booting and the update sheet use
+  fixed-size Hosts.
 
 ---
 
@@ -1192,9 +1222,13 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   never overwritten. The shell daemon refuses to read a clipboard-image URI its setter couldn't read
   itself (confused-deputy guard, §3.4).
 - **Updates are signed.** The Mac's Sparkle appcast entries carry an EdDSA signature
-  (`SUPublicEDKey` in `Info.plist`; the private half lives in the release machine's login Keychain).
-  The Android app only *finds* a newer release (the GitHub "latest release" API) and sends the user to
-  download the APK; it installs nothing itself.
+  (`SUPublicEDKey` in `Info.plist`; the private half lives in the release machine's login Keychain), and
+  the Mac app itself is Developer-ID signed and notarized. The Android app downloads a newer APK from the
+  GitHub release over HTTPS and checks it **before** offering it: the SHA-256 GitHub reports for the asset,
+  the same package name, a higher `versionCode`, and a signing certificate shared with the installed app
+  (Android enforces the signature again at install). It never installs by itself: the system installer
+  asks the user (§3.9). The trust anchor is the release signing key — if the keystore changes, installed
+  apps can no longer update in place.
 
 **What does NOT hold yet (be explicit about this):**
 
@@ -1250,7 +1284,8 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
 | A file transfer is interrupted (link drop, cancel, a timeout) | The sender fails that file — at once on a nack, a lost link or a cancel, after 30 s of unacked chunks otherwise. The receiver keeps the partial for 10 min; sending the same file again **resumes** (§5.4) |
 | Phone service killed mid-transfer | `START_STICKY` restarts it; the Files-screen row that was `active` is shown as "Interrupted"; the Mac keeps its partial for a resume |
 | Mac app quit mid-transfer | The phone keeps its partial (in memory) for 10 min; re-dropping the file resumes it |
-| An update is out | Mac: Sparkle checks the appcast; Android: the app compares the installed version with the GitHub latest release and links the APK |
+| An update is out | Mac: Sparkle checks the appcast; Android: the foreground service checks the GitHub latest release every 6 h, downloads + verifies the APK and posts "Update ready — tap to install" (§3.9); an OTA JS update installs in place via `expo-updates` |
+| The app was just updated (Android) | The process is replaced and nothing restarts the service by itself → `PackageReplacedReceiver` restarts `ClipForegroundService` and forgets the installed update |
 | Mac crash | `SMAppService` login item relaunches at next login |
 
 ---
@@ -1290,7 +1325,9 @@ set `BUILD_NUMBER=2` for a second build the same day, or the new APK has the sam
 the APK with `eas build --platform android --profile preview --local` (the `preview` profile *is* the
 public release channel). `cd mac && ./scripts/build-release.sh --publish` builds the universal DMG,
 EdDSA-signs it, writes the appcast and creates the GitHub release; then attach the APK
-(`gh release upload`). Native changes mean a new APK — a JS-only change could go out as an EAS Update on
+(`gh release upload`) — **exactly one `.apk` asset**: the in-app updater takes the first one it finds, and
+GitHub's `digest` for that asset is what it verifies the download against. The release must stay signed
+with the same keystore, or phones can't update in place. Native changes mean a new APK — a JS-only change could go out as an EAS Update on
 the same `runtimeVersion`, but nothing that touches `modules/selfadb` can.
 
 First run: enter your relay in the Mac's **Settings ▸ Relay Server** (or stay LAN-only), show the pairing QR, scan it on
@@ -1320,7 +1357,12 @@ v1 links **one phone and one Mac**. Implemented:
   Notifications tab.
 - **Message (SMS) mirroring and replies** (`sms`; §5.3) — conversation threads in the Messages tab, and a
   reply composer for 1:1 threads that sends a real SMS from the phone.
-- **Updates** — Sparkle on the Mac; the Android app points at the GitHub release.
+- **Updates** — Sparkle on the Mac (Developer-ID signed, notarized). On Android, JS-only changes ship over
+  the air (`expo-updates`); a new APK is **found and downloaded in the background by the app**, verified,
+  and handed to the system installer with one tap (§3.9) — the first APK that contains the updater has to be
+  installed by hand.
+- **A native Material 3 UI** on Android (§3.10): every screen in Jetpack Compose, a theme/accent picker,
+  native animations and a collapsing large title.
 
 **Finder ▸ Share ▸ "Send to Phone"** works in Developer-ID builds; macOS (`amfid`) refuses to run an
 *ad-hoc signed* app extension (`AppleMobileFileIntegrityError -423`), so older releases and `--adhoc`
@@ -1400,7 +1442,7 @@ mobile/modules/selfadb/android/src/main/java/expo/modules/selfadb/
   NotificationListener.kt   NotificationListenerService → note frames (skips both app variants)
   SmsMirror.kt              FGS-owned SMS reader/sender → sms frames
   BleAdvertiser.kt          BLE presence beacon
-  ClipBus.kt                service ↔ module bridge + ring buffers + file-transfer event
+  ClipBus.kt                service ↔ module bridge + ring buffers + file-transfer and app-update events
 mobile/modules/selfadb/android/src/test/…/   JUnit: FileFrameVectorTest, FileInboxTest, FileSinkTest, FolderWalkerTest, FileHistoryTest, AppUpdateTest
 
 mobile/native-src/clipboard-agent/
@@ -1408,14 +1450,20 @@ mobile/native-src/clipboard-agent/
   build-dex.sh              javac → d8 → dex
 
 mobile/src/
-  app/                      Expo Router screens: index (Home), files, settings, notifications, notification-apps, clipboard-history,
-                            server-config, pair-mac, qr-scan, adb-setup, logs, daemon-logs, about
-  features/selfadb/         use-clip-boot (capture state machine), use-permission-settings, use-daemon-heartbeat, client (module re-export)
+  app/                      Expo Router screens (all Compose): index (Home), files, settings, appearance, notifications,
+                            notification-apps, clipboard-history, server-config, pair-mac, qr-scan, adb-setup, logs, daemon-logs, about
+  features/selfadb/         use-clip-boot (capture state machine), use-permission-settings, use-daemon-heartbeat,
+                            use-notification-app-filter, pair-screen, client (module re-export + event types)
+  features/appearance/      appearance-store (SecureStore: mode + accent seed), appearance-context (resolves the palette once)
   features/files/           use-file-history (the Files screen's data)
-  features/pairing/         pairing-store (SecureStore + QR parse), pairing-context
-  features/connection/      server-config (SecureStore relay endpoint), use-relay-status, use-connection-status
+  features/pairing/         pairing-store (SecureStore + QR parse), pairing-context, pair-scanner
+  features/connection/      server-config (SecureStore relay endpoint), use-relay-status, use-relay-autostart, use-connection-status
   features/telemetry/       use-mac-battery, use-mac-distance, use-mac-stat
   features/clip-history/    use-clip-history
-  features/updates/         GitHub-release update check (native) + OTA
-  components/               the shared M3 vocabulary (rows, groups, sheets, icons)
+  features/updates/         check.ts (native probe via the module + OTA), use-app-update (sheet state, onAppUpdate), update-modal
+  components/               the shared M3 vocabulary: m3 (palette, groups, tonal), m3-screen, rows, status-card, buttons, sheet,
+                            confirm-sheet, icons, text, fit-text, log-view, booting, header-button;
+                            motion (native animation tokens + Reveal/AnimatedSurface/SmoothProgress), collapsing-title
+  constants/                theme (spacing, status colours), typography (font families)
+  lib/                      text, haptics, async
 ```
