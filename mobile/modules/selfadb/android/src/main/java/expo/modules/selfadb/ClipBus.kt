@@ -21,6 +21,8 @@ object ClipBus {
   @Volatile var onRelay: ((Map<String, Any?>) -> Unit)? = null
   /** A file-transfer history row was added or changed (see [FileHistory]). */
   @Volatile var onFileTransfer: ((Map<String, Any?>) -> Unit)? = null
+  /** The pending native update changed state or progress (see [AppUpdater]). */
+  @Volatile var onAppUpdate: ((Map<String, Any?>) -> Unit)? = null
 
   /** Last relay state, retained so a late-attaching UI can query it (the service may
    *  have connected long before the app/JS came up). */

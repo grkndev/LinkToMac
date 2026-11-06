@@ -1,6 +1,8 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
 import type {
+  AppUpdateCheck,
+  AppUpdateState,
   ClipEvent,
   FileTransferEntry,
   InstalledApp,
@@ -79,6 +81,17 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   clearRelay(): Promise<void>;
   /** current relay state, retained natively (the service may have connected before the app). */
   relayGetStatus(): Promise<RelayEvent>;
+  /** look for a newer release; fetches its APK in the background when automatic download is on */
+  checkAppUpdate(): Promise<AppUpdateCheck>;
+  /** fetch (or resume) the pending release's APK now, whatever the automatic-download setting */
+  downloadAppUpdate(): Promise<AppUpdateState>;
+  /** the pending native update as last seen (persisted natively — survives restarts) */
+  getAppUpdateState(): Promise<AppUpdateState>;
+  /** whether the service checks for / downloads native updates by itself (persisted, default true) */
+  getAutoUpdate(): Promise<boolean>;
+  setAutoUpdate(enabled: boolean): Promise<void>;
+  /** rehearsal only: point the release feed at a local server (debuggable builds; null clears) */
+  setUpdateFeedForTesting(url: string | null): Promise<void>;
   /** the persisted file-transfer history, newest first (survives restarts and the JS runtime). */
   getFileHistory(): Promise<FileTransferEntry[]>;
   clearFileHistory(): Promise<void>;

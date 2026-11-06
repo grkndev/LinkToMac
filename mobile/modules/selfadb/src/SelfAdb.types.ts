@@ -94,7 +94,33 @@ export type FileTransferEntry = {
   retryable: boolean;
 };
 
+export type AppUpdateStatus = 'idle' | 'downloading' | 'ready' | 'failed';
+
+/** The pending native update (a newer APK on GitHub), as the background updater sees it. */
+export type AppUpdateState = {
+  /** `idle` = found but not fetched (auto-download off, or no APK asset); `ready` = verified and installable. */
+  state: AppUpdateStatus;
+  /** the newer version, or null when nothing newer is pending */
+  version: string | null;
+  notes: string | null;
+  /** the APK URL, else the release page — the browser fallback when `downloadable` is false */
+  url: string | null;
+  /** the release has an APK asset the app can fetch itself */
+  downloadable: boolean;
+  /** 0..100 while `downloading` */
+  progress: number;
+  /** why the last attempt failed (`failed` only) */
+  error: string | null;
+};
+
+export type AppUpdateCheck = AppUpdateState & {
+  /** false when the probe itself failed (offline / API error) — "no update" must not be claimed then */
+  checked: boolean;
+};
+
 export type SelfAdbModuleEvents = {
+  /** the pending native update changed state or download progress */
+  onAppUpdate: (event: AppUpdateState) => void;
   /** a file-transfer row was added or changed (progress, status) */
   onFileTransfer: (event: FileTransferEntry) => void;
   onClip: (event: ClipEvent) => void;

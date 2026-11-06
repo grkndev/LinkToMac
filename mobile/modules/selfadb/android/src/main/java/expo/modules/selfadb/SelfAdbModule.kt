@@ -104,7 +104,7 @@ class SelfAdbModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SelfAdb")
 
-    Events("onClip", "onMacClip", "onMacStat", "onLog", "onStatus", "onRelay", "onFileTransfer")
+    Events("onClip", "onMacClip", "onMacStat", "onLog", "onStatus", "onRelay", "onFileTransfer", "onAppUpdate")
 
     // Attach UI callbacks to the (possibly already-running) service.
     // Each callback runs on ClipForegroundService's thread, not JS's — a sendEvent() that
@@ -118,11 +118,43 @@ class SelfAdbModule : Module() {
       ClipBus.onLog = { msg -> safeSendEvent("onLog", mapOf("message" to msg)) }
       ClipBus.onRelay = { payload -> safeSendEvent("onRelay", payload) }
       ClipBus.onFileTransfer = { entry -> safeSendEvent("onFileTransfer", entry) }
+      ClipBus.onAppUpdate = { state -> safeSendEvent("onAppUpdate", state) }
     }
 
     AsyncFunction("isPaired") {
       adb.isPaired()
     }.runOnQueue(adbQueue)
+
+    // --- native self-update (AppUpdater): find a newer release, fetch its APK in the background.
+    // The check/download run on AppUpdater's own executor and resolve the promise from there — not
+    // on Expo's shared queue, which a slow network call would otherwise hold up.
+    AsyncFunction("checkAppUpdate") { promise: Promise ->
+      val updater = AppUpdater.get(appCtx)
+      updater.check(autoDownload = updater.autoUpdate()) { rec, ok ->
+        promise.resolve(rec.toMap() + ("checked" to ok))
+      }
+    }
+
+    AsyncFunction("downloadAppUpdate") { promise: Promise ->
+      AppUpdater.get(appCtx).download { rec -> promise.resolve(rec.toMap()) }
+    }
+
+    AsyncFunction("getAppUpdateState") {
+      AppUpdater.get(appCtx).record().toMap()
+    }
+
+    AsyncFunction("getAutoUpdate") {
+      AppUpdater.get(appCtx).autoUpdate()
+    }
+
+    AsyncFunction("setAutoUpdate") { enabled: Boolean ->
+      AppUpdater.get(appCtx).setAutoUpdate(enabled)
+    }
+
+    // Rehearsal hook: point the release feed at a local server. Only honoured by a debuggable build.
+    AsyncFunction("setUpdateFeedForTesting") { url: String? ->
+      AppUpdater.get(appCtx).setFeedOverride(url)
+    }
 
     AsyncFunction("pair") { host: String, port: Int, code: String ->
       log("pairing $host:$port")
