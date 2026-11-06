@@ -1,8 +1,9 @@
 import {
   Box,
   Column,
+  EnterTransition,
+  ExitTransition,
   Icon,
-  LinearProgressIndicator,
   LoadingIndicator,
   Row,
   Shape,
@@ -11,8 +12,10 @@ import {
 } from "@expo/ui/jetpack-compose";
 import { Text } from "@/components/text";
 import {
-  alpha,
+  animateContentSize,
+  animated,
   fillMaxWidth,
+  graphicsLayer,
   height,
   padding,
   verticalScroll,
@@ -28,6 +31,7 @@ import { HeaderTextButton } from "@/components/header-button";
 import { useIcons, type IconSource } from "@/components/icons";
 import { Group, IconCircle, SectionLabel, useM3Colors, withAlpha } from "@/components/m3";
 import { M3Host } from "@/components/m3-screen";
+import { Motion, Reveal, SmoothProgress, useLatched, usePulse } from "@/components/motion";
 import { GroupRow } from "@/components/rows";
 import { Spacing } from "@/constants/theme";
 import { useRelayStatus } from "@/features/connection/use-relay-status";
@@ -99,12 +103,29 @@ function SendTile({
 }) {
   const container = filled ? colors.primary : colors.secondaryContainer;
   const content = filled ? colors.onPrimary : colors.onSecondaryContainer;
+  const { pulse, scale } = usePulse();
   return (
     <Surface
       color={container}
       shape={shape}
-      onClick={enabled ? onPress : () => AppAlert.show("Not connected", "Connect to your Mac first.", "OK")}
-      modifiers={enabled ? [weight(1), height(56)] : [weight(1), height(56), alpha(0.5)]}
+      onClick={
+        enabled
+          ? () => {
+              pulse();
+              onPress();
+            }
+          : () => AppAlert.show("Not connected", "Connect to your Mac first.", "OK")
+      }
+      modifiers={[
+        weight(1),
+        height(56),
+        // One layer for both effects, always present (see motion.tsx): dim offline, bounce on press.
+        graphicsLayer({
+          alpha: animated(enabled ? 1 : 0.5, Motion.color),
+          scaleX: scale,
+          scaleY: scale,
+        }),
+      ]}
     >
       <Row
         modifiers={[fillMaxWidth(), height(56)]}
@@ -136,6 +157,8 @@ export default function FilesScreen() {
   const inProgress = items?.filter((e) => e.status === "active" || e.status === "queued") ?? [];
   const finished = items?.filter((e) => e.status !== "active" && e.status !== "queued") ?? [];
   const current = inProgress.find((e) => e.status === "active") ?? inProgress[0];
+  // Latched so the card keeps its content while it animates out after the last transfer ends.
+  const live = useLatched(current ? { current, waiting: inProgress.length - 1 } : null);
 
   // History arrives newest-first, so each bucket keeps that order.
   const buckets = (["Today", "Yesterday", "Earlier"] as const)
@@ -171,87 +194,100 @@ export default function FilesScreen() {
         ]}
         verticalArrangement={{ spacedBy: Spacing.three }}
       >
-        <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 4 }}>
-          <SendTile
-            colors={colors}
-            icon={icons.uploadFile}
-            label="Send files"
-            filled
-            enabled={connected}
-            shape={SEND_FIRST}
-            onPress={() => {
-              haptic();
-              SelfAdb.pickFiles().catch(() => {});
-            }}
-          />
-          <SendTile
-            colors={colors}
-            icon={icons.uploadFolder}
-            label="Send folder"
-            filled={false}
-            enabled={connected}
-            shape={SEND_LAST}
-            onPress={() => {
-              haptic();
-              SelfAdb.pickFolder().catch(() => {});
-            }}
-          />
-        </Row>
+        {/* Send tiles + transfer card share one Column: a hidden Reveal is a zero-height child, and
+            the outer Column's spacing would still be added around it. The card pads its own top. */}
+        <Column modifiers={[fillMaxWidth()]}>
+          <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 4 }}>
+            <SendTile
+              colors={colors}
+              icon={icons.uploadFile}
+              label="Send files"
+              filled
+              enabled={connected}
+              shape={SEND_FIRST}
+              onPress={() => {
+                haptic();
+                SelfAdb.pickFiles().catch(() => {});
+              }}
+            />
+            <SendTile
+              colors={colors}
+              icon={icons.uploadFolder}
+              label="Send folder"
+              filled={false}
+              enabled={connected}
+              shape={SEND_LAST}
+              onPress={() => {
+                haptic();
+                SelfAdb.pickFolder().catch(() => {});
+              }}
+            />
+          </Row>
 
-        {/* What is going out right now. Tapping it cancels the batch (the same as the notification's Cancel). */}
-        {current ? (
-          <Surface
-            color={colors.primaryContainer}
-            shape={CARD_SHAPE}
-            onClick={() => {
-              haptic();
-              cancel();
-            }}
-            modifiers={[fillMaxWidth()]}
+          {/* What is going out right now. Tapping it cancels the batch (the same as the notification's Cancel). */}
+          <Reveal
+            visible={!!current}
+            enter={EnterTransition.slideInVertically({ initialOffsetY: -0.3 })
+              .plus(EnterTransition.fadeIn())
+              .plus(EnterTransition.expandVertically())}
+            exit={ExitTransition.shrinkVertically().plus(ExitTransition.fadeOut())}
           >
-            <Column modifiers={[fillMaxWidth(), padding(16, 16, 16, 16)]} verticalArrangement={{ spacedBy: 12 }}>
-              <Row
-                modifiers={[fillMaxWidth()]}
-                horizontalArrangement={{ spacedBy: 14 }}
-                verticalAlignment="center"
-              >
-                <IconCircle
-                  source={icons.upload}
-                  container={colors.primary}
-                  on={colors.onPrimary}
+            <Box modifiers={[fillMaxWidth(), padding(0, Spacing.three, 0, 0)]}>
+            {live ? (
+            <Surface
+              color={colors.primaryContainer}
+              shape={CARD_SHAPE}
+              onClick={() => {
+                haptic();
+                cancel();
+              }}
+              modifiers={[fillMaxWidth()]}
+            >
+              <Column modifiers={[fillMaxWidth(), padding(16, 16, 16, 16)]} verticalArrangement={{ spacedBy: 12 }}>
+                <Row
+                  modifiers={[fillMaxWidth()]}
+                  horizontalArrangement={{ spacedBy: 14 }}
+                  verticalAlignment="center"
+                >
+                  <IconCircle
+                    source={icons.upload}
+                    container={colors.primary}
+                    on={colors.onPrimary}
+                  />
+                  <Column modifiers={[weight(1)]} verticalArrangement={{ spacedBy: 2 }}>
+                    <Text
+                      color={colors.onPrimaryContainer}
+                      style={{ typography: "bodyLarge", fontWeight: "600" }}
+                      maxLines={1}
+                      overflow="ellipsis"
+                    >
+                      {`${live.current.name} (${live.current.progress}%)`}
+                    </Text>
+                    <Text
+                      color={withAlpha(colors.onPrimaryContainer, 0.85)}
+                      style={{ typography: "bodySmall" }}
+                    >
+                      Sending to your Mac · tap to cancel
+                    </Text>
+                  </Column>
+                  <Icon source={icons.close} size={22} tint={colors.onPrimaryContainer} />
+                </Row>
+                <SmoothProgress
+                  progress={live.current.progress / 100}
+                  color={colors.primary}
+                  trackColor={withAlpha(colors.primary, 0.22)}
                 />
-                <Column modifiers={[weight(1)]} verticalArrangement={{ spacedBy: 2 }}>
-                  <Text
-                    color={colors.onPrimaryContainer}
-                    style={{ typography: "bodyLarge", fontWeight: "600" }}
-                    maxLines={1}
-                    overflow="ellipsis"
-                  >
-                    {`${current.name} (${current.progress}%)`}
+                {live.waiting > 0 ? (
+                  <Text color={withAlpha(colors.onPrimaryContainer, 0.85)} style={{ typography: "bodySmall" }}>
+                    {`${live.waiting} more waiting`}
                   </Text>
-                  <Text
-                    color={withAlpha(colors.onPrimaryContainer, 0.85)}
-                    style={{ typography: "bodySmall" }}
-                  >
-                    Sending to your Mac · tap to cancel
-                  </Text>
-                </Column>
-                <Icon source={icons.close} size={22} tint={colors.onPrimaryContainer} />
-              </Row>
-              <LinearProgressIndicator
-                progress={Math.max(0, Math.min(1, current.progress / 100))}
-                color={colors.primary}
-                trackColor={withAlpha(colors.primary, 0.22)}
-                modifiers={[fillMaxWidth()]}
-              />
-              {inProgress.length > 1 ? (
-                <Text color={withAlpha(colors.onPrimaryContainer, 0.85)} style={{ typography: "bodySmall" }}>
-                  {`${inProgress.length - 1} more waiting`}
-                </Text>
-              ) : null}
-            </Column>
-          </Surface>
-        ) : null}
+                ) : null}
+              </Column>
+            </Surface>
+            ) : null}
+            </Box>
+          </Reveal>
+        </Column>
 
         {items === null ? (
           <Centered>
@@ -278,8 +314,13 @@ export default function FilesScreen() {
           </Centered>
         ) : (
           // Bounded (≤200) grouped lists — plain Columns, not LazyColumn, since they sit inside the
-          // outer verticalScroll() (infinite-height constraints crash a LazyColumn).
-          buckets.map((b) => (
+          // outer verticalScroll() (infinite-height constraints crash a LazyColumn). The wrapper
+          // animates its height so a new row or day section eases in instead of shoving the list.
+          <Column
+            modifiers={[fillMaxWidth(), animateContentSize()]}
+            verticalArrangement={{ spacedBy: Spacing.three }}
+          >
+          {buckets.map((b) => (
             <Column key={b.label} modifiers={[fillMaxWidth()]} verticalArrangement={{ spacedBy: Spacing.two }}>
               <SectionLabel colors={colors}>{b.label}</SectionLabel>
               <Group outerRadius={20}>
@@ -330,7 +371,8 @@ export default function FilesScreen() {
                 })}
               </Group>
             </Column>
-          ))
+          ))}
+          </Column>
         )}
       </Column>
     </M3Host>

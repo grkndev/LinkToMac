@@ -9,8 +9,13 @@ import {
 import {
   animated,
   background,
+  clip,
+  fillMaxWidth,
+  graphicsLayer,
+  height,
   keyframes,
   matchParentSize,
+  Shapes,
   spring,
   tween,
   type AnimatedValue,
@@ -39,6 +44,8 @@ export const Motion = {
   spatial: spring({ dampingRatio: 0.8, stiffness: 380 }),
   /** Alpha and progress: no overshoot, quick. */
   effects: spring({ dampingRatio: 1, stiffness: 1500 }),
+  /** A progress fill catching up to a throttled value: slow enough to read as continuous. */
+  progress: tween({ durationMillis: 450, easing: "fastOutSlowIn" }),
   /** Colour changes. */
   color: tween({ durationMillis: 350, easing: "fastOutSlowIn" }),
 } as const;
@@ -152,5 +159,45 @@ export function AnimatedSurface({
         {children}
       </Box>
     </Surface>
+  );
+}
+
+/**
+ * A thin determinate bar whose fill glides to each new value. The native `LinearProgressIndicator`
+ * redraws at the value it is given, so a progress fed by throttled updates (a file transfer) visibly
+ * steps; here the fill is a full-width box scaled from its left edge with an animated `scaleX`.
+ */
+export function SmoothProgress({
+  progress,
+  color,
+  trackColor,
+  thickness = 6,
+}: {
+  /** 0..1 */
+  progress: number;
+  color: string;
+  trackColor: string;
+  thickness?: number;
+}) {
+  const p = Math.max(0, Math.min(1, progress));
+  return (
+    <Box
+      modifiers={[
+        fillMaxWidth(),
+        height(thickness),
+        clip(Shapes.RoundedCorner(thickness / 2)),
+        background(trackColor),
+      ]}
+    >
+      <Box
+        modifiers={[
+          fillMaxWidth(),
+          height(thickness),
+          // Layer first, fill second: the background must be inside the scaled layer.
+          graphicsLayer({ scaleX: animated(p, Motion.progress), transformOriginX: 0 }),
+          background(color),
+        ]}
+      />
+    </Box>
   );
 }
