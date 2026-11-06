@@ -193,6 +193,8 @@ class ClipForegroundService : Service() {
     refreshShareShortcuts()
     // And the SMS mirror (live observer), if enabled + permitted. Backfill runs on the peer-online edge.
     maybeStartSmsMirroring()
+    // Look for a newer native release now and then, and fetch its APK in the background. Idempotent.
+    AppUpdater.get(this).schedule()
     // A manual capture rides in on the same intent, handled only after the setup above: the
     // process may have been restarted by this very start, in which case `conn` was null until
     // maybeStartConnection() ran. The ConnectionManager queues until a link joins, so an
@@ -1375,6 +1377,7 @@ class ClipForegroundService : Service() {
   }
 
   override fun onDestroy() {
+    AppUpdater.get(this).cancelSchedule()
     shareExec.shutdownNow()
     unregisterBatteryReceiver()
     conn?.shutdown()
@@ -1734,6 +1737,10 @@ class ClipForegroundService : Service() {
     /** The paired Mac's name, or null before its first `stat` arrives. */
     fun getMacName(ctx: Context): String? =
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).getString(KEY_MAC_NAME, null)
+
+    /** A relay pairing is stored — there is a link to restore (see [PackageReplacedReceiver]). */
+    fun isConfigured(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("room", null) != null
 
     fun getClipPort(ctx: Context): Int =
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)

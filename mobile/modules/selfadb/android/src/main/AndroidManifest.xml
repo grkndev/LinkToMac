@@ -46,6 +46,13 @@
        rely on the relay. Saves battery when out and about. -->
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+  <!--
+    Opening the system installer for the downloaded update APK needs "Install unknown apps" for this
+    app (a per-app switch the user flips once; InstallActivity sends them to it). The app never
+    installs silently — the system shows its own confirmation.
+  -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
   <!-- keep the relay WS alive under doze / aggressive OEM battery management -->
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
@@ -238,6 +245,33 @@
         android:name="android.app.shortcuts"
         android:resource="@xml/selfadb_shortcuts" />
     </activity>
+
+    <!--
+      Hands the downloaded update APK to the system installer (see InstallActivity). Reached from the
+      "Update ready" notification and the update sheet; not exported. Deliberately WITHOUT noHistory:
+      the user may be sent to the "Install unknown apps" screen first and must land back here. Own
+      task (taskAffinity="") so the app is not dragged to the front by a notification tap.
+      configChanges: a rotation must not recreate it mid-install.
+    -->
+    <activity
+      android:name=".InstallActivity"
+      android:theme="@style/Theme.LinkToMac.Invisible"
+      android:taskAffinity=""
+      android:excludeFromRecents="true"
+      android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+      android:exported="false" />
+
+    <!--
+      Restarts the foreground service after this app is updated (an update kills the process and the
+      system does not bring the service back), and forgets the update that was just installed.
+    -->
+    <receiver
+      android:name=".PackageReplacedReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+      </intent-filter>
+    </receiver>
 
     <!--
       Notification mirroring: a NotificationListenerService that captures every posted/removed

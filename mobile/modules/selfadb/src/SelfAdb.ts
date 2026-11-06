@@ -85,6 +85,8 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   checkAppUpdate(): Promise<AppUpdateCheck>;
   /** fetch (or resume) the pending release's APK now, whatever the automatic-download setting */
   downloadAppUpdate(): Promise<AppUpdateState>;
+  /** open the system installer for the downloaded, verified APK (the user confirms there); false when none is ready */
+  installAppUpdate(): Promise<boolean>;
   /** the pending native update as last seen (persisted natively — survives restarts) */
   getAppUpdateState(): Promise<AppUpdateState>;
   /** whether the service checks for / downloads native updates by itself (persisted, default true) */

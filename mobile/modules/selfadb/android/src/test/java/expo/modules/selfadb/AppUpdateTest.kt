@@ -88,6 +88,9 @@ class AppUpdateTest {
       path = "/cache/updates/0.13.0.apk",
     )
     assertEquals(rec, UpdateRecord.fromJson(rec.toJson()))
+    val failed = UpdateRecord(rec.release, UpdateState.FAILED, error = "Signed with a different key", retryable = false)
+    assertEquals(failed, UpdateRecord.fromJson(failed.toJson())) // the "don't re-download" flag survives a restart
+    assertTrue(UpdateRecord.fromJson("{\"state\":\"FAILED\"}").retryable) // older records default to retryable
     val bare = UpdateRecord(release = null)
     assertEquals(bare, UpdateRecord.fromJson(bare.toJson()))
   }

@@ -120,8 +120,14 @@ class AppUpdater private constructor(private val ctx: Context) {
       publish(cur.copy(release = latest)) // notes may have been edited; the file is already good
       return true
     }
+    if (sameVersion && cur.state == UpdateState.FAILED && !cur.retryable) {
+      // Downloaded fine but can't be installed here (e.g. the dev build offered the release APK).
+      // Re-fetching it every few hours would burn data for the same answer.
+      publish(cur.copy(release = latest))
+      return true
+    }
     if (!sameVersion) deleteDownloads()
-    // A failed attempt at the same version is retried (the partial file, if any, resumes).
+    // A transient failure at the same version is retried (the partial file, if any, resumes).
     publish(UpdateRecord(latest))
     ClipBus.log("update: ${latest.version} available (installed $installed)")
     if (autoDownload && latest.apkUrl != null) downloadNow()
@@ -201,7 +207,7 @@ class AppUpdater private constructor(private val ctx: Context) {
       if (problem != null) {
         finalFile.delete()
         part.delete()
-        fail(problem)
+        fail(problem, retryable = false)
         return
       }
       markReady(finalFile)
@@ -290,9 +296,9 @@ class AppUpdater private constructor(private val ctx: Context) {
     ClipBus.log("update: ${rec.release?.version} downloaded and verified")
   }
 
-  private fun fail(reason: String) {
+  private fun fail(reason: String, retryable: Boolean = true) {
     ClipBus.log("update: failed ($reason)")
-    publish(rec.copy(state = UpdateState.FAILED, error = reason))
+    publish(rec.copy(state = UpdateState.FAILED, error = reason, retryable = retryable))
   }
 
   // --- state ----------------------------------------------------------------------------------
@@ -310,7 +316,9 @@ class AppUpdater private constructor(private val ctx: Context) {
   }
 
   @Synchronized private fun publish(next: UpdateRecord, persist: Boolean = true) {
+    val prev = rec
     rec = next
+    UpdateNotifier.sync(ctx, prev, next)
     if (persist) prefs.edit().putString(KEY_RECORD, next.toJson()).apply()
     ClipBus.onAppUpdate?.invoke(next.toMap())
   }

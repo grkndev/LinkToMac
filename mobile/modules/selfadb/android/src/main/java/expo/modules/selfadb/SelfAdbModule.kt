@@ -139,6 +139,13 @@ class SelfAdbModule : Module() {
       AppUpdater.get(appCtx).download { rec -> promise.resolve(rec.toMap()) }
     }
 
+    // Open the system installer for the verified APK (the user confirms there). False when nothing is ready.
+    AsyncFunction("installAppUpdate") {
+      if (AppUpdater.get(appCtx).readyFile() == null) return@AsyncFunction false
+      InstallActivity.launch(appCtx)
+      true
+    }
+
     AsyncFunction("getAppUpdateState") {
       AppUpdater.get(appCtx).record().toMap()
     }

@@ -36,12 +36,19 @@ data class UpdateRecord(
   /** The verified APK, when [UpdateState.READY]. */
   val path: String? = null,
   val error: String? = null,
+  /**
+   * False for a failure another attempt can't fix (the file downloaded fine but isn't a valid update
+   * for this install: wrong package, wrong key, bad checksum). The periodic check then stops
+   * re-downloading the same version every few hours; an explicit tap on Download still tries.
+   */
+  val retryable: Boolean = true,
 ) {
   fun toJson(): String = JSONObject().apply {
     put("state", state.name)
     put("progress", progress)
     put("path", path ?: JSONObject.NULL)
     put("error", error ?: JSONObject.NULL)
+    put("retryable", retryable)
     release?.let {
       put(
         "release",
@@ -89,6 +96,7 @@ data class UpdateRecord(
           progress = o.optInt("progress", 0),
           path = o.optStringOrNull("path"),
           error = o.optStringOrNull("error"),
+          retryable = o.optBoolean("retryable", true),
         )
       } catch (e: Exception) {
         UpdateRecord(null)
