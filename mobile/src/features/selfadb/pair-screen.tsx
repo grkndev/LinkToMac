@@ -12,10 +12,13 @@ import {
 } from '@expo/ui/jetpack-compose';
 import { Text } from "@/components/text";
 import {
+  animated,
   fillMaxSize,
   fillMaxWidth,
+  graphicsLayer,
   imePadding,
   padding,
+  keyframes,
   size,
   verticalScroll,
   weight,
@@ -27,6 +30,7 @@ import { LinkButton, PrimaryButton } from '@/components/buttons';
 import { useIcons } from '@/components/icons';
 import { Group, useM3Colors, withAlpha } from '@/components/m3';
 import { M3Host } from '@/components/m3-screen';
+import { Reveal, useLatched } from '@/components/motion';
 import { GroupRow } from '@/components/rows';
 import { Spacing, StatusColors } from '@/constants/theme';
 import { MONO } from '@/constants/typography';
@@ -66,6 +70,27 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
   // window (up to 20s) with zero feedback (issue #30).
   const busy = boot.state === 'pairing' || (mode === 'reconnect' && boot.refreshing);
   const canSubmit = code.length === CODE_LENGTH && !busy;
+
+  // Shake the code field each time a pair attempt ENDS in an error (pairing → not pairing with an
+  // error set; `pair()` sets both in one batch). Counting the transitions, not watching the error
+  // string, so a second identical failure shakes again.
+  const [shakes, setShakes] = useState(0);
+  const [wasPairing, setWasPairing] = useState(false);
+  const isPairing = boot.state === 'pairing';
+  if (isPairing !== wasPairing) {
+    setWasPairing(isPairing);
+    if (wasPairing && boot.error) setShakes((n) => n + 1);
+  }
+  // The target alternates so every shake is a change (see Motion in motion.tsx); the keyframes
+  // swing out and settle regardless of direction.
+  const shakeX = animated(
+    shakes % 2 ? 0.0001 : 0,
+    keyframes({
+      durationMillis: 420,
+      keyframes: { 0: 0, 70: -12, 140: 10, 210: -8, 280: 6, 350: -3, 420: 0 },
+    }),
+  );
+  const shownError = useLatched(boot.error);
 
   const openSettings = () => {
     SelfAdb.openWirelessDebuggingSettings().catch(() => {});
@@ -194,7 +219,7 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
                 enabled={!busy}
                 maxLength={CODE_LENGTH}
                 shape={radius(16)}
-                modifiers={[fillMaxWidth()]}
+                modifiers={[fillMaxWidth(), graphicsLayer({ translationX: shakeX })]}
                 textStyle={{ textAlign: 'center', fontSize: 28, fontWeight: '500', fontFamily: MONO.medium, letterSpacing: 8 }}
                 keyboardOptions={{ keyboardType: 'number', imeAction: 'done' }}
               >
@@ -217,7 +242,7 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
               />
             </Row>
 
-            {boot.error ? (
+            <Reveal visible={!!boot.error}>
               <Surface color={colors.errorContainer} shape={radius(20)} modifiers={[fillMaxWidth()]}>
                 <Row
                   modifiers={[fillMaxWidth(), padding(16, 14, 16, 14)]}
@@ -226,11 +251,11 @@ export function PairScreen({ boot }: { boot: ClipBoot }) {
                 >
                   <Icon source={icons.error} size={20} tint={colors.onErrorContainer} />
                   <Text modifiers={[weight(1)]} color={colors.onErrorContainer} style={{ typography: 'bodyMedium' }}>
-                    {boot.error}
+                    {shownError}
                   </Text>
                 </Row>
               </Surface>
-            ) : null}
+            </Reveal>
           </Column>
 
           <Box
