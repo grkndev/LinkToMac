@@ -1,32 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="530" viewBox="0 0 1400 530">
-<defs><marker id="m0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#F2B84B"/></marker><marker id="m1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#3DDC97"/></marker><marker id="m2" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#B696F5"/></marker></defs>
-<rect x="1" y="1" width="1398" height="528" rx="20" fill="#10151C" stroke="#2A323D" stroke-width="2"/>
-<rect x="50" y="150" width="360" height="190" rx="12" fill="#171D26" stroke="#3DDC97" stroke-width="1.8"/>
-<text x="68" y="180" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#3DDC97" text-anchor="start">Android phone</text>
-<text x="68" y="206" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">Background app</text>
-<text x="68" y="229" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">clipboard · lock · battery</text>
-<text x="68" y="252" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">notifications · SMS · files</text>
-<rect x="550" y="150" width="300" height="190" rx="12" fill="#171D26" stroke="#F2B84B" stroke-width="1.8"/>
-<text x="568" y="180" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#F2B84B" text-anchor="start">Your relay (optional)</text>
-<text x="568" y="206" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">Tiny WebSocket server</text>
-<text x="568" y="229" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">routes by room id</text>
-<text x="568" y="252" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">sees only ciphertext</text>
-<rect x="990" y="150" width="360" height="190" rx="12" fill="#171D26" stroke="#59B8FF" stroke-width="1.8"/>
-<text x="1008" y="180" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#59B8FF" text-anchor="start">Mac</text>
-<text x="1008" y="206" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">Menu-bar app + dashboard</text>
-<text x="1008" y="229" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">clipboard · lock · pairing QR</text>
-<text x="1008" y="252" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">notifications · messages</text>
-<path d="M410 245 L550 245" fill="none" stroke="#F2B84B" stroke-width="2.2" stroke-linecap="round" marker-end="url(#m0)" marker-start="url(#m0)"/>
-<path d="M850 245 L990 245" fill="none" stroke="#F2B84B" stroke-width="2.2" stroke-linecap="round" marker-end="url(#m0)" marker-start="url(#m0)"/>
-<rect x="454.5" y="203.5" width="51" height="27" rx="13.5" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="480" y="221.55" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#F2B84B" text-anchor="middle">away</text>
-<rect x="894.5" y="203.5" width="51" height="27" rx="13.5" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="920" y="221.55" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#F2B84B" text-anchor="middle">away</text>
-<path d="M230 150 L230 78 Q230 62 246 62 L1154 62 Q1170 62 1170 78 L1170 150" fill="none" stroke="#3DDC97" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="9 7" marker-end="url(#m1)" marker-start="url(#m1)"/>
-<rect x="497" y="48" width="406" height="28" rx="14" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="700" y="66.9" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#3DDC97" text-anchor="middle">Same Wi-Fi: direct LAN link, no relay in the loop</text>
-<path d="M230 340 L230 404 Q230 420 246 420 L1154 420 Q1170 420 1170 404 L1170 340" fill="none" stroke="#B696F5" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="3 7" marker-end="url(#m2)" marker-start="url(#m2)"/>
-<rect x="457.5" y="406" width="485" height="28" rx="14" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="700" y="424.9" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="#B696F5" text-anchor="middle">Bluetooth presence beacon: proximity auto-lock, fully local</text>
-<text x="700" y="482" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#93A0B1" text-anchor="middle">Clipboard, files, messages and the lock command are end-to-end encrypted on every path.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="470" viewBox="0 0 1100 470">
+<defs><marker id="m0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#F2B84B"/></marker><marker id="m1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#3DDC97"/></marker><marker id="m2" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#B696F5"/></marker></defs>
+<rect x="1" y="1" width="1098" height="468" rx="20" fill="#10151C" stroke="#2A323D" stroke-width="2"/>
+<rect x="30" y="125" width="310" height="172" rx="14" fill="#171D26" stroke="#3DDC97" stroke-width="2.2"/>
+<text x="50" y="161" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#3DDC97" text-anchor="start">Android phone</text>
+<text x="50" y="192" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">Background app</text>
+<text x="50" y="219" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">clipboard · lock · battery</text>
+<text x="50" y="246" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">notifications · SMS</text>
+<text x="50" y="273" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">files &amp; share sheet</text>
+<rect x="425" y="125" width="250" height="172" rx="14" fill="#171D26" stroke="#F2B84B" stroke-width="2.2"/>
+<text x="445" y="161" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#F2B84B" text-anchor="start">Your relay</text>
+<text x="445" y="192" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">optional, self-hosted</text>
+<text x="445" y="219" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">tiny WebSocket server</text>
+<text x="445" y="246" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">routes by room id</text>
+<text x="445" y="273" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">sees only ciphertext</text>
+<rect x="760" y="125" width="310" height="172" rx="14" fill="#171D26" stroke="#59B8FF" stroke-width="2.2"/>
+<text x="780" y="161" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#59B8FF" text-anchor="start">Mac</text>
+<text x="780" y="192" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">Menu-bar app + dashboard</text>
+<text x="780" y="219" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">clipboard · lock · QR</text>
+<text x="780" y="246" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">notifications · messages</text>
+<text x="780" y="273" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">files &amp; drag-and-drop</text>
+<path d="M340 211 L425 211" fill="none" stroke="#F2B84B" stroke-width="2.6" stroke-linecap="round" marker-end="url(#m0)" marker-start="url(#m0)"/>
+<path d="M675 211 L760 211" fill="none" stroke="#F2B84B" stroke-width="2.6" stroke-linecap="round" marker-end="url(#m0)" marker-start="url(#m0)"/>
+<rect x="353" y="170.25" width="59" height="29.5" rx="14.75" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="382.5" y="190.425" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="400" fill="#F2B84B" text-anchor="middle">away</text>
+<rect x="688" y="170.25" width="59" height="29.5" rx="14.75" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="717.5" y="190.425" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="400" fill="#F2B84B" text-anchor="middle">away</text>
+<path d="M185 125 L185 71 Q185 55 201 55 L899 55 Q915 55 915 71 L915 125" fill="none" stroke="#3DDC97" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="9 7" marker-end="url(#m1)" marker-start="url(#m1)"/>
+<rect x="362" y="39.5" width="376" height="31" rx="15.5" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="550" y="60.95" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#3DDC97" text-anchor="middle">Same Wi-Fi: direct LAN link, no relay</text>
+<path d="M185 297 L185 351 Q185 367 201 367 L899 367 Q915 367 915 351 L915 297" fill="none" stroke="#B696F5" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="3 7" marker-end="url(#m2)" marker-start="url(#m2)"/>
+<rect x="328.5" y="351.5" width="443" height="31" rx="15.5" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="550" y="372.95" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#B696F5" text-anchor="middle">Bluetooth beacon: proximity auto-lock, local</text>
+<text x="550" y="429" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16" font-weight="400" fill="#93A0B1" text-anchor="middle">Clipboard, files, messages and the lock command are end-to-end encrypted.</text>
 </svg>

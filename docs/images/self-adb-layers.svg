@@ -1,44 +1,46 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="800" viewBox="0 0 1250 800">
-<defs><marker id="m0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#7B8899"/></marker><marker id="m1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#3DDC97"/></marker></defs>
-<rect x="1" y="1" width="1248" height="798" rx="20" fill="#10151C" stroke="#2A323D" stroke-width="2"/>
-<rect x="60" y="40" width="500" height="95" rx="12" fill="#171D26" stroke="#313B49" stroke-width="1.5"/>
-<text x="78" y="70" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#E8EEF5" text-anchor="start">Expo module</text>
-<text x="78" y="96" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">control plane, only alive while the JS app runs</text>
-<rect x="60" y="215" width="500" height="95" rx="12" fill="#171D26" stroke="#313B49" stroke-width="1.5"/>
-<text x="78" y="245" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#E8EEF5" text-anchor="start"><tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">libadb-android</tspan></text>
-<text x="78" y="271" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">pure-Java ADB client (adb-over-TLS)</text>
-<rect x="700" y="215" width="490" height="95" rx="12" fill="#171D26" stroke="#3DDC97" stroke-width="1.8"/>
-<text x="718" y="245" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#3DDC97" text-anchor="start">On-device <tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">adbd</tspan></text>
-<text x="718" y="271" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">Wireless Debugging</text>
-<rect x="60" y="390" width="500" height="95" rx="12" fill="#171D26" stroke="#313B49" stroke-width="1.5"/>
-<text x="78" y="420" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#E8EEF5" text-anchor="start"><tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">app_process</tspan></text>
-<text x="78" y="446" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">shell-side launcher</text>
-<rect x="700" y="390" width="490" height="110" rx="12" fill="#171D26" stroke="#3DDC97" stroke-width="1.8"/>
-<text x="718" y="420" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#3DDC97" text-anchor="start">ClipboardAgent</text>
-<text x="718" y="446" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">shell UID, detached daemon</text>
-<text x="718" y="469" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">survives the app</text>
-<rect x="60" y="590" width="500" height="150" rx="12" fill="#171D26" stroke="#3DDC97" stroke-width="1.8"/>
-<text x="78" y="620" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#3DDC97" text-anchor="start">ClipForegroundService</text>
-<text x="78" y="646" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">owns <tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">ClipBridge</tspan> (localhost client),</text>
-<text x="78" y="669" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start"><tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">RelayClient</tspan> (WebSocket) and <tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">BleAdvertiser</tspan></text>
-<text x="78" y="692" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="400" fill="#93A0B1" text-anchor="start">survives an app swipe (<tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">START_STICKY</tspan>)</text>
-<path d="M310 135 L310 215" fill="none" stroke="#7B8899" stroke-width="2.2" stroke-linecap="round" marker-end="url(#m0)"/>
-<rect x="317" y="161.5" width="226" height="27" rx="13.5" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="430" y="179.55" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#93A0B1" text-anchor="middle">start / pair / deploy / kill</text>
-<path d="M560 262 L700 262" fill="none" stroke="#3DDC97" stroke-width="2.2" stroke-linecap="round" marker-end="url(#m1)"/>
-<rect x="575.5" y="248.5" width="109" height="27" rx="13.5" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="630" y="266.55" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#3DDC97" text-anchor="middle">TLS + spake2</text>
-<path d="M310 310 L310 390" fill="none" stroke="#7B8899" stroke-width="2.2" stroke-linecap="round" marker-end="url(#m0)"/>
-<rect x="330" y="336.5" width="160" height="27" rx="13.5" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="410" y="354.55" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#93A0B1" text-anchor="middle">exec / push streams</text>
-<path d="M560 437 L700 437" fill="none" stroke="#3DDC97" stroke-width="2.2" stroke-linecap="round" marker-end="url(#m1)"/>
-<rect x="590" y="423.5" width="80" height="27" rx="13.5" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="630" y="441.55" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#3DDC97" text-anchor="middle">launches</text>
-<path d="M945 500 L945 649 Q945 665 929 665 L560 665" fill="none" stroke="#3DDC97" stroke-width="2.2" stroke-linecap="round" marker-end="url(#m1)" marker-start="url(#m1)"/>
-<rect x="604.5" y="651.5" width="291" height="27" rx="13.5" fill="#10151C" stroke="none" stroke-width="1"/>
-<text x="750" y="669.55" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#3DDC97" text-anchor="middle">ServerSocket 127.0.0.1:53123 (NDJSON)</text>
-<text x="700" y="80" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#93A0B1" text-anchor="start" letter-spacing="1.6">CONTROL PLANE</text>
-<text x="700" y="102" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#93A0B1" text-anchor="start">Pairs, deploys and kills the daemon over ADB.</text>
-<text x="700" y="710" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#93A0B1" text-anchor="start" letter-spacing="1.6">DATA PLANE</text>
-<text x="700" y="732" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#93A0B1" text-anchor="start">Runs with no ADB and no JS once the daemon is up.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1110" height="850" viewBox="0 0 1110 850">
+<defs><marker id="m0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#7B8899"/></marker><marker id="m1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#3DDC97"/></marker></defs>
+<rect x="1" y="1" width="1108" height="848" rx="20" fill="#10151C" stroke="#2A323D" stroke-width="2"/>
+<rect x="30" y="40" width="450" height="91" rx="14" fill="#171D26" stroke="#313B49" stroke-width="1.8"/>
+<text x="50" y="76" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#E8EEF5" text-anchor="start">Expo module</text>
+<text x="50" y="107" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">control plane, alive only with JS</text>
+<rect x="30" y="221" width="450" height="91" rx="14" fill="#171D26" stroke="#313B49" stroke-width="1.8"/>
+<text x="50" y="257" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#E8EEF5" text-anchor="start"><tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">libadb-android</tspan></text>
+<text x="50" y="288" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">pure-Java ADB client (adb-over-TLS)</text>
+<rect x="630" y="221" width="450" height="91" rx="14" fill="#171D26" stroke="#3DDC97" stroke-width="2.2"/>
+<text x="650" y="257" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#3DDC97" text-anchor="start">On-device <tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">adbd</tspan></text>
+<text x="650" y="288" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">Wireless Debugging</text>
+<rect x="30" y="402" width="450" height="118" rx="14" fill="#171D26" stroke="#313B49" stroke-width="1.8"/>
+<text x="50" y="438" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#E8EEF5" text-anchor="start"><tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">app_process</tspan></text>
+<text x="50" y="469" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">shell-side launcher</text>
+<rect x="630" y="402" width="450" height="118" rx="14" fill="#171D26" stroke="#3DDC97" stroke-width="2.2"/>
+<text x="650" y="438" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#3DDC97" text-anchor="start">ClipboardAgent</text>
+<text x="650" y="469" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">shell UID, detached daemon</text>
+<text x="650" y="496" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start"><tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">ServerSocket</tspan>, survives the app</text>
+<rect x="30" y="610" width="450" height="145" rx="14" fill="#171D26" stroke="#3DDC97" stroke-width="2.2"/>
+<text x="50" y="646" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="21" font-weight="650" fill="#3DDC97" text-anchor="start">ClipForegroundService</text>
+<text x="50" y="677" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">owns <tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">ClipBridge</tspan> (localhost client),</text>
+<text x="50" y="704" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start"><tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">RelayClient</tspan> (WS), <tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">BleAdvertiser</tspan></text>
+<text x="50" y="731" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17.5" font-weight="400" fill="#93A0B1" text-anchor="start">survives an app swipe (<tspan font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="0.93em" fill="#9CCBFF">START_STICKY</tspan>)</text>
+<path d="M255 131 L255 221" fill="none" stroke="#7B8899" stroke-width="2.6" stroke-linecap="round" marker-end="url(#m0)"/>
+<rect x="256.5" y="161.25" width="267" height="29.5" rx="14.75" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="390" y="181.425" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="400" fill="#93A0B1" text-anchor="middle">start / pair / deploy / kill</text>
+<path d="M480 266.5 L630 266.5" fill="none" stroke="#3DDC97" stroke-width="2.6" stroke-linecap="round" marker-end="url(#m1)"/>
+<rect x="491" y="251.75" width="128" height="29.5" rx="14.75" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="555" y="271.925" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="400" fill="#3DDC97" text-anchor="middle">TLS + spake2</text>
+<path d="M255 312 L255 402" fill="none" stroke="#7B8899" stroke-width="2.6" stroke-linecap="round" marker-end="url(#m0)"/>
+<rect x="275.5" y="342.25" width="189" height="29.5" rx="14.75" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="370" y="362.425" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="400" fill="#93A0B1" text-anchor="middle">exec / push streams</text>
+<path d="M480 461 L630 461" fill="none" stroke="#3DDC97" stroke-width="2.6" stroke-linecap="round" marker-end="url(#m1)"/>
+<rect x="508.5" y="446.25" width="93" height="29.5" rx="14.75" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="555" y="466.425" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="400" fill="#3DDC97" text-anchor="middle">launches</text>
+<path d="M855 520 L855 666.5 Q855 682.5 839 682.5 L480 682.5" fill="none" stroke="#3DDC97" stroke-width="2.6" stroke-linecap="round" marker-end="url(#m1)" marker-start="url(#m1)"/>
+<rect x="551.5" y="667.75" width="232" height="29.5" rx="14.75" fill="#10151C" stroke="none" stroke-width="1"/>
+<text x="667.5" y="687.925" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="400" fill="#3DDC97" text-anchor="middle">127.0.0.1:53123 · NDJSON</text>
+<text x="630" y="78" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="700" fill="#93A0B1" text-anchor="start" letter-spacing="1.6">CONTROL PLANE</text>
+<text x="630" y="106" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16.5" font-weight="400" fill="#93A0B1" text-anchor="start">Pairs, deploys and kills the</text>
+<text x="630" y="130" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16.5" font-weight="400" fill="#93A0B1" text-anchor="start">daemon over ADB.</text>
+<text x="630" y="757.5" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="700" fill="#93A0B1" text-anchor="start" letter-spacing="1.6">DATA PLANE</text>
+<text x="630" y="785.5" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16.5" font-weight="400" fill="#93A0B1" text-anchor="start">Runs with no ADB and no JS</text>
+<text x="630" y="809.5" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="16.5" font-weight="400" fill="#93A0B1" text-anchor="start">once the daemon is up.</text>
 </svg>
