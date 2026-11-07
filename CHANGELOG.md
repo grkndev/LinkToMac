@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.12.1 (2026-11-07)
+
+Full notes: [`release-notes/v0.12.1.md`](release-notes/v0.12.1.md). **Android only** (0.12.0 → 0.12.1); the Mac app stays at 0.12.0.
+
+### Features
+- **New app icon** — a laptop with two-way sync arrows cut into its screen (replaces the phone-and-laptop picture with the Apple/Android logos): adaptive icon with a flat `#2E4C9E` background, themed (monochrome) icon, and the same mark as the notification icon.
+- **Animated splash** (Android 12+) — an `AnimatedVectorDrawable` plays the laptop pop-in, the base stretch, the arrows sliding in and "Link to Mac" sliding out of a mask under the icon; light and dark variants, fixed colours independent of the M3 theme. Older Android shows the end frame.
+- **Boot overlay** — paints the splash's last frame so the hand-off is invisible, loops the arrows while pairing/theme/fonts settle, then flies the icon into Home's hero badge.
+- **Home badge** — the laptop icon is a Stroke outline while disconnected and Twotone when connected.
+
+### Changes
+- The native splash is held until its 1 s intro has played (up to ~0.7 s of extra start-up).
+
+### Internal
+- `scripts/build-brand-assets.mjs` generates the icon, splash, boot layers, notification icon and in-app icons from one glyph definition (`opentype.js`, dev dependency, outlines the wordmark).
+- `plugins/with-splash-animation.js` (system splash animation length), dev-only **Settings ▸ Developer** previews (`/preview?kind=onboarding|splash|boot`).
+- Native resources changed, so this ships as a new APK (new `runtimeVersion`), not an OTA update.
+
 ## v0.11.0 (2026-10-15)
 
 Full notes: [`release-notes/v0.11.0.md`](release-notes/v0.11.0.md). Update **both** apps (Android 0.10.0 → 0.11.0, Mac 0.10.0 → 0.11.0).
