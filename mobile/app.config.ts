@@ -56,10 +56,11 @@ export default (_: ConfigContext): ExpoConfig => ({
     bundleIdentifier: BUNDLE_ID,
   },
   android: {
+    // Brand mark "Synced Mac": regenerate every image below with `node scripts/build-brand-assets.mjs`.
+    // The background is a flat colour (not an image) so the launcher mask crops only that.
     adaptiveIcon: {
-      backgroundColor: '#E6F4FE',
+      backgroundColor: '#2E4C9E',
       foregroundImage: './assets/images/android-icon-foreground.png',
-      backgroundImage: './assets/images/android-icon-background.png',
       monochromeImage: './assets/images/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
@@ -77,13 +78,24 @@ export default (_: ConfigContext): ExpoConfig => ({
     // or the app-level manifest merge fails.
     ['expo-build-properties', { android: { minSdkVersion: 30 } }],
     'expo-router',
+    // The system splash's 1 s icon animation length. Listed BEFORE expo-splash-screen on purpose: Expo runs a
+    // later plugin's mod first, and this one must patch the style that expo-splash-screen writes.
+    ['./plugins/with-splash-animation', { duration: 1000 }],
     [
       'expo-splash-screen',
       {
-        backgroundColor: '#ffffff',
+        // Fixed soft colours, independent of the app's M3 theme (the design: "dynamic colour starts at Home").
+        // Keep in sync with src/components/booting.tsx and scripts/build-brand-assets.mjs.
+        backgroundColor: '#F6F7FB',
+        dark: { backgroundColor: '#121317' },
         android: {
-          image: './assets/images/splash-icon.png',
-          imageWidth: 76,
+          // Android 12+ plays this AnimatedVectorDrawable (generated: scripts/build-brand-assets.mjs); older
+          // versions show its end frame. No `image`/`imageWidth`: the plugin copies these XMLs to
+          // res/drawable[-night]/splashscreen_logo.xml instead of rasterising a PNG.
+          drawable: {
+            icon: './assets/splash/splash-anim.xml',
+            darkIcon: './assets/splash/splash-anim-night.xml',
+          },
         },
       },
     ],

@@ -258,6 +258,37 @@ export default function SettingsScreen() {
           />
         </Section>
 
+        {/* Dev builds only: replay the first-run experience. Each opens /preview, which never navigates away
+            on its own — you leave with the back gesture. */}
+        {__DEV__ && (
+          <Section colors={colors} label="Developer">
+            <ActionRow
+              colors={colors}
+              icon={icons.qr}
+              label="Replay onboarding"
+              hint="The pairing screen. Nothing on it navigates."
+              onPress={() => router.push({ pathname: "/preview", params: { kind: "onboarding" } })}
+              chevron
+            />
+            <ActionRow
+              colors={colors}
+              icon={icons.laptopActive}
+              label="Replay splash"
+              hint="The 1 s intro, in-app. Tap to replay."
+              onPress={() => router.push({ pathname: "/preview", params: { kind: "splash" } })}
+              chevron
+            />
+            <ActionRow
+              colors={colors}
+              icon={icons.retry}
+              label="Preview boot screen"
+              hint="The connecting frame, looping."
+              onPress={() => router.push({ pathname: "/preview", params: { kind: "boot" } })}
+              chevron
+            />
+          </Section>
+        )}
+
         <Group>
           <ActionRow
             colors={colors}

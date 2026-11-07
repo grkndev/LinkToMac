@@ -15,6 +15,8 @@ const MODULES = {
   // Home
   settings: require('../../assets/icons/settings.xml'),
   laptop: require('../../assets/icons/laptop_mac.xml'),
+  // Same glyph, Twotone: the "linked / active" state (generated — scripts/build-brand-assets.mjs).
+  laptopActive: require('../../assets/icons/laptop_mac_twotone.xml'),
   lock: require('../../assets/icons/lock.xml'),
   send: require('../../assets/icons/send.xml'),
   cast: require('../../assets/icons/cast.xml'),

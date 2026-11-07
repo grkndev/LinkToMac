@@ -13,6 +13,7 @@ import {
   animateContentSize,
   fillMaxWidth,
   height,
+  onGloballyPositioned,
   padding,
   size,
   weight,
@@ -23,6 +24,7 @@ import { useIcons, type IconSource } from "@/components/icons";
 import { StatusDot, withAlpha } from "@/components/m3";
 import { AnimatedSurface, Reveal, useBreathing, useLatched } from "@/components/motion";
 import { Spacing } from "@/constants/theme";
+import { setHeroBadge } from "@/features/boot/hero-badge";
 
 const radius = (r: number) =>
   Shape.RoundedCorner({ cornerRadii: { topStart: r, topEnd: r, bottomStart: r, bottomEnd: r } });
@@ -94,11 +96,12 @@ export function StatusCard({
             <AnimatedSurface
               color={connected ? colors.primary : colors.surfaceContainerHighest}
               shape={MARK}
-              modifiers={[size(76, 76)]}
+              // Reports where the badge sits so the Boot overlay can shrink the splash glyph into it.
+              modifiers={[size(76, 76), onGloballyPositioned(setHeroBadge)]}
             >
               <Box contentAlignment="center" modifiers={[size(76, 76)]}>
                 <Icon
-                  source={icons.laptop}
+                  source={connected ? icons.laptopActive : icons.laptop}
                   size={42}
                   tint={connected ? colors.onPrimary : colors.onSurfaceVariant}
                 />
