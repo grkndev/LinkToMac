@@ -206,6 +206,15 @@ final class RelayClient {
     /// drop-zone progress UI: one bar for the whole batch, labelled with the file in flight.
     var outgoingBatch: BatchProgress?
 
+    /// Everything sent or received, newest first (the Files page). In memory only — cleared on
+    /// quit / unpair, like the other histories.
+    private(set) var fileHistory: [FileTransferRecord] = []
+    private static let fileHistoryCap = 100
+
+    /// The files of the batch in flight (all drops that joined it), kept so `finishBatch` can turn
+    /// the sender's name-only result into history rows that can be retried.
+    @ObservationIgnored private var batchItems: [OutgoingItem] = []
+
     /// Reasons files were left out of the batch (empty, too large, unreadable), held until the
     /// batch ends so they land in its single summary notification instead of one banner each.
     @ObservationIgnored private var batchProblems: [String] = []
@@ -401,6 +410,14 @@ final class RelayClient {
         return corr
     }
 
+    /// "Not delivered · Retry": drop the failed bubble and send the same text again (a fresh
+    /// placeholder, so it shows as sending and resolves from the new ack).
+    func retryMessage(id: Int64) {
+        guard let failed = messages.first(where: { $0.id == id }), failed.status.isFailed else { return }
+        messages.removeAll { $0.id == id }
+        sendReply(addr: failed.addr, body: failed.body)
+    }
+
     private func timeoutPendingReply(corr: String) {
         guard let placeholderId = pendingReplies.removeValue(forKey: corr) else { return }
         guard let idx = messages.firstIndex(where: { $0.id == placeholderId }) else { return }
@@ -581,6 +598,9 @@ final class RelayClient {
                 self.log("file saved: \(url.path)")
                 self.replyAck(frame)
                 self.announceSaved(url)
+                let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                self.record(FileTransferRecord(direction: .received, name: url.lastPathComponent, bytes: bytes,
+                                               status: .done, date: Date(), location: url))
             case let .failure(error):
                 self.log("file save failed: \(error.localizedDescription)")
                 self.replyNack(frame, "The Mac couldn't write the file")
@@ -630,11 +650,28 @@ final class RelayClient {
         }
     }
 
+    /// Add a row to the Files history (newest first, capped).
+    private func record(_ row: FileTransferRecord) {
+        fileHistory.insert(row, at: 0)
+        if fileHistory.count > Self.fileHistoryCap { fileHistory.removeLast(fileHistory.count - Self.fileHistoryCap) }
+    }
+
+    /// Retry a failed row: send its sources again (same transfer ids, so the phone resumes a
+    /// partial copy). The old row goes away — the new attempt writes its own.
+    func resumeTransfer(_ row: FileTransferRecord) {
+        guard row.canResume else { return }
+        fileHistory.removeAll { $0.id == row.id }
+        sendFilesToPhone(row.resumeSources)
+    }
+
+    func clearFileHistory() { fileHistory.removeAll() }
+
     /// Abandon the batch in flight (the drop zone's Cancel).
     func cancelOutgoing() { fileSender.cancel() }
 
     private func startBatch(_ plan: FileBatchPlanner.Plan) {
         batchProblems += plan.problems
+        batchItems += plan.items
         guard !plan.items.isEmpty else {
             if !fileSender.isBusy {
                 outgoingBatch = nil
@@ -682,6 +719,8 @@ final class RelayClient {
         outgoingBatch = nil
         let problems = batchProblems
         batchProblems = []
+        for row in FileHistoryBuilder.sentRecords(items: batchItems, result: result).reversed() { record(row) }
+        batchItems = []
         log("file batch done: \(result.sent.count) sent, \(result.failures.count) failed, \(result.notSent) not sent")
 
         let total = result.sent.count + result.failures.count + result.notSent
@@ -1007,6 +1046,8 @@ final class RelayClient {
         pairing = PairingStore.loadOrCreate()
         lastClip = nil
         clipHistory.removeAll()
+        fileHistory.removeAll()
+        batchItems.removeAll()
         notifications.removeAll()
         messages.removeAll()
         pendingReplies.removeAll()

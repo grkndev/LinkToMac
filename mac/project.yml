@@ -77,6 +77,7 @@ targets:
       - path: Sources/LinkToMac/RelayProtocol.swift
       - path: Sources/LinkToMac/FileTransfer.swift
       - path: Sources/LinkToMac/FileDrop.swift
+      - path: Sources/LinkToMac/FileHistory.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
