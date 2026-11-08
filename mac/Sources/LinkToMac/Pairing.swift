@@ -24,11 +24,16 @@ enum PairingStore {
     /// `loadOrCreate` from the `@MainActor` RelayClient) and reader (PairingView) is main-actor.
     @MainActor private(set) static var persistFailed = false
 
+    /// True when this launch had to mint a fresh pairing — a brand-new install, or right after an
+    /// unpair — which is exactly when the "Pair your phone" screen should come first.
+    @MainActor private(set) static var createdThisLaunch = false
+
     @MainActor
     static func loadOrCreate() -> Pairing {
         if let existing = load() { return existing }
         let fresh = Pairing(room: randomBase64(32), key: randomBase64(32))
         save(fresh)
+        createdThisLaunch = true
         return fresh
     }
 
