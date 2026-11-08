@@ -1,21 +1,48 @@
 {
-  "fill" : {
-    "automatic-gradient" : "extended-srgb:0.00000,0.47843,1.00000,1.00000"
-  },
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.35294,0.45098,0.73725,1.00000",
+          "srgb:0.23529,0.32157,0.59216,1.00000"
+        ]
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.16471,0.18431,0.23922,1.00000",
+          "srgb:0.10196,0.11373,0.14902,1.00000"
+        ]
+      }
+    },
+    {
+      "appearance" : "tinted",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.22745,0.23529,0.25882,1.00000",
+          "srgb:0.14902,0.15294,0.16863,1.00000"
+        ]
+      }
+    }
+  ],
   "groups" : [
     {
       "layers" : [
         {
           "blend-mode" : "normal",
-          "fill" : {
-            "solid" : "srgb:0.98144,1.00000,0.98764,1.00000"
-          },
+          "fill-specializations" : [
+            { "value" : { "solid" : "srgb:1.00000,1.00000,1.00000,1.00000" } },
+            { "appearance" : "dark", "value" : { "solid" : "srgb:0.68235,0.74510,0.91765,1.00000" } },
+            { "appearance" : "tinted", "value" : { "solid" : "srgb:0.85098,0.85490,0.87843,1.00000" } }
+          ],
           "glass" : false,
           "hidden" : false,
-          "image-name" : "android-icon-monochrome 2.png",
-          "name" : "android-icon-monochrome 2",
+          "image-name" : "glyph.png",
+          "name" : "glyph",
           "position" : {
-            "scale" : 1.25,
+            "scale" : 1,
             "translation-in-points" : [
               0,
               0
@@ -28,8 +55,8 @@
         "opacity" : 0.5
       },
       "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
+        "enabled" : false,
+        "value" : 0
       }
     }
   ],

@@ -1,123 +1,86 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The "drop a file to send it to your phone" surface, shared by the dashboard window and the
-/// menu-bar panel so both read identically. Three states: inviting (something is being dragged
-/// over us), sending (a live percentage), and nothing at all.
-///
-/// Deliberately **not** a button: the panel and the window differ in size and chrome, but the drop
-/// affordance is the same idea in both, so it is one view parameterised by size.
-struct FileDropZone: View {
+/// The window's drop surface: while a drag hovers, the content area (not the sidebar or the
+/// toolbar) is covered by a dashed, tinted panel with a big arrow — "Drop to send to <phone>".
+/// The transfer itself is then shown by the Files page, which a drop switches to.
+struct DropOverlay: View {
     let phoneName: String
-    /// Non-nil while a batch is running — takes precedence over the drag invitation.
-    let outgoing: BatchProgress?
-    var compact = false
-    /// Cancels the batch in flight; nil hides the button.
-    var onCancel: (() -> Void)?
+    /// "3 items" while dragging, when the count is known (nil → the generic line).
+    var itemCount: Int? = nil
 
     var body: some View {
-        VStack(spacing: compact ? 8 : 14) {
-            if let outgoing {
-                sending(outgoing)
-            } else {
-                invitation
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(compact ? 16 : 28)
-        .background(
-            RoundedRectangle(cornerRadius: compact ? M3.corLargeIncreased : M3.corExtraLarge,
-                             style: .continuous)
-                .fill(M3.surfaceContainer)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: compact ? M3.corLargeIncreased : M3.corExtraLarge,
-                             style: .continuous)
-                .strokeBorder(M3.primary, style: StrokeStyle(lineWidth: 2, dash: outgoing == nil ? [7, 5] : []))
-        )
-    }
-
-    private var invitation: some View {
-        Group {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: compact ? 26 : 40, weight: .light))
-                .foregroundStyle(M3.primary)
-            Text("Drop to send to \(phoneName)")
-                .font(compact ? M3.bodyLarge : M3.headline(20))
-                .foregroundStyle(M3.onSurface)
-                .multilineTextAlignment(.center)
-            if !compact {
+        ZStack {
+            M3.surface.opacity(0.72)
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(M3.primaryContainer.opacity(0.55))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .strokeBorder(M3.primary, style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                )
+                .padding(.leading, 22).padding(.trailing, 22).padding(.top, 4).padding(.bottom, 22)
+            VStack(spacing: 14) {
+                Circle().fill(M3.primary).frame(width: 80, height: 80)
+                    .overlay(Image(systemName: "arrow.down").font(.system(size: 34, weight: .medium))
+                        .foregroundStyle(M3.onPrimary))
+                Text("Drop to send to \(phoneName)")
+                    .font(.system(size: 24, weight: .bold)).foregroundStyle(M3.onSurface)
                 Text("Lands in Downloads on your phone")
-                    .font(M3.bodyLarge)
-                    .foregroundStyle(M3.onSurfaceVariant)
-            }
-        }
-    }
-
-    private func sending(_ batch: BatchProgress) -> some View {
-        Group {
-            // "rapor.pdf (50%)": the file in flight and its own progress…
-            Text(batch.label)
-                .font(compact ? M3.bodyLarge : M3.headline(20))
-                .foregroundStyle(M3.onSurface)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .monospacedDigit()
-            // …under one determinate bar for the whole batch, so it only ever moves forward. A
-            // spinner would not do: a big file over the relay is paced, and "how much longer" is
-            // the question, not "is it working".
-            ProgressView(value: batch.overallFraction)
-                .progressViewStyle(.linear)
-                .tint(M3.primary)
-            HStack(spacing: 12) {
-                if batch.count > 1 {
-                    Text("\(batch.index) / \(batch.count)")
-                        .font(M3.bodyLarge)
-                        .foregroundStyle(M3.onSurfaceVariant)
-                        .monospacedDigit()
-                }
-                if let onCancel {
-                    Button("Cancel", action: onCancel)
-                        .buttonStyle(.plain)
-                        .font(M3.bodyLarge)
-                        .foregroundStyle(M3.primary)
-                }
+                    .font(.system(size: 14)).foregroundStyle(M3.onSurfaceVariant)
             }
         }
     }
 }
 
-/// Makes a whole view a drop target for files headed to the phone: while a drag hovers, the
-/// content is replaced by a `FileDropZone` (the user asked for the current screen to *become* the
-/// drop target rather than to gain a small well somewhere), and the zone stays up, showing a
-/// percentage, for as long as the transfer runs.
+/// The menu panel's drop state: a tinted zone to drop on and, under it, the batch in flight.
+struct PanelDropContent: View {
+    let phoneName: String
+    let targeted: Bool
+    let outgoing: BatchProgress?
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if targeted || outgoing == nil {
+                VStack(spacing: 10) {
+                    Circle().fill(M3.primary).frame(width: 52, height: 52)
+                        .overlay(Image(systemName: "arrow.down").font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(M3.onPrimary))
+                    Text("Drop to send to \(phoneName)").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(M3.onSurface).multilineTextAlignment(.center)
+                    Text("Opens by itself while you drag").font(.system(size: 12)).foregroundStyle(M3.onSurfaceVariant)
+                }
+                .frame(maxWidth: .infinity).frame(height: 204)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(M3.primaryContainer.opacity(0.55)))
+            }
+            if let outgoing {
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Sending \(outgoing.currentName)").font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(M3.onSurface).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Text(Self.detail(outgoing)).font(.system(size: 12.5)).foregroundStyle(M3.onSurfaceVariant).monospacedDigit()
+                    }
+                    DSProgressBar(fraction: outgoing.overallFraction, height: 4)
+                }
+            }
+        }
+    }
+
+    private static func detail(_ b: BatchProgress) -> String {
+        let pct = Int((b.overallFraction * 100).rounded())
+        return b.count > 1 ? "\(b.index) / \(b.count) · \(pct)%" : "\(pct)%"
+    }
+}
+
+/// Makes a view a drop target for files headed to the phone. It draws nothing itself — the window
+/// and the menu panel each show their own drop state from `isTargeted`.
 struct PhoneFileDrop: ViewModifier {
     let client: RelayClient
-    var compact = false
-
-    @State private var targeted = false
-
-    private var showing: Bool { targeted || client.outgoingBatch != nil }
+    @Binding var isTargeted: Bool
 
     func body(content: Content) -> some View {
         content
-            .overlay {
-                if showing {
-                    ZStack {
-                        M3.surface.opacity(0.94)
-                        FileDropZone(
-                            phoneName: client.phoneName ?? "your phone",
-                            outgoing: client.outgoingBatch,
-                            compact: compact,
-                            onCancel: { client.cancelOutgoing() }
-                        )
-                        .padding(compact ? 12 : 48)
-                    }
-                    .transition(.opacity)
-                }
-            }
-            .animation(.easeOut(duration: 0.15), value: showing)
-            .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
+            .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
                 NSLog("[LinkToMac] drop received: %d provider(s)", providers.count)
                 guard !providers.isEmpty else { return false }
                 Self.collect(providers) { urls, unreadable in
@@ -172,9 +135,8 @@ private final class URLBox: @unchecked Sendable {
 }
 
 extension View {
-    /// Accept dropped files and send them to the phone. `compact` tightens the overlay for the
-    /// menu-bar panel.
-    func phoneFileDrop(client: RelayClient, compact: Bool = false) -> some View {
-        modifier(PhoneFileDrop(client: client, compact: compact))
+    /// Accept dropped files and send them to the phone; `isTargeted` is true while a drag hovers.
+    func phoneFileDrop(client: RelayClient, isTargeted: Binding<Bool>) -> some View {
+        modifier(PhoneFileDrop(client: client, isTargeted: isTargeted))
     }
 }

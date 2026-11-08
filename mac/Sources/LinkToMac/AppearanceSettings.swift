@@ -43,8 +43,10 @@ final class AppearanceStore {
     /// Apply the Dock-icon preference: `.regular` shows it, `.accessory` hides it (menu-bar-only).
     /// Must be called once at launch too — property observers don't fire from `init`. Re-activates
     /// so the open window keeps focus across the policy switch.
-    func applyDockPolicy() {
+    func applyDockPolicy(reactivate: Bool = true) {
         NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
-        NSApp.activate(ignoringOtherApps: true)
+        // Switching the policy drops activation; take it back so an open window keeps focus. At launch
+        // we must NOT: a "Start at login" launch would yank focus from whatever the user is doing.
+        if reactivate { NSApp.activate(ignoringOtherApps: true) }
     }
 }

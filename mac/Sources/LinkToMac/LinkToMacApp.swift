@@ -10,10 +10,17 @@ struct LinkToMacApp: App {
         // The menu-bar item is an `NSStatusItem` owned by the AppDelegate (`StatusItemController`),
         // NOT a `MenuBarExtra`: it has to accept dragged files so a file can be sent to the phone
         // with the dashboard closed, and MenuBarExtra exposes no hook to register dragged types on.
-        // SwiftUI still requires a Scene, so this is an empty Settings scene with its menu item
-        // removed — every real setting lives in the dashboard window.
-        Settings { EmptyView() }
-            .commands { CommandGroup(replacing: .appSettings) {} }
+        // So the only scene SwiftUI sees is Settings. The Settings window (⌘,) is a real `Settings` scene: native toolbar tabs, standard
+        // menu item, remembered position. It reads the objects the AppDelegate owns.
+        Settings {
+            SettingsRoot(
+                client: delegate.client,
+                proximity: delegate.proximity,
+                appearance: delegate.appearance,
+                onApplyLan: { delegate.applyLanSettings() },
+                onCheckForUpdates: { delegate.checkForUpdates() }
+            )
+        }
     }
 }
 
@@ -37,14 +44,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The menu-bar item + its panel. Owns the `NSStatusItem`, so it can be a drop target.
     private lazy var statusItem = StatusItemController(
         client: client,
+        proximity: proximity,
         appearance: appearance,
-        onOpenWindow: { [weak self] in self?.showDashboardWindow() }
+        onOpenWindow: { [weak self] in self?.showDashboardWindow() },
+        onOpenSettings: { openSettingsWindow() }
     )
     /// The main dashboard window. Built lazily and reused (the app is now a regular Dock app, so
     /// the window is the primary surface; the menu-bar extra is the quick-glance companion).
     private var dashboardWindow: NSWindow?
-    /// The dashboard's sub-screen stack, shared by `DashboardView` and the titlebar Back button.
+    /// The dashboard's navigation state (selected page).
     private let dashboardNav = DashboardNav()
+    /// The "Pair your phone" window (first launch, after an unpair, and Settings ▸ Show QR Code…).
+    private var pairingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         client.connect()
@@ -60,13 +71,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so the phone can show the Mac's distance — it can't measure that itself, it only advertises.
         proximity.onReading = { [weak self] reading in self?.client.updateProximity(reading) }
         // Re-advertise under the fresh pairing id (and drop stale auth) when the user re-pairs.
-        client.onPairingChanged = { [weak self] in self?.applyLanSettings() }
+        client.onPairingChanged = { [weak self] in
+            self?.applyLanSettings()
+            // A rotated pairing is a phone with nothing to scan: show the code straight away.
+            self?.showPairingWindow()
+        }
+        PairingOpener.shared.open = { [weak self] in self?.showPairingWindow() }
+        watchLinkForPairing()
         applyLanSettings()
-        appearance.applyDockPolicy() // honour the persisted "Show in Dock" pref at launch
+        appearance.applyDockPolicy(reactivate: false) // honour the persisted "Show in Dock" pref at launch
         statusItem.start()           // and the persisted "Show in Menu Bar" pref
         // Don't steal focus here: at launch (esp. as a background "Start at login" item) the
         // user may already be mid-task in another app — order the window front without activating.
-        showDashboardWindow(activate: false)
+        if PairingStore.createdThisLaunch {
+            // A fresh install has nothing to show yet: start with the pairing screen.
+            showPairingWindow()
+        } else {
+            showDashboardWindow(activate: false)
+        }
         // Prompt for notification permission up front so the first mirrored notification can
         // already raise a banner (the prompt is async; an early request avoids the first one
         // being silently skipped while authorization is still undetermined).
@@ -143,42 +165,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let root = DashboardView(
                 client: client,
                 proximity: proximity,
-                appearance: appearance,
-                onApplyLan: { [weak self] in self?.applyLanSettings() }, // LAN port/enabled may have changed
-                onCheckForUpdates: { [weak self] in self?.checkForUpdates() },
                 nav: dashboardNav
             )
             let hosting = NSHostingController(rootView: root)
-            // We pin the window size ourselves (below); stop the hosting controller from imposing
-            // its own content-derived size constraints.
+            // The window is resizable; stop the hosting controller from imposing its own
+            // content-derived size constraints on top of ours.
             hosting.sizingOptions = []
             let window = NSWindow(contentViewController: hosting)
             window.title = "Link to Mac"
-            // Chromeless titlebar: transparent + no title text + full-size content, so the dark
-            // dashboard bleeds to the top edge under the floating traffic lights — no visible bar,
-            // just the Close/Minimize buttons. No resize, no full screen, no zoom.
-            window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            // Chromeless titlebar: transparent + no title text + full-size content, so the page
+            // runs to the top edge and the floating sidebar sits under the traffic lights.
+            // Resizable, with the usual zoom button; no full screen. Appearance follows the system.
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.collectionBehavior.insert(.fullScreenNone)
-            window.standardWindowButton(.zoomButton)?.isEnabled = false // green button disabled
             window.isReleasedWhenClosed = false
-            // 1280×760 matches the reference design 1:1 (left column 466 + 17 gap + 732 right panel +
-            // 32/33 side margins). Locked: min == max so the window is a fixed size and can't resize.
-            let fixedSize = NSSize(width: 1280, height: 760)
-            window.setContentSize(fixedSize)
-            window.minSize = fixedSize
-            window.maxSize = fixedSize
-            window.appearance = NSAppearance(named: .darkAqua)
-            // The Back button sits in the titlebar beside the traffic lights (see DashboardWindow).
-            window.addTitlebarAccessoryViewController(makeDashboardBackAccessory(nav: dashboardNav))
-            window.center()
+            window.setContentSize(NSSize(width: 1180, height: 780))
+            window.contentMinSize = NSSize(width: 900, height: 600)
+            // Remember the user's size and position; centre only the very first time.
+            if !window.setFrameUsingName("LinkToMacDashboard") { window.center() }
+            window.setFrameAutosaveName("LinkToMacDashboard")
+            // The design puts the traffic lights inside the sidebar card, 22 / 24 pt from its corner.
+            WindowChrome.keepTrafficLights(in: window, left: 21, top: 23)
             dashboardWindow = window
         }
         // Explicit user requests (Dock reopen, the menu panel's "Open Window…") still activate —
         // only the just-launched case opts out (see the call in applicationDidFinishLaunching).
-        if activate { NSApp.activate(ignoringOtherApps: true) }
-        dashboardWindow?.makeKeyAndOrderFront(nil)
+        if activate { WindowChrome.bringToFront(dashboardWindow) } else { dashboardWindow?.orderFront(nil) }
+    }
+
+    // MARK: - Pairing window
+
+    /// Front the "Pair your phone" window, building it on first use.
+    func showPairingWindow() {
+        if pairingWindow == nil {
+            let root = PairingScreen(client: client) { [weak self] in
+                self?.pairingWindow?.orderOut(nil)
+                self?.showDashboardWindow()
+            }
+            // An NSHostingView as the content view (not a hosting controller): with content under
+            // the titlebar the frame is then exactly the design's 760 × 500, with no titlebar extra.
+            let hosting = NSHostingView(rootView: root)
+            hosting.sizingOptions = []
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 760, height: 500),
+                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+                backing: .buffered, defer: false
+            )
+            window.contentView = hosting
+            window.title = "Pair your phone"
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isReleasedWhenClosed = false
+            // Pin the *frame* to the design's 760 × 500 (min == max, like the dashboard used to be):
+            // `contentRect` excludes the titlebar, so without this AppKit adds 32 pt of blank.
+            let size = NSSize(width: 760, height: 500)
+            window.minSize = size
+            window.maxSize = size
+            window.setFrame(NSRect(origin: .zero, size: size), display: false)
+            window.center()
+            WindowChrome.keepTrafficLights(in: window, left: 17, top: 13) // the design's pairing window
+            pairingWindow = window
+        }
+        WindowChrome.bringToFront(pairingWindow)
+    }
+
+    /// "Pairing finishes on its own": when the phone connects while the pairing window is up, close
+    /// it and carry on to the dashboard. Re-arms itself — `withObservationTracking` fires once.
+    private func watchLinkForPairing() {
+        withObservationTracking {
+            _ = client.isLinked
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.client.isLinked, self.pairingWindow?.isVisible == true {
+                    self.pairingWindow?.orderOut(nil)
+                    self.showDashboardWindow()
+                }
+                self.watchLinkForPairing()
+            }
+        }
     }
 
     /// User-initiated Sparkle update check (shows Sparkle's standard progress/alerts UI).

@@ -1,159 +1,304 @@
 import SwiftUI
 
-/// Root view of the main dashboard window (hosted by `AppDelegate.showDashboardWindow()`). A
-/// two-column layout matching the reference design: `PhonePanel` on the left, `FeaturePanel` on
-/// the right. The Clipboard / Settings / About sub-screens (which replaced the three standalone
-/// `NSWindow`s) are shown via an **explicit `path` stack (`DashboardNav`) with our own Back
-/// button** rather than a `NavigationStack` — a hosted `NSHostingController` window doesn't render
-/// the navigation titlebar back button. The button is a titlebar accessory
-/// (`makeDashboardBackAccessory`), which is why the stack lives in a shared object.
+/// The pages in the sidebar. Calls and Photos are shown dimmed as "Soon" (no data source yet), so
+/// they are not cases here.
+enum DashPage: Hashable, CaseIterable {
+    case overview, notifications, messages, clipboard, files
+
+    var title: String {
+        switch self {
+        case .overview: return "Overview"
+        case .notifications: return "Notifications"
+        case .messages: return "Messages"
+        case .clipboard: return "Clipboard"
+        case .files: return "Files"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .overview: return "square.grid.2x2"
+        case .notifications: return "bell"
+        case .messages: return "bubble.left"
+        case .clipboard: return "doc.on.clipboard"
+        case .files: return "folder"
+        }
+    }
+    var selectedIcon: String {
+        switch self {
+        case .overview: return "square.grid.2x2.fill"
+        case .notifications: return "bell.fill"
+        case .messages: return "bubble.left.fill"
+        case .clipboard: return "doc.on.clipboard.fill"
+        case .files: return "folder.fill"
+        }
+    }
+}
+
+/// Navigation state, held outside the view so other code can drive the selected page.
+@MainActor @Observable
+final class DashboardNav {
+    var page: DashPage = .overview
+}
+
+/// Root view of the dashboard window: a floating sidebar on the left and, beside it, a toolbar over
+/// the selected page. Resizable (min 900 × 600); light and dark follow the system.
 ///
-/// Force-dark (`.preferredColorScheme(.dark)`) to match the design; the window also sets a
-/// `.darkAqua` appearance so the titlebar follows. **Phase 1: the panels show placeholder
-/// telemetry; the Settings sub-tree is fully functional.**
+/// All four pages stay mounted and are shown by opacity, so an open conversation or a scroll
+/// position survives switching pages. Settings lives in its own window (⌘,).
 struct DashboardView: View {
     let client: RelayClient
     let proximity: ProximityMonitor
-    let appearance: AppearanceStore
-    let onApplyLan: () -> Void
-    let onCheckForUpdates: () -> Void
-
-    /// Sub-screen stack, shared with the titlebar's Back button (an AppKit accessory outside this
-    /// view tree — see `TitlebarBackView`). Empty == the dashboard home.
     let nav: DashboardNav
-    private var path: [DashRoute] {
-        get { nav.path }
-        nonmutating set { nav.path = newValue }
-    }
+    @State private var dropTargeted = false
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        ZStack {
-            M3.surface.ignoresSafeArea()
-            // `home` stays mounted underneath the sub-screen instead of being swapped out —
-            // unmounting it destroyed FeaturePanel's @State (selected tab, open SMS thread,
-            // pagination) on every push. Hidden + hit-test-disabled while a route is up.
-            home
-                .opacity(path.isEmpty ? 1 : 0)
-                .allowsHitTesting(path.isEmpty)
-            if let route = path.last {
-                screen(for: route)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(M3.surface)
-                    // Same top clearance as `home`. The Back button lives in the titlebar (next to
-                    // the traffic lights), not here: drawn from SwiftUI into the titlebar band it
-                    // vanished on macOS 27, because that band is painted over the content.
-                    .padding(.top, 40)
-                    // ⌘[ — the standard "back". A zero-size hidden button, so it works wherever
-                    // the titlebar button is or isn't.
-                    .background {
-                        Button("Back", action: nav.pop)
-                            .keyboardShortcut("[", modifiers: .command)
-                            .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
-                    }
+        HStack(spacing: 0) {
+            DashboardSidebar(client: client, nav: nav)
+                .frame(width: 232)
+                .padding(.leading, 8).padding(.vertical, 8)
+            VStack(spacing: 0) {
+                toolbar
+                pages
+            }
+            .overlay {
+                // Covers the content area only — the sidebar stays put.
+                if dropTargeted {
+                    DropOverlay(phoneName: client.phoneName ?? "your phone").transition(.opacity)
+                }
             }
         }
-        // Drag any file onto the window and the whole dashboard becomes the drop target; the same
-        // overlay then carries the send percentage. The menu-bar panel gets the compact variant,
-        // so the affordance reads the same whether or not this window is open.
-        .phoneFileDrop(client: client)
-        .preferredColorScheme(.dark)
+        .animation(.easeOut(duration: 0.15), value: dropTargeted)
+        .onAppear { SettingsOpener.shared.open = { openSettings() } }
+        // A drop starts a transfer; show it where it is tracked.
+        .onChange(of: client.outgoingBatch != nil) { _, sending in if sending { nav.page = .files } }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The titlebar is transparent and the content runs under it (the traffic lights float over
+        // the sidebar), so the design's coordinates start at the window's very top edge.
+        .ignoresSafeArea(.container, edges: .top)
+        .background(M3.surface.ignoresSafeArea())
+        // Drag a file anywhere onto the window to send it to the phone.
+        .phoneFileDrop(client: client, isTargeted: $dropTargeted)
     }
 
-    // MARK: - Home
+    // MARK: - Toolbar
 
-    private var home: some View {
-        HStack(alignment: .top, spacing: 17) {
-            PhonePanel(client: client, proximity: proximity, onOpen: { path.append($0) })
-            FeaturePanel(client: client)
+    /// 52 pt: title (+ a quiet subtitle) on the left, the page's actions on the right.
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(nav.page.title).font(.system(size: 17, weight: .semibold)).foregroundStyle(M3.onSurface)
+                if let subtitle = toolbarSubtitle {
+                    Text(subtitle).font(.system(size: 12.5)).foregroundStyle(M3.outline)
+                }
+            }
+            Spacer(minLength: 0)
+            toolbarActions
+            // Settings: the design reaches it from ⌘, and the menu panel; a button here makes it
+            // findable from the window too.
+            DSToolbarButton(icon: "gearshape") { openSettingsWindow() }.help("Settings (⌘,)")
         }
-        .padding(.leading, 32)
-        .padding(.trailing, 33)
-        .padding(.top, 40) // clear the floating traffic lights (no titlebar now)
+        .padding(.leading, 22).padding(.trailing, 20)
+        .frame(height: 52)
+    }
+
+    private var toolbarSubtitle: String? {
+        switch nav.page {
+        case .messages:
+            let n = client.conversations.count
+            return n == 0 ? nil : "\(n) \(n == 1 ? "conversation" : "conversations")"
+        case .clipboard:
+            let n = client.clipHistory.count
+            return n == 0 ? nil : "\(n) \(n == 1 ? "copy" : "copies") · kept until quit"
+        default: return nil
+        }
+    }
+
+    @ViewBuilder private var toolbarActions: some View {
+        switch nav.page {
+        case .messages:
+            if !client.messages.isEmpty {
+                DSToolbarButton(icon: "trash") { client.clearMessages() }.help("Clear messages")
+            }
+        case .clipboard:
+            if !client.clipHistory.isEmpty {
+                DSToolbarButton(icon: "trash", title: "Clear") { client.clearClipHistory() }
+            }
+        case .notifications:
+            if !client.notifications.isEmpty {
+                DSToolbarButton(icon: "trash", title: "Clear") { client.clearNotifications() }
+            }
+            DSToolbarButton(icon: "square.and.arrow.up", title: "Send Files…", style: .primary) {
+                DashFilePicker.pickAndSend(client: client)
+            }
+        case .files:
+            DSToolbarButton(icon: "folder.badge.plus", title: "Send Folder…") {
+                DashFilePicker.pickAndSend(client: client, folders: true)
+            }
+            DSToolbarButton(icon: "square.and.arrow.up", title: "Send Files…", style: .primary) {
+                DashFilePicker.pickAndSend(client: client)
+            }
+        case .overview:
+            DSToolbarButton(icon: "square.and.arrow.up", title: "Send Files…", style: .primary) {
+                DashFilePicker.pickAndSend(client: client)
+            }
+        }
+    }
+
+    // MARK: - Pages
+
+    private var pages: some View {
+        ZStack {
+            ForEach(DashPage.allCases, id: \.self) { page in
+                pageView(page)
+                    .opacity(nav.page == page ? 1 : 0)
+                    .allowsHitTesting(nav.page == page)
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: - Sub-screens
-
     @ViewBuilder
-    private func screen(for route: DashRoute) -> some View {
-        switch route {
+    private func pageView(_ page: DashPage) -> some View {
+        switch page {
+        case .overview:
+            OverviewPage(client: client, proximity: proximity, onOpen: { nav.page = $0 })
+        case .notifications:
+            NotificationsPage(client: client)
+        case .messages:
+            MessagesPage(client: client)
         case .clipboard:
             ClipHistoryScreen(client: client)
-        case .settings:
-            SettingsScreen(
-                client: client,
-                proximity: proximity,
-                appearance: appearance,
-                onCheckForUpdates: onCheckForUpdates,
-                onOpen: { path.append($0) }
-            )
-        case .relay:
-            RelayScreen(client: client, onApplyLan: onApplyLan)
-        case .about:
-            AboutView(onCheckForUpdates: onCheckForUpdates)
-        }
-    }
-
-}
-
-// MARK: - Navigation state + titlebar Back button
-
-/// The sub-screen stack, pulled out of `DashboardView`'s `@State` so a view *outside* its tree —
-/// the titlebar accessory below — can read and pop it.
-@MainActor @Observable
-final class DashboardNav {
-    var path: [DashRoute] = []
-    func pop() { if !path.isEmpty { path.removeLast() } }
-}
-
-extension DashRoute {
-    var title: String {
-        switch self {
-        case .clipboard: return "Clipboard History"
-        case .settings: return "Settings"
-        case .relay: return "Relay Server"
-        case .about: return "About"
+        case .files:
+            FilesPage(client: client)
         }
     }
 }
 
-/// "‹ Back  <screen title>", shown only while a sub-screen is open (the home screen leaves it
-/// empty). Hosted in a titlebar accessory so it sits beside the traffic lights.
-private struct TitlebarBackView: View {
+// MARK: - Sidebar
+
+/// The floating sidebar: page links with counts, the roadmap pages dimmed as "Soon", and the
+/// paired phone at the bottom. The traffic lights float over its top 44 pt.
+struct DashboardSidebar: View {
+    let client: RelayClient
     let nav: DashboardNav
 
     var body: some View {
-        HStack(spacing: 10) {
-            if let route = nav.path.last {
-                Button(action: nav.pop) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
-                        Text("Back").font(M3.labelLarge)
-                    }
-                    .foregroundStyle(M3.onSurfaceVariant)
-                    .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: 44) // room for the traffic lights
+            VStack(spacing: 2) {
+                ForEach(DashPage.allCases, id: \.self) { page in item(page) }
+            }
+            .padding(.horizontal, 8).padding(.top, 4)
+
+            Text("Coming later")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(M3.outline)
+                .padding(.top, 16).padding(.horizontal, 18).padding(.bottom, 4)
+            VStack(spacing: 2) {
+                soonItem(icon: "phone", title: "Calls")
+                soonItem(icon: "photo.on.rectangle", title: "Photos")
+            }
+            .padding(.horizontal, 8)
+
+            Spacer(minLength: 0)
+            phoneCard
+                .padding(.horizontal, 8).padding(.bottom, 8)
+        }
+        .frame(maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(M3.sidebar)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(M3.outlineVariant, lineWidth: 0.5))
+        )
+    }
+
+    private func count(for page: DashPage) -> Int {
+        switch page {
+        case .notifications: return client.notifications.count
+        case .messages: return client.messages.filter { !$0.outgoing && !$0.read }.count
+        default: return 0
+        }
+    }
+
+    private func item(_ page: DashPage) -> some View {
+        let selected = nav.page == page
+        let n = count(for: page)
+        return Button {
+            nav.page = page
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? page.selectedIcon : page.icon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(selected ? M3.onPrimaryContainer : M3.primary)
+                    .frame(width: 20)
+                Text(page.title)
+                    .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? M3.onPrimaryContainer : M3.onSurface)
+                Spacer(minLength: 0)
+                if n > 0 {
+                    Text("\(n)").font(.system(size: 12)).foregroundStyle(M3.outline).monospacedDigit()
                 }
-                .buttonStyle(.plain)
-                Text(route.title).font(M3.titleMedium).foregroundStyle(M3.onSurface)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? M3.primaryContainer : Color.clear))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func soonItem(icon: String, title: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 15)).frame(width: 20)
+            Text(title).font(.system(size: 13.5))
+            Spacer(minLength: 0)
+            SoonPill()
+        }
+        .foregroundStyle(M3.outline)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+    }
+
+    /// The paired phone, read-only: name, link state, transport and battery.
+    private var phoneCard: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(M3.primary)
+                .frame(width: 34, height: 34)
+                .overlay(Image(systemName: "iphone").font(.system(size: 15)).foregroundStyle(M3.onPrimary))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(client.phoneName ?? "Android")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(M3.onSurface).lineLimit(1)
+                statusLine
             }
             Spacer(minLength: 0)
         }
-        .padding(.leading, 4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .preferredColorScheme(.dark)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(M3.surface)
+                .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(M3.outlineVariant, lineWidth: 0.5))
+        )
     }
-}
 
-/// A `.leading` titlebar accessory — AppKit places it in the titlebar row next to the traffic
-/// lights. Used instead of drawing the button from SwiftUI because the dashboard's titlebar is
-/// transparent over full-size content, and SwiftUI content laid out into that band is not shown.
-@MainActor
-func makeDashboardBackAccessory(nav: DashboardNav) -> NSTitlebarAccessoryViewController {
-    let host = NSHostingView(rootView: TitlebarBackView(nav: nav))
-    host.sizingOptions = []                      // keep the frame below; don't resize to content
-    host.frame = NSRect(x: 0, y: 0, width: 360, height: 28)
-    let accessory = NSTitlebarAccessoryViewController()
-    accessory.view = host
-    accessory.layoutAttribute = .leading
-    return accessory
+    /// "● Connected · LAN · 82%" — values in the secondary colour, separators in the tertiary one.
+    private var statusLine: some View {
+        let parts: [String] = client.isLinked
+            ? ["Connected", client.lanPeerConnected ? "LAN" : "Relay"] + (client.phoneBatteryLevel.map { ["\($0)%"] } ?? [])
+            : ["Disconnected"]
+        return HStack(spacing: 5) {
+            Circle().fill(client.isLinked ? M3.success : M3.outline).frame(width: 8, height: 8)
+            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                if index > 0 { Text("·").foregroundStyle(M3.outline) }
+                Text(part).foregroundStyle(M3.onSurfaceVariant)
+            }
+        }
+        .font(.system(size: 11.5))
+        .lineLimit(1)
+    }
 }

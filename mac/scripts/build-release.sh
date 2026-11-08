@@ -222,13 +222,9 @@ fi
 
 echo "==> package DMG"
 mkdir -p "$OUT"
-STAGE="$(mktemp -d)"
-cp -R "$APP" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
 DMG="$OUT/$SCHEME-$VERSION.dmg"
-rm -f "$DMG"
-hdiutil create -volname "$SCHEME $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
-rm -rf "$STAGE"
+# The install window (background, icon positions, volume icon) is built by make-dmg.sh.
+"$(dirname "$0")/make-dmg.sh" "$APP" "$VERSION" "$DMG"
 
 if [ "$ADHOC" -eq 0 ]; then
   echo "==> sign + notarize DMG"
