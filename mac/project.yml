@@ -14,8 +14,8 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    MARKETING_VERSION: "0.12.0"
-    CURRENT_PROJECT_VERSION: "16"
+    MARKETING_VERSION: "0.12.1"
+    CURRENT_PROJECT_VERSION: "17"
     # Ad-hoc signing so Debug/local builds need no Developer team. Release builds are NOT shipped
     # from this: scripts/build-release.sh re-signs every bundle with Developer ID + hardened runtime
     # and notarizes it (entitlements: Resources/LinkToMac.entitlements).
