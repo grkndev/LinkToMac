@@ -883,7 +883,9 @@ final class RelayClient {
             let bannerTitle = entry.title.isEmpty ? entry.app : "\(entry.app) · \(entry.title)"
             // The phone sends the icon on every post, so iconPNG is normally present; the banner
             // attachment surfaces the source app's icon (WhatsApp, Discord, …).
-            Task { await MacNotifier.post(title: bannerTitle, body: entry.text, iconPNG: iconPNG) }
+            // "from Galaxy S24 Ultra": which phone it came from (the design's banner subtitle).
+            let subtitle = phoneName.map { "from \($0)" }
+            Task { await MacNotifier.post(title: bannerTitle, subtitle: subtitle, body: entry.text, iconPNG: iconPNG) }
         }
     }
 

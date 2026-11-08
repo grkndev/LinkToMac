@@ -59,20 +59,24 @@ enum MacNotifier {
     /// Raise a banner (or, with a repeated `identifier`, update the one already showing). No-op if
     /// the user hasn't authorized notifications. `iconPNG`, when present, is
     /// the source app's icon (PNG bytes) shown as the banner's attachment thumbnail.
-    static func post(title: String, body: String, iconPNG: Data? = nil, identifier: String? = nil) async {
+    static func post(title: String, subtitle: String? = nil, body: String, iconPNG: Data? = nil,
+                     identifier: String? = nil) async {
         requestAuthorizationIfNeeded()
         await pendingAuthorization?.value
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
         else { return }
-        deliver(title: title, body: body, iconURL: iconPNG.flatMap { writeTempIcon($0) }, identifier: identifier)
+        deliver(title: title, subtitle: subtitle, body: body,
+                iconURL: iconPNG.flatMap { writeTempIcon($0) }, identifier: identifier)
     }
 
     /// Build + add the request. `nonisolated` so it runs in `getNotificationSettings`'s off-main
     /// `@Sendable` callback and can re-invoke itself (text-only) if the attachment is rejected.
-    private nonisolated static func deliver(title: String, body: String, iconURL: URL?, identifier: String? = nil) {
+    private nonisolated static func deliver(title: String, subtitle: String? = nil, body: String,
+                                            iconURL: URL?, identifier: String? = nil) {
         let content = UNMutableNotificationContent()
         content.title = title
+        if let subtitle, !subtitle.isEmpty { content.subtitle = subtitle }
         if !body.isEmpty { content.body = body }
         content.sound = .default
         if let iconURL,
@@ -91,7 +95,7 @@ enum MacNotifier {
             // If the attachment made the request invalid, the banner is dropped — re-post it
             // text-only so the notification still appears (the icon is a nice-to-have).
             if error != nil, hadAttachment {
-                deliver(title: title, body: body, iconURL: nil, identifier: identifier)
+                deliver(title: title, subtitle: subtitle, body: body, iconURL: nil, identifier: identifier)
             }
         }
     }
