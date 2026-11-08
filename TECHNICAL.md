@@ -652,10 +652,10 @@ phone panel, a Notifications / Messages tab strip, clip history and Settings.
 | `MacNotifier.swift` | Native banners (`UNUserNotificationCenter`), with a foreground delegate and replace-by-identifier |
 | `ProximityMonitor.swift` / `ProximityConfig.swift` | CoreBluetooth central, RSSI → lock decision (§8); UUID derivation |
 | `ScreenLock.swift` | Locks the screen (§4.3) |
-| `Pairing.swift` / `PairingView.swift` | Room/key generation, Keychain, the v3 QR |
+| `Pairing.swift` / `PairingWindow.swift` | Room/key generation, Keychain, the v3 QR |
 | `LoginItem.swift` | `SMAppService` auto-start at login |
 | `MenuPanel.swift`, `DashboardWindow.swift`, `PhonePanel.swift`, `FeaturePanel.swift`, `ClipHistoryScreen.swift` | The popover and the dashboard: phone identity, Notifications/Messages tabs (the Messages tab has the reply composer), clip history |
-| `SettingsScreen.swift`, `AppearanceSettings.swift`, `RelayScreen.swift`, `ServerSettingsView.swift`, `AboutView.swift`, `DashboardComponents.swift`, `PanelComponents.swift` | Settings, appearance, relay, about, shared M3 components |
+| `SettingsWindow.swift`, `AppearanceSettings.swift`, `AboutView.swift`, `DashboardComponents.swift`, `PanelComponents.swift` | Settings, appearance, relay, about, shared M3 components |
 | `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — sandboxed, so it hands the path over via `linktomac://` (`NSWorkspace.open`; `NSExtensionContext.open` does nothing for a Finder share extension). Inert under ad-hoc signing, runs in the Developer-ID build |
 
 ### 4.1 RelayClient (Swift)
@@ -1348,10 +1348,10 @@ mac/
     MacNotifier.swift            native banners (foreground delegate, replace-by-identifier)
     ProximityMonitor.swift / ProximityConfig.swift   BLE central, RSSI → lock; UUID derivation
     ScreenLock.swift             SACLockScreenImmediate / CGSession
-    Pairing.swift / PairingView.swift   room/key, Keychain, v3 QR
+    Pairing.swift / PairingWindow.swift   room/key, Keychain, v3 QR
     LoginItem.swift              SMAppService auto-start
     MenuPanel.swift / DashboardWindow.swift / PhonePanel.swift / FeaturePanel.swift / ClipHistoryScreen.swift   popover + dashboard
-    SettingsScreen.swift / AppearanceSettings.swift / RelayScreen.swift / ServerSettingsView.swift / AboutView.swift   settings surfaces
+    SettingsWindow.swift / AppearanceSettings.swift / AboutView.swift   settings surfaces
     DashboardComponents.swift / PanelComponents.swift   shared M3 components
   ShareExtension/                Finder ▸ Share ▸ "Send to Phone" (needs a Developer ID build to run; hands the path over via linktomac://)
   Tests/                         swift-testing: AckWindow, FileSender (resume), FileInbox, FileBatchPlanner, FileFrame, FileFrameVectors, BurstCounter
