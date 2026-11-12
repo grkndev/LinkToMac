@@ -51,6 +51,17 @@ final class RelayClient {
     private(set) var phoneCharging: Bool?
     private(set) var phoneName: String?
 
+    /// What the phone is playing, from its `stat` frames (`media` / `mediaArt`). The phone sends it
+    /// when it changes, so `NowPlaying.positionMs(at:)` advances the progress locally. nil = nothing
+    /// is playing, or the phone hasn't said yet.
+    private(set) var nowPlaying: NowPlaying?
+    /// Why the phone can't show media (`"off"` = "Mirror media" is off, `"no-access"` = notification
+    /// access missing). nil when it can, or it hasn't said.
+    private(set) var mediaUnavailableReason: String?
+    /// The cover of the track whose `NowPlaying.id` is `mediaArtID`; only shown while they match.
+    private(set) var mediaArtData: Data?
+    private(set) var mediaArtID: String?
+
     /// One mirrored phone notification. `key` is the Android `sbn.key` — stable across an update of
     /// the same notification, so it drives dedup/update/removal AND the SwiftUI identity: a fresh
     /// `UUID()` per upsert made every in-place update diff as delete+insert (row rebuilt, state lost).
@@ -361,6 +372,25 @@ final class RelayClient {
             return
         }
         Task { [weak self] in try? await self?.send(.stat(nonce: nonce, ct: ct)) }
+    }
+
+    /// Ask the phone to play / pause / skip / seek / set its volume. Travels as a small `stat`
+    /// (`{"mediaCmd":…}`) over both transports like every other stat — the phone keeps one link joined.
+    /// The seek and the volume are applied here at once, so a slider doesn't snap back for the
+    /// moment before the phone's own report arrives.
+    func mediaCommand(_ command: MediaCommand) {
+        guard isLinked else { return }
+        switch command {
+        case let .seek(ms):
+            nowPlaying?.posMs = max(0, ms)
+            nowPlaying?.receivedAt = Date()
+        case let .volume(level):
+            nowPlaying?.vol = level
+        default: break
+        }
+        let payload = command.statJSON
+        sendStat(payload)
+        onLocalStat?(payload)
     }
 
     /// Compose + send an SMS reply to `addr` (a 1:1 thread's address). Appends an optimistic
@@ -836,6 +866,34 @@ final class RelayClient {
         if let level = stat.level { phoneBatteryLevel = min(max(level, 0), 100) }
         if let charging = stat.charging { phoneCharging = charging }
         if let name = stat.name, !name.isEmpty { phoneName = name }
+        applyMedia(json)
+    }
+
+    /// The media fields of a phone `stat`. A stat that carries none (battery, name…) leaves the card
+    /// as it is — `NowPlaying.parse` says so with `.absent`.
+    private func applyMedia(_ json: String) {
+        guard let raw = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else { return }
+        switch NowPlaying.parse(stat: raw) {
+        case .absent:
+            break
+        case .cleared:
+            nowPlaying = nil
+            mediaUnavailableReason = nil
+            mediaArtData = nil
+            mediaArtID = nil
+        case let .unavailable(reason):
+            nowPlaying = nil
+            mediaUnavailableReason = reason.isEmpty ? "unknown" : reason
+            mediaArtData = nil
+            mediaArtID = nil
+        case let .track(track):
+            nowPlaying = track
+            mediaUnavailableReason = nil
+        }
+        if let art = NowPlaying.art(stat: raw) {
+            mediaArtID = art.id
+            mediaArtData = art.jpeg
+        }
     }
 
     private struct StatPayload: Decodable {
@@ -1058,6 +1116,10 @@ final class RelayClient {
         phoneBatteryLevel = nil
         phoneCharging = nil
         phoneName = nil
+        nowPlaying = nil
+        mediaUnavailableReason = nil
+        mediaArtData = nil
+        mediaArtID = nil
         proxState = nil
         proxRSSI = nil
         onPairingChanged?()

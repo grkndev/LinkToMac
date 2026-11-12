@@ -243,19 +243,10 @@ struct OverviewPage: View {
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(M3.surfaceContainer))
     }
 
-    // MARK: - Media (roadmap)
+    // MARK: - Media
 
     private var mediaCard: some View {
-        HStack(spacing: 12) {
-            DSCircleIcon(icon: "music.note")
-            Text("Media controls").font(.system(size: 13, weight: .semibold)).foregroundStyle(M3.onSurface)
-            Spacer(minLength: 0)
-            SoonPill()
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 58)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(M3.surfaceContainer))
-        .opacity(0.6)
+        MediaCard(client: client)
     }
 }
 

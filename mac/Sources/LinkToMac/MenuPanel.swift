@@ -34,6 +34,7 @@ struct MenuPanel: View {
             identity
             if client.isLinked {
                 chips
+                MediaPanelRow(client: client)
                 if let clip = client.lastClip, !clip.isEmpty { lastCopy(clip) }
                 if let incoming = client.incomingFile { incomingCard(incoming) }
                 dropHint
