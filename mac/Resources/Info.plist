@@ -23,8 +23,11 @@
 	<key>LSUIElement</key>
 	<false/>
 	<!-- The Finder Share extension ("Send to Phone") is sandboxed and can't reach the phone
-	     itself, so it hands the chosen file's path back to this app as linktomac://send?path=…
-	     See ShareExtension/ShareViewController.swift and AppDelegate's open-URL handler. -->
+	     itself, so it hands the chosen file back to this app as linktomac://send?id=<uuid>. The URL
+	     names no file (anything can open a URL): the id keys a one-shot record in the extension's
+	     container. See Sources/LinkToMac/ShareHandoff.swift, ShareExtension/ShareViewController.swift
+	     and AppDelegate's open-URL handler. -->
+	<!-- (The id is not a secret, just an unguessable key — it is only ever useful once.) -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

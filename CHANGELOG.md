@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (Mac)
+
+### Changes
+- **The Finder "Send to Phone" hand-off no longer puts a file path in a URL.** `linktomac://send?path=…` could be opened by any local app or web page, making the Mac send any readable file to your phone. The URL now carries only a one-time id; the path is recorded by the share extension in its own sandbox container and used once (it expires after two minutes). Opening `linktomac://send?path=…` by hand now does nothing.
+
 ## v0.12.1 (2026-11-07)
 
 Full notes: [`release-notes/v0.12.1.md`](release-notes/v0.12.1.md). **Android only** (0.12.0 → 0.12.1); the Mac app stays at 0.12.0.
