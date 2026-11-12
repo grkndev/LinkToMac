@@ -1,6 +1,6 @@
 # Teşhis raporu ve log gizliliği: plan
 
-> **Durum (2026-11-08):** Plan. Henüz uygulanmadı.
+> **Durum (2026-11-12):** Uygulandı (`feat/diagnostics`, 0.13.0). Plandan sapmalar ve doğrulama durumu §12'de.
 
 Tarih: 2026-11-08 · Kapsam: Android uygulaması (`mobile/`): log üretimi, Logs ve Daemon Log
 paylaşımı, yeni **Send diagnostics** ekranı, GitHub issue şablonu, `ApplicationExitInfo`.
@@ -258,10 +258,40 @@ APK olduğu için sürüm numarasını yükseltir (0.12.2 ya da 0.13.0, §10).
 
 ## 11. Kabul ölçütleri
 
-- [ ] `sanitize.test.ts` geçiyor, canary seti hiçbir çıktıda yok.
+- [x] `sanitize.test.ts` geçiyor, canary seti hiçbir çıktıda yok.
 - [ ] Logs, Daemon Log ve Diagnostics çıktılarında pano metni, dosya adı, adres, Mac/telefon adı yok.
 - [ ] Send diagnostics önizlemesi gönderilecek metnin **aynısı**.
 - [ ] Hiçbir şey otomatik gönderilmiyor (ağ trafiği yok).
 - [ ] OTA, 0.12.1 APK'sında çalışıyor, "Son kapanışlar" yoksa atlanıyor.
 - [ ] Aşama 2: kapanış nedenleri raporda, bekçi betiği lint'te, kaynakta hassas log satırı kalmadı.
 - [ ] README/TECHNICAL gizlilik metni güncel.
+
+## 12. Uygulama notları (2026-11-12)
+
+Dal `feat/diagnostics`, hepsi tek sürümde (0.13.0). Plandan farklar ve yan bulgular:
+
+- **Envanter genişledi (§2).** Kaynaktaki taramada tabloda olmayan ~10 satır daha çıktı ve kaynakta temizlendi:
+  alınan dosya adları (`ClipForegroundService.kt` `file: couldn't save` / `file saved to Downloads`),
+  `pairAuto` içindeki IP'ler (`SelfAdbModule.kt:326, 334`), `PickActivity.kt` içindeki `content://` URI'si ve
+  `ClipboardAgent.java:241, 302, 326, 558` içindeki istisna metinleri. URI/yol taşıyabilen `e.message` satırlarından
+  `share: metadata query failed`, `pick: metadata query failed` ve `openFile failed` istisna **sınıf adına** indi;
+  geri kalan `${e.message}` satırları teşhis değeri için bilerek duruyor ve sınırda temizleniyor.
+- **Temizleyicinin sınırı.** Desenler yalnızca tanıyabildiği biçimleri yakalar (URL, IP, yol, paket adı, bilinen ad).
+  OEM `description` ya da bir hata metni içinde *çıplak* bir kelime (ör. bir dosya adı) yakalanamaz. İlk test
+  fixture'ım bunu gösterdi; testi gevşetmek yerine fixture'ları bu alanlara gerçekte girebilecek biçimlere çevirdim.
+  Bu, kaynak kuralının (§4.2) ve önizlemenin (§4.4) neden var olduğunun somut örneği.
+- **Bekçi (§4.2)** tek bir regex yerine küçük bir tokenizer: Kotlin'in iç içe `${if (…) "a" else "b"}` ifadeleri
+  basit bir tarama ile yanlış okunuyordu. İlk çalıştırmada 6 bulgu çıktı; hepsi incelendi ve yanlış pozitif çıktı
+  (`victim.key` = temizlenmiş transfer id'si, kendi güncelleme APK adı, kendi paket adı, `launchDaemon`'a argüman
+  olarak giden `secret` ve yalnızca `!= null` kontrolü). `launchDaemon` dönüşü komutun stdout'u (`LAUNCHED`), gizli
+  anahtar log'a girmiyor. `!= null` kontrolü genel olarak güvenli sayıldı, kalan dördü `// log-privacy: ok — <neden>`
+  ile işaretlendi. Testleri düzeltmeden önceki gerçek sızıntı satırlarını çalıştırır.
+- **Issue Form önceden doldurma** `body=` ile değil alan id'siyle (`summary`) yapılır; `issueUrl` URL ~7,5 KB'ı
+  aşarsa özeti kısaltır.
+- **TS 6 + `bun:test`.** TS 6 `@types/*` paketlerini otomatik yüklemiyor; `tsconfig`'e `types` eklemek RN'in global
+  tiplerini bozabileceğinden `@types/bun` yalnızca test dosyalarında `/// <reference types="bun" />` ile alınır.
+- `.github/ISSUE_TEMPLATE/config.yml` iletişim bağlantısı `mailto:` kullanır; GitHub'ın bunu bağlantı olarak
+  gösterdiği ilk yayında kontrol edilmeli.
+
+**Henüz doğrulanmadı (cihaz gerekir):** §7'deki canary uçtan uca senaryosu, `getExitReasons`'ın gerçek bir kapanışla
+dolması, eski APK'da OTA ile bölümün atlanması. Birim testleri, `tsc`, lint ve JVM testleri geçiyor.

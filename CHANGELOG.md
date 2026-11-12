@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.13.0 (2026-11-12)
+
+Full notes: [`release-notes/v0.13.0.md`](release-notes/v0.13.0.md). **Android only** (0.12.1 → 0.13.0); the Mac app stays at 0.12.1.
+
+### Features
+- **Send diagnostics** (Settings ▸ Support) — builds a bug report on the phone (versions, device model, link and permission state, why Android last ended the app, sanitized log tails), shows exactly what it contains, and lets you share it or open a pre-filled GitHub issue. Nothing is sent automatically and nothing goes through the clipboard sync.
+- **Why the app was killed** — the report includes Android's own record of why it ended the app's process (`ApplicationExitInfo`: low memory, user-requested, crash, ANR, …), the one direct evidence of the silent One UI / lmkd kills.
+- **GitHub bug report form** (`.github/ISSUE_TEMPLATE`) with a "this page is public" warning and a `summary` field the app pre-fills.
+
+### Changes
+- **Logs no longer expose your data.** Logs and Daemon Log (on screen and on Share) have clipboard text, file names, addresses, your Mac's and phone's names, package names, URIs and the pairing room/key removed. Debug builds still draw the raw log on screen; Share is always sanitized.
+- The app and daemon no longer write clipboard text, file names, addresses or package names into their log lines; they log lengths, counts and states. The daemon dex is rebuilt.
+
+### Internal
+- `sanitize.ts` (pure, idempotent) + `build-report.ts`, tested with `bun test` (`bun run test`); `scripts/check-log-privacy.mjs` fails `bun run lint` on a log call that interpolates user data.
+- `getExitReasons(limit)` on the `selfadb` module (+ `ExitReasonsTest`); the JS feature-detects it.
+- Native code changed, so this ships as a new APK (new `runtimeVersion`), not an OTA update.
+
 ## v0.12.1 (2026-11-07)
 
 Full notes: [`release-notes/v0.12.1.md`](release-notes/v0.12.1.md). **Android only** (0.12.0 → 0.12.1); the Mac app stays at 0.12.0.
