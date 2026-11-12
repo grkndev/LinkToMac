@@ -15,6 +15,8 @@ export function usePermissionSettings() {
   const [notifMirrorOn, setNotifMirrorOn] = useState(true);
   const [notifAccess, setNotifAccess] = useState<boolean | null>(null);
   const [smsMirrorOn, setSmsMirrorOn] = useState(true);
+  // Null until read, and stays null on a binary that predates media mirroring (the row is hidden).
+  const [mediaMirrorOn, setMediaMirrorOn] = useState<boolean | null>(null);
   const [smsAccess, setSmsAccess] = useState<boolean | null>(null);
   const [sendSmsAccess, setSendSmsAccess] = useState<boolean | null>(null);
   // True once Android has refused an SMS permission without prompting: only App info can grant it
@@ -66,6 +68,11 @@ export function usePermissionSettings() {
     SelfAdb.getSmsForwarding()
       .then(setSmsMirrorOn)
       .catch(() => {});
+    if (typeof SelfAdb.getMediaForwarding === 'function') {
+      SelfAdb.getMediaForwarding()
+        .then(setMediaMirrorOn)
+        .catch(() => {});
+    }
     recheckGrants();
 
     const sub = AppState.addEventListener('change', (next) => {
@@ -87,6 +94,11 @@ export function usePermissionSettings() {
   const toggleSmsMirror = (on: boolean) => {
     setSmsMirrorOn(on);
     SelfAdb.setSmsForwarding(on).catch(() => {});
+  };
+
+  const toggleMediaMirror = (on: boolean) => {
+    setMediaMirrorOn(on);
+    SelfAdb.setMediaForwarding(on).catch(() => {});
   };
 
   // Auto-lock needs Nearby Devices to advertise the BLE beacon; ask before enabling.
@@ -171,6 +183,8 @@ export function usePermissionSettings() {
     notifMirrorOn,
     toggleNotifMirror,
     notifAccess,
+    mediaMirrorOn,
+    toggleMediaMirror,
     smsMirrorOn,
     toggleSmsMirror,
     smsAccess,

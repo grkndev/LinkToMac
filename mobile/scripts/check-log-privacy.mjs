@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 
 /** Variable/property names that hold user data. Matched as whole words inside a log call's code. */
 export const FORBIDDEN = [
-  'name', 'display', 'text', 'body', 'title',
+  'name', 'display', 'text', 'body', 'title', 'artist', 'album',
   'url', 'relayUrl', 'host', 'pairHost', 'connHost', 'addr', 'address',
   'pkg', 'srcPkg', 'packageName', 'uri', 'path', 'authority', 'getAuthority',
   'room', 'key', 'token', 'secret', 'password',

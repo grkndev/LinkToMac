@@ -139,6 +139,11 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   getSmsForwarding(): Promise<boolean>;
   /** pause/resume mirroring SMS to the Mac without revoking the OS permission. */
   setSmsForwarding(enabled: boolean): Promise<void>;
+  /** whether the now-playing media is mirrored to the Mac (persisted, default **false**). Absent in
+   *  binaries older than the media feature — feature-detect before calling. */
+  getMediaForwarding(): Promise<boolean>;
+  /** turn media mirroring (and the Mac's controls) on/off. Needs notification access, never ADB. */
+  setMediaForwarding(enabled: boolean): Promise<void>;
   /** force an immediate SMS (re)sync to the Mac (used right after granting access). */
   syncSms(): Promise<void>;
   /** whether we hold SEND_SMS (requested lazily, on the first reply attempt). */

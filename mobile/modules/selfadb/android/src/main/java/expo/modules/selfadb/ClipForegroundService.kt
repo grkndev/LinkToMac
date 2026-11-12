@@ -78,6 +78,9 @@ class ClipForegroundService : Service() {
   /** Reads + live-observes the SMS store, forwarding to the Mac over the `sms` channel. Started
    *  only when the user enabled message mirroring AND granted READ_SMS. */
   private var sms: SmsMirror? = null
+  /** What the phone is playing, mirrored to the Mac (and its controls). Started only when the user
+   *  turned on "Mirror media"; needs notification access, never ADB. */
+  private var media: MediaMirror? = null
 
   /** The chunked `file` transfer currently in flight, so inbound [FileFrame.OP_ACK] frames can
    *  find its window. Single-slot on purpose: [shareExec] runs one transfer at a time. */
@@ -193,6 +196,8 @@ class ClipForegroundService : Service() {
     refreshShareShortcuts()
     // And the SMS mirror (live observer), if enabled + permitted. Backfill runs on the peer-online edge.
     maybeStartSmsMirroring()
+    // And the media mirror, if the user turned it on. Needs no permission of its own.
+    maybeStartMediaMirroring()
     // Look for a newer native release now and then, and fetch its APK in the background. Idempotent.
     AppUpdater.get(this).schedule()
     // A manual capture rides in on the same intent, handled only after the setup above: the
@@ -366,7 +371,11 @@ class ClipForegroundService : Service() {
         writeRemoteText(text)
         ClipBus.macClip(text, System.currentTimeMillis().toDouble())
       },
-      onStatReceived = { json -> ClipBus.macStat(json); rememberMacName(json) },
+      onStatReceived = { json ->
+        ClipBus.macStat(json)
+        rememberMacName(json)
+        handleMediaCommand(json)
+      },
       onFileReceived = { bytes -> applyFile(bytes) },
       onSmsReceived = { json -> handleInboundSms(json) },
       onStatus = { transport, status, peerOnline, error, attempt ->
@@ -378,6 +387,7 @@ class ClipForegroundService : Service() {
         if (peerOnline && !lastPeerOnline) {
           pushBatteryStat(force = true)
           sms?.backfill()
+          pushMediaSnapshot()
         }
         lastPeerOnline = peerOnline
       },
@@ -1376,6 +1386,50 @@ class ClipForegroundService : Service() {
     }
   }
 
+  // ---- Media mirroring (MediaMirror <-> Mac) -----------------------------------
+  // Rides the `stat` frame (no new frame type, so the relay needs no change). Gated by the
+  // "Mirror media" switch (default OFF: what you listen to is personal). NOT gated by ADB — the
+  // only grant it wants is the notification access the app already asks for.
+
+  private fun maybeStartMediaMirroring() {
+    if (media != null || !getMediaForwarding(this)) return
+    media = MediaMirror(
+      this,
+      send = { json -> conn?.sendStat(json) },
+      log = { ClipBus.log(it) },
+    ).also { it.start() }
+  }
+
+  /** The Mac (re)connected: give it the card. When mirroring is off, say so — otherwise the Mac
+   *  can't tell "off" from "nothing playing" and would show the wrong empty state. */
+  private fun pushMediaSnapshot() {
+    val m = media
+    if (m != null) m.pushSnapshot() else conn?.sendStat(MediaState.statUnavailable("off"))
+  }
+
+  /** A `mediaCmd` in a `stat` from the Mac. A stat without one is the common case. */
+  private fun handleMediaCommand(json: String) {
+    if (media == null || !json.contains("mediaCmd")) return
+    MediaState.parseCommand(json)?.let { media?.control(it) }
+  }
+
+  /** The notification listener (re)bound: a mirror that had no access can look again. */
+  fun refreshMedia() {
+    media?.refresh()
+  }
+
+  /** Live toggle of media mirroring. Persisted so a START_STICKY restart with no JS honors it. */
+  fun applyMediaForwarding(enabled: Boolean) {
+    setMediaForwarding(this, enabled)
+    if (enabled) {
+      maybeStartMediaMirroring()
+      media?.pushSnapshot()
+    } else {
+      media?.stop(reason = "off")
+      media = null
+    }
+  }
+
   override fun onDestroy() {
     AppUpdater.get(this).cancelSchedule()
     shareExec.shutdownNow()
@@ -1386,6 +1440,8 @@ class ClipForegroundService : Service() {
     bleAdvertiser = null
     sms?.stop()
     sms = null
+    media?.stop(reason = null) // the link is going down too; nothing to tell the Mac
+    media = null
     bridge?.stop()
     bridge = null
     instance = null
@@ -1675,6 +1731,7 @@ class ClipForegroundService : Service() {
     private const val KEY_NOTIF_INCLUDE_PKGS = "notifIncludePkgs"
     private const val KEY_NOTIF_EXCLUDE_PKGS = "notifExcludePkgs"
     private const val KEY_SMS_FORWARDING = "smsForwarding"
+    private const val KEY_MEDIA_FORWARDING = "mediaForwarding"
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     /** The Mac's device name, learned from its `stat` frames — see [rememberMacName]. */
     private const val KEY_MAC_NAME = "macName"
@@ -1840,6 +1897,18 @@ class ClipForegroundService : Service() {
     fun setSmsForwarding(ctx: Context, enabled: Boolean) {
       ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
         .putBoolean(KEY_SMS_FORWARDING, enabled)
+        .apply()
+    }
+
+    /** Whether the phone's now-playing media is mirrored to the Mac (default **false**: what you
+     *  listen to is personal, so it is opt-in). Persisted in PREFS_UI (survives unpair). */
+    fun getMediaForwarding(ctx: Context): Boolean =
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .getBoolean(KEY_MEDIA_FORWARDING, false)
+
+    fun setMediaForwarding(ctx: Context, enabled: Boolean) {
+      ctx.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_MEDIA_FORWARDING, enabled)
         .apply()
     }
 

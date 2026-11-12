@@ -648,6 +648,21 @@ class SelfAdbModule : Module() {
       }
     }
 
+    /** Whether the now-playing media is mirrored to the Mac (default false — opt-in). */
+    AsyncFunction("getMediaForwarding") {
+      ClipForegroundService.getMediaForwarding(appCtx)
+    }
+
+    /** Turn media mirroring on/off. Needs notification access only — no ADB, no daemon. */
+    AsyncFunction("setMediaForwarding") { enabled: Boolean ->
+      val svc = ClipForegroundService.instance
+      if (svc != null) {
+        svc.applyMediaForwarding(enabled)
+      } else {
+        ClipForegroundService.setMediaForwarding(appCtx, enabled)
+      }
+    }
+
     /** Force an immediate SMS (re)sync to the Mac — used right after the access grant. */
     AsyncFunction("syncSms") {
       ClipForegroundService.instance?.startSmsMirroring()
