@@ -837,7 +837,7 @@ class ClipForegroundService : Service() {
           )
         }
       } catch (e: Exception) {
-        ClipBus.log("folder walk failed: ${e.message}")
+        ClipBus.log("folder walk failed (${e.javaClass.simpleName})")
         problems += "Couldn't read that folder"
       }
     }
@@ -886,7 +886,7 @@ class ClipForegroundService : Service() {
         }
       }
     } catch (e: Exception) {
-      ClipBus.log("share send failed: ${e.message}")
+      ClipBus.log("share send failed (${e.javaClass.simpleName})")
       toastOnMain("Couldn't send that")
     } finally {
       items.forEach { it.staged?.delete() }

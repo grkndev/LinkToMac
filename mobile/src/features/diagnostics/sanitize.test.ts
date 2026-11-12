@@ -111,6 +111,16 @@ describe('rules', () => {
     expect(sanitizeLine('addr 02:00:5e:10:00:ff')).toBe('addr <redacted>');
   });
 
+  test('a real SecurityException line from a phone: the refused URI is scrubbed, our own package stays', () => {
+    // Logged verbatim by an APK before the source-side fix (ShareActivity: "send not started: ${e.message}").
+    const real =
+      'share: send not started: com.grkndev.linktomac.dev has no access to content://media/external/downloads/1000059280';
+    const out = sanitizeLine(real);
+    expect(out).toBe('share: send not started: com.grkndev.linktomac.dev has no access to <file>');
+    expect(out).not.toContain('content://');
+    expect(sanitizeLine(out)).toBe(out); // idempotent
+  });
+
   test('loopback is kept (the daemon bridge), other addresses still go', () => {
     // Real line from a phone whose daemon is down.
     const real =

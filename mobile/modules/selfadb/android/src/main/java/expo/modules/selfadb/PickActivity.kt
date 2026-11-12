@@ -69,7 +69,7 @@ class PickActivity : Activity() {
         }
       }
     } catch (e: Exception) {
-      ClipBus.log("pick: not started: ${e.message}")
+      ClipBus.log("pick: not started (${e.javaClass.simpleName})")
       Toast.makeText(this, "Couldn't send that", Toast.LENGTH_SHORT).show()
     }
     finish()

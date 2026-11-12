@@ -259,11 +259,11 @@ APK olduğu için sürüm numarasını yükseltir (0.12.2 ya da 0.13.0, §10).
 ## 11. Kabul ölçütleri
 
 - [x] `sanitize.test.ts` geçiyor, canary seti hiçbir çıktıda yok.
-- [ ] Logs, Daemon Log ve Diagnostics çıktılarında pano metni, dosya adı, adres, Mac/telefon adı yok.
+- [x] Logs, Daemon Log ve Diagnostics çıktılarında pano metni, dosya adı, adres, Mac/telefon adı yok. (release derlemede cihazda doğrulandı, §12)
 - [ ] Send diagnostics önizlemesi gönderilecek metnin **aynısı**.
 - [ ] Hiçbir şey otomatik gönderilmiyor (ağ trafiği yok).
 - [ ] OTA, 0.12.1 APK'sında çalışıyor, "Son kapanışlar" yoksa atlanıyor.
-- [ ] Aşama 2: kapanış nedenleri raporda, bekçi betiği lint'te, kaynakta hassas log satırı kalmadı.
+- [x] Aşama 2: kapanış nedenleri raporda, bekçi betiği lint'te, kaynakta hassas log satırı kalmadı. (cihazda doğrulandı, §12)
 - [ ] README/TECHNICAL gizlilik metni güncel.
 
 ## 12. Uygulama notları (2026-11-12)
@@ -297,5 +297,39 @@ Dal `feat/diagnostics`, hepsi tek sürümde (0.13.0). Plandan farklar ve yan bul
 - `.github/ISSUE_TEMPLATE/config.yml` iletişim bağlantısı `mailto:` kullanır; GitHub'ın bunu bağlantı olarak
   gösterdiği ilk yayında kontrol edilmeli.
 
-**Henüz doğrulanmadı (cihaz gerekir):** §7'deki canary uçtan uca senaryosu, `getExitReasons`'ın gerçek bir kapanışla
-dolması, eski APK'da OTA ile bölümün atlanması. Birim testleri, `tsc`, lint ve JVM testleri geçiyor.
+**Doğrulama durumu:** Birim testleri, `tsc`, lint ve JVM testleri geçiyor. Cihaz testi aşağıda.
+
+### Cihazda doğrulama (2026-11-12, S24 Ultra, Android 17)
+
+Debug dev client ve ardından **release** varyantı (`__DEV__` kapalı) kuruldu; dev uygulama güncel Mac'e yeniden eşleştirildi.
+
+**Geçenler.** Pano: telefondan canary metin gönderildi, log'da yalnızca `clip [manual]: 27 chars`, Mac panosuna ulaştı.
+Dosya: canary adlı PDF paylaşıldı, log'da `share -> Mac file (42 B, 1 chunk(s), id=…)` ve `share: file … delivered`
+(ad yok), dosya Mac'e düştü. Release derlemede Settings'te Developer bölümü yok; Logs, Daemon Log ve Diagnostics raporu
+(72 satır) gerçek değerler (relay host, LAN IP, Mac ve telefon adı, canary) için tarandı: sızıntı yok. "JS bundle:
+embedded in the APK" (beklenmedik OTA gelmedi). "Recent exits" gerçek OS kayıtlarıyla doldu (`PACKAGE_UPDATED`,
+`USER_REQUESTED`, `[FORCE STOP]`). Share report Android paylaşım sayfasını rapor metniyle açtı.
+
+**Cihazın bulduğu hatalar (düzeltildi).** (1) GitHub Android uygulaması `template=` ve form alanlarını yok sayıp yalnızca
+başlığı ve `body=`'yi dolduruyor, özet kayboluyordu: artık `summary=` ve `body=` birlikte. (2) Sanitizer `127.0.0.1`
+(daemon köprüsü) adresini `<host>` yapıyordu: loopback artık korunuyor. (3) Debug derlemede Metro paketi "OTA update"
+diye yazılıyordu: "dev server (debug build)". (4) `ShareActivity`'deki `e.message` satırı, reddedilen `content://` URI'sini
+ve paket adını log'a yazdı (SecurityException mesajı bunu her zaman içerir); bu ve kullanıcı dosya/URI'si üzerinde çalışan üç
+benzer satır (klasör gezme, paylaşım gönderimi, picker) istisna sınıf adına çevrildi. Sanitizer bu gerçek satırı zaten
+`…has no access to <file>` yapıyor (test fixture'ı olarak eklendi), yani sınırdaki katman kaynaktaki açığı kapatmıştı.
+
+**Mac Share extension (Developer ID ile yerel imzalı, notarize edilmemiş derleme).** `fix/share-handoff` derlemesi
+geçici olarak `/Applications`'a kuruldu, sonra orijinal geri konuldu. Extension `NSSharingService` üzerinden (Finder'daki
+Paylaş menüsünün sistem yolu) çalıştırıldı: "Send to Phone" sunuldu, dosya telefona düştü. Bu, tasarımın tek varsayımını
+(uygulamanın extension container'ını bulabilmesi) doğruladı. Ek bulgu: macOS başka bir uygulamanın container'ını
+listelemeye çalışan süreci engelliyor (`Operation not permitted`), yani kayıt dosyasına dışarıdan erişim işletim sistemi
+düzeyinde de kapalı. Eski `path=` biçimi, uydurma `id` ve path-traversal `id`: uygulamaya 2 Apple Event ulaştı, her biri
+tam bir `NSLog` üretti, telefona hiçbir şey gitmedi, `/etc/hosts` gitmedi. (`NSLog` metni birleşik log'da maskeli
+olduğundan "ignored" yazısı doğrudan görülemedi; sonuç bu dolaylı kanıta ve birim testlerine dayanıyor.)
+
+**Doğrulanmadı.** Eski APK'ya OTA ile gelen JS'in "Recent exits"i atlaması (eski APK ve yayınlanmış bir OTA gerekir);
+`ShareActivity`'deki yeni satırın cihazda yeniden çalıştırılması (yalnızca derlendi); notarize edilmiş derleme;
+dosya gönderiminin Mac→telefon yönünde ve çoklu dosyada denenmesi.
+
+**Gözlem (bu işle ilgisiz).** `.dev` varyantının release derlemesi, gerçek release APK'sını "yeni sürüm" diye önerip indirmeyi
+dener ve "Built for a different app" ile başarısız olur; debug derlemede bu pencere `__DEV__` ile gizli.
