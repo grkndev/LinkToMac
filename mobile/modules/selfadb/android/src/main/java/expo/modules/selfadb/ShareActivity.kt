@@ -124,7 +124,9 @@ abstract class ShareActivity : Activity() {
         // that lands as a toast rather than an uncaught exception on this thread.
         ClipForegroundService.submitShare(this, refs, disposition)
       } catch (e: Exception) {
-        ClipBus.log("share: send not started: ${e.message}")
+        // Class name only: a SecurityException's message embeds the content URI and the package that
+        // was refused (seen on a real phone), i.e. the shared file's address.
+        ClipBus.log("share: send not started (${e.javaClass.simpleName})")
         staged.forEach { it.delete() } // nothing will pick them up now; don't leave copies behind
         runOnUiThread { toast(COULD_NOT_SEND) }
       }
@@ -165,7 +167,7 @@ abstract class ShareActivity : Activity() {
           }
         }
     } catch (e: Exception) {
-      ClipBus.log("share: metadata query failed: ${e.message}")
+      ClipBus.log("share: metadata query failed (${e.javaClass.simpleName})")
     }
     return Meta(name ?: uri.lastPathSegment ?: "shared", size)
   }

@@ -9,13 +9,9 @@ import { useIcons, type IconSource } from "@/components/icons";
 import { Group, useM3Colors } from "@/components/m3";
 import { M3Screen } from "@/components/m3-screen";
 import { GroupRow, InfoRow } from "@/components/rows";
+import { CONTACT_EMAIL, PROFILE_URL, RELEASES_URL, REPO_SLUG, REPO_URL } from "@/constants/links";
 import { Spacing } from "@/constants/theme";
 import { useAppUpdate } from "@/features/updates/use-app-update";
-
-const REPO_URL = "https://github.com/grkndev/LinkToMac";
-const PROFILE_URL = "https://grkn.dev";
-const RELEASES_URL = "https://github.com/grkndev/LinkToMac/releases";
-const CONTACT_EMAIL = "info@grkn.dev";
 
 const open = (url: string) => {
   Linking.openURL(url).catch(() => {});
@@ -116,7 +112,7 @@ export default function AboutScreen() {
           colors={colors}
           leading={glyph(icons.code)}
           label="Source code"
-          supporting="github.com/grkndev/LinkToMac"
+          supporting={`github.com/${REPO_SLUG}`}
           trailing={external}
           onClick={() => open(REPO_URL)}
         />

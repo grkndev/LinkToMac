@@ -1165,6 +1165,23 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   becomes a path, sizes and chunk lengths are capped (1 GiB, ≤ one chunk), and a received file is
   never overwritten. The shell daemon refuses to read a clipboard-image URI its setter couldn't read
   itself (confused-deputy guard, §3.4).
+- **Android logs carry no user data — enforced twice, and nothing is sent automatically.** The relay has its
+  own rule (room-id prefix + ciphertext length only); this is the phone's. (1) *At the source:* a
+  `ClipBus.log` / daemon `log` / Logs-screen `append` call logs lengths, counts, states and exception
+  *class* names — never clipboard text, file names, hosts/IPs, package names, URIs/paths or the pairing
+  secrets. `mobile/scripts/check-log-privacy.mjs` (chained after `expo lint`) fails the build on an
+  interpolated `text`/`name`/`url`/`host`/`pkg`/`uri`/…; a reviewed exception carries a
+  `// log-privacy: ok — <reason>` comment. `e.message` stays allowed (free text, so (2) cleans it).
+  (2) *At the boundary:* Logs, Daemon Log and the Diagnostics report draw and share
+  `src/features/diagnostics/sanitize.ts` output — idempotent patterns for clipboard lines, file names,
+  URLs/IPs/hosts, content URIs and paths, packages, e-mail/phone/tokens, plus the runtime-known Mac and
+  phone names, relay host and pairing secrets. It is best-effort (a bare word can't be recognised), which
+  is why the source rule exists and why **Settings ▸ Send diagnostics** previews exactly the text that
+  Share sends. Only a `__DEV__` build draws the raw log, and Share is sanitized even there. The report
+  also carries `ApplicationExitInfo` (`getExitReasons`) — the OS's own record of why it ended the app's
+  process, the one direct evidence of the silent One UI / lmkd kills (issues #29–#31). There is no
+  telemetry and no automatic upload; the report goes nowhere until the person taps Share or opens the
+  pre-filled GitHub issue (summary only, sent as the form's `summary` field id *and* as `body=`: the GitHub Android app ignores form fields and reads only `body=`).
 - **Updates are signed.** The Mac's Sparkle appcast entries carry an EdDSA signature
   (`SUPublicEDKey` in `Info.plist`; the private half lives in the release machine's login Keychain), and
   the Mac app itself is Developer-ID signed and notarized. The Android app downloads a newer APK from the

@@ -153,7 +153,7 @@ class FileInbox(
   private fun evictOldestStale(): Boolean {
     val cutoff = System.currentTimeMillis() - staleMs
     val victim = partials.entries.filter { it.value.touched < cutoff }.minByOrNull { it.value.touched } ?: return false
-    log("file: evicting idle transfer ${victim.key} to make room")
+    log("file: evicting idle transfer ${victim.key} to make room") // log-privacy: ok — key is the sanitized transfer id
     discard(victim.key)
     return true
   }

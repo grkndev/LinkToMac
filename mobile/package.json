@@ -39,6 +39,7 @@
     "uniwind": "^1.9.0"
   },
   "devDependencies": {
+    "@types/bun": "^1.4.4",
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~56.0.4",
@@ -51,7 +52,8 @@
     "android": "APP_VARIANT=development expo run:android",
     "ios": "APP_VARIANT=development expo run:ios",
     "web": "APP_VARIANT=development expo start --web",
-    "lint": "APP_VARIANT=development expo lint"
+    "lint": "APP_VARIANT=development expo lint && node scripts/check-log-privacy.mjs",
+    "test": "bun test src/ scripts/"
   },
   "private": true
 }

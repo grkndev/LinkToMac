@@ -317,7 +317,7 @@ class ConnectionManager(
     if (lanUp) return
     if (relayUrl.isEmpty()) return // LAN-only: nothing to fall back to
     if (relay != null) return
-    log("relay fallback -> $relayUrl")
+    log("falling back to the relay")
     relay = RelayClient(
       url = relayUrl,
       token = token,

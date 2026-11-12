@@ -1,6 +1,7 @@
 package expo.modules.selfadb
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -158,13 +159,30 @@ class SelfAdbModule : Module() {
       AppUpdater.get(appCtx).setAutoUpdate(enabled)
     }
 
+    // Why Android last ended this app's process (newest first). The OS keeps these itself, so no
+    // storage of ours is involved. Only the reason, importance, status and a capped description go
+    // out — never the ANR trace stream, which is large and can carry data. minSdk is 30, which is
+    // where getHistoricalProcessExitReasons starts, so there is no version gate.
+    AsyncFunction("getExitReasons") { limit: Int ->
+      val am = appCtx.getSystemService(ActivityManager::class.java)
+      am.getHistoricalProcessExitReasons(appCtx.packageName, 0, limit.coerceIn(1, 30)).map { info ->
+        mapOf(
+          "timestamp" to info.timestamp,
+          "reason" to ExitReasons.reasonName(info.reason),
+          "importance" to ExitReasons.importanceName(info.importance),
+          "status" to info.status,
+          "description" to ExitReasons.cleanDescription(info.description),
+        )
+      }
+    }
+
     // Rehearsal hook: point the release feed at a local server. Only honoured by a debuggable build.
     AsyncFunction("setUpdateFeedForTesting") { url: String? ->
       AppUpdater.get(appCtx).setFeedOverride(url)
     }
 
     AsyncFunction("pair") { host: String, port: Int, code: String ->
-      log("pairing $host:$port")
+      log("pairing (adb)")
       val ok = adb.pair(host, port, code)
       if (!ok) throw Exception("pair failed (wrong code / port / not in pairing mode)")
       "paired"
@@ -172,7 +190,7 @@ class SelfAdbModule : Module() {
 
     AsyncFunction("connect") { host: String, port: Int ->
       status("connecting", "idle")
-      log("connecting $host:$port")
+      log("connecting (adb)")
       // connect() returns false ONLY when a session is already live (libadb's
       // isConnected() guard) — that's success, not failure. A real failure throws
       // (AdbPairingRequiredException / IOException).
@@ -276,7 +294,7 @@ class SelfAdbModule : Module() {
           log("dropping stale adb session before reconnect")
           adb.disconnect()
         }
-        log("connecting $host:${endpoint.second} (mDNS)")
+        log("connecting (mDNS)")
         if (!adb.connect(host, endpoint.second)) {
           status("failed", "idle")
           throw Exception("connect failed despite mDNS endpoint $host:${endpoint.second}")
@@ -285,7 +303,7 @@ class SelfAdbModule : Module() {
         // If we couldn't self-toggle, the user just enabled it manually -> grab
         // the permission now so every future reboot is silent.
         if (!canToggle) {
-          log("grant for future silent reconnects: " + adb.grantSecureSettings(appCtx.packageName))
+          log("grant for future silent reconnects: " + adb.grantSecureSettings(appCtx.packageName)) // log-privacy: ok — our own package; the log prints the command output
         }
         deploy(clipPort)
         status("connected", "running")
@@ -323,7 +341,7 @@ class SelfAdbModule : Module() {
       val pairEp = adb.discover(AdbMdns.SERVICE_TYPE_TLS_PAIRING, 30000L)
         ?: throw Exception("pairing service not found (open 'Pair device with pairing code')")
       val pairHost = pairEp.first.hostAddress ?: "127.0.0.1"
-      log("pairing $pairHost:${pairEp.second}")
+      log("pairing (mDNS)")
       if (!adb.pair(pairHost, pairEp.second, code)) {
         throw Exception("pair failed (wrong code / dialog closed)")
       }
@@ -331,14 +349,14 @@ class SelfAdbModule : Module() {
       val connEp = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000)
         ?: throw Exception("connect service not found after pairing")
       val connHost = connEp.first.hostAddress ?: "127.0.0.1"
-      log("connecting $connHost:${connEp.second} (mDNS)")
+      log("connecting (mDNS)")
       // false = a session is already live (libadb's isConnected() guard), not a
       // failure; real failures throw. Don't mistake the reused link for an error.
       if (!adb.connect(connHost, connEp.second)) {
         log("adb session already live, reusing")
       }
       status("connected", "idle")
-      log("grant WRITE_SECURE_SETTINGS: " + adb.grantSecureSettings(appCtx.packageName))
+      log("grant WRITE_SECURE_SETTINGS: " + adb.grantSecureSettings(appCtx.packageName)) // log-privacy: ok — our own package; the log prints the command output
       deploy(clipPort)
       status("connected", "running")
       "ready"
@@ -674,7 +692,7 @@ class SelfAdbModule : Module() {
         )
         true
       } catch (e: Exception) {
-        ClipBus.log("openFile failed: ${e.message}")
+        ClipBus.log("openFile failed (${e.javaClass.simpleName})")
         false
       }
     }
@@ -936,7 +954,7 @@ class SelfAdbModule : Module() {
       log("pushing clipboard-agent.dex -> /data/local/tmp")
       adb.pushAsset("clipboard-agent.dex", "/data/local/tmp/clipboard-agent.dex") { log(it) }
       log("launching detached daemon...")
-      log("launch: " + adb.launchDaemon(clipPort, secret))
+      log("launch: " + adb.launchDaemon(clipPort, secret)) // log-privacy: ok — secret is only an argument; the log prints the command output (LAUNCHED)
       // launchDaemon only echoes LAUNCHED; confirm the daemon actually bound its socket.
       // On the half-trusted first adb session after a reboot the launch can silently fail,
       // and without this check autoStart would report a false "ready" while the bridge loops

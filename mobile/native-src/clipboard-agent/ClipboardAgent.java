@@ -235,10 +235,10 @@ public class ClipboardAgent {
                     }
                 }
             }
-            log("image skipped: source " + srcPkg + " lacks read access to " + uri.getAuthority());
+            log("image skipped: the app that copied it lacks read access to the clip URI");
             return false;
         } catch (Throwable t) {
-            log("image skipped: source access check failed (" + t + ")");
+            log("image skipped: source access check failed (" + t.getClass().getSimpleName() + ")");
             return false;
         }
     }
@@ -299,7 +299,7 @@ public class ClipboardAgent {
             }
             emitImage(uri, initial);
         } catch (Exception e) {
-            log("capture error: " + e.getMessage());
+            log("capture error: " + e.getClass().getSimpleName());
         }
     }
 
@@ -323,7 +323,7 @@ public class ClipboardAgent {
         } catch (Exception e) {
             // A SecurityException here = the shell resolver wasn't granted this URI (some
             // provider-private images). Non-fatal: just skip that image.
-            log("image capture failed: " + e.getMessage());
+            log("image capture failed: " + e.getClass().getSimpleName());
         }
     }
 
@@ -555,7 +555,7 @@ public class ClipboardAgent {
                 sendLog();
             }
         } catch (Exception e) {
-            log("cmd parse error: " + e.getMessage());
+            log("cmd parse error: " + e.getClass().getSimpleName());
         }
     }
 

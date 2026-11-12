@@ -164,6 +164,10 @@ function RootNavigator({
               name="daemon-logs"
               options={header("Daemon Log", { headerShadowVisible: undefined })}
             />
+            <Stack.Screen
+              name="diagnostics"
+              options={header("Send diagnostics", { headerShadowVisible: undefined })}
+            />
             <Stack.Screen name="clipboard-history" options={header("Clipboard")} />
             <Stack.Screen name="files" options={header("Files")} />
             <Stack.Screen name="about" options={header("")} />

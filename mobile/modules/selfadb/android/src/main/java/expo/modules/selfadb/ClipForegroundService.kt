@@ -251,7 +251,7 @@ class ClipForegroundService : Service() {
   private fun ingestClip(text: String, ts: Double, source: ClipSource) {
     if (text.isEmpty()) return
     if (consumeEcho(text)) return // echo of our own recent write -> swallow
-    ClipBus.log("clip [${source.label}]: ${text.take(60)}")
+    ClipBus.log("clip [${source.label}]: ${text.length} chars")
     ClipBus.clip(text, ts)
     conn?.sendClip(text)
   }
@@ -352,7 +352,7 @@ class ClipForegroundService : Service() {
       ClipBus.log("connection: nothing configured (no relay, LAN off)")
       return
     }
-    ClipBus.log("connection starting (relay=${if (url.isEmpty()) "none" else url}, lan=${if (lanReady) lanPort else "off"})")
+    ClipBus.log("connection starting (relay=${if (url.isEmpty()) "none" else "on"}, lan=${if (lanReady) lanPort else "off"})")
     conn = ConnectionManager(
       context = this,
       relayUrl = url,
@@ -568,7 +568,7 @@ class ClipForegroundService : Service() {
     val display = FileSink.sanitize(name, mime)
     val uri = FileSink.saveToDownloads(this, source, name, mime, dir)
     if (uri == null) {
-      ClipBus.log("file: couldn't save $display")
+      ClipBus.log("file: save to Downloads failed")
       postFileNotification("Couldn't save file", display, null, mime)
       FileHistory.record(this, HistoryEntry(
         direction = "in", name = display, dir = FileSink.sanitizeDir(dir).ifEmpty { null }, size = source.length(),
@@ -580,7 +580,7 @@ class ClipForegroundService : Service() {
       direction = "in", name = display, dir = FileSink.sanitizeDir(dir).ifEmpty { null }, size = source.length(),
       mime = mime, ts = System.currentTimeMillis(), status = "done", progress = 100, uri = uri.toString(),
     ))
-    ClipBus.log("file saved to Downloads: $display (${source.length()} B)")
+    ClipBus.log("file saved to Downloads (${source.length()} B)")
     postReceivedNotification(display, uri, mime, FileSink.sanitizeDir(dir).substringBefore('/').ifEmpty { null })
     return true
   }
@@ -803,7 +803,7 @@ class ClipForegroundService : Service() {
         }
       }
     } catch (e: Exception) {
-      ClipBus.log("share: metadata query failed: ${e.message}")
+      ClipBus.log("share: metadata query failed (${e.javaClass.simpleName})")
     }
     return size to modified
   }
@@ -837,7 +837,7 @@ class ClipForegroundService : Service() {
           )
         }
       } catch (e: Exception) {
-        ClipBus.log("folder walk failed: ${e.message}")
+        ClipBus.log("folder walk failed (${e.javaClass.simpleName})")
         problems += "Couldn't read that folder"
       }
     }
@@ -856,7 +856,7 @@ class ClipForegroundService : Service() {
           }
         }
     } catch (e: Exception) {
-      ClipBus.log("pick: metadata query failed: ${e.message}")
+      ClipBus.log("pick: metadata query failed (${e.javaClass.simpleName})")
     }
     return name to size
   }
@@ -886,7 +886,7 @@ class ClipForegroundService : Service() {
         }
       }
     } catch (e: Exception) {
-      ClipBus.log("share send failed: ${e.message}")
+      ClipBus.log("share send failed (${e.javaClass.simpleName})")
       toastOnMain("Couldn't send that")
     } finally {
       items.forEach { it.staged?.delete() }
@@ -1014,7 +1014,7 @@ class ClipForegroundService : Service() {
     val id = item.transferId
     val t = Transfer(id)
     transfer = t
-    ClipBus.log("share -> Mac file: $name ($total B, $count chunk(s), id=$id)")
+    ClipBus.log("share -> Mac file ($total B, $count chunk(s), id=$id)")
     try {
       val buf = ByteArray(FileFrame.CHUNK_RAW_BYTES)
       var lastSentAt = 0L
@@ -1070,10 +1070,10 @@ class ClipForegroundService : Service() {
     } catch (e: java.io.IOException) {
       // The source vanished or its grant is gone (a content URI whose permission didn't outlive
       // the activity, a file deleted mid-send).
-      ClipBus.log("share: couldn't read $name: ${e.message}")
+      ClipBus.log("share: read failed (${e.javaClass.simpleName})")
       return "Couldn't read $name"
     } catch (e: SecurityException) {
-      ClipBus.log("share: no access to $name: ${e.message}")
+      ClipBus.log("share: access denied (${e.javaClass.simpleName})")
       return "Couldn't read $name"
     } finally {
       transfer = null

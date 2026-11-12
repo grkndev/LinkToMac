@@ -19,6 +19,7 @@ export type {
   AppUpdateState,
   AppUpdateStatus,
   ClipEvent,
+  ExitReason,
   FileTransferEntry,
   FileTransferStatus,
   InstalledApp,

@@ -1,7 +1,7 @@
 import { Column, Icon, Row, Surface, Shape, } from '@expo/ui/jetpack-compose';
 import { Text } from "@/components/text";
 import { fillMaxSize, fillMaxWidth, padding, weight } from '@expo/ui/jetpack-compose/modifiers';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Share } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,6 +11,8 @@ import { LogView } from '@/components/log-view';
 import { useM3Colors } from '@/components/m3';
 import { M3Host } from '@/components/m3-screen';
 import { Spacing } from '@/constants/theme';
+import { sanitizeText } from '@/features/diagnostics/sanitize';
+import { useKnownValues } from '@/features/diagnostics/use-known-values';
 import SelfAdb, { CLIP_PORT } from '@/features/selfadb/client';
 import { TimeoutError, withTimeout } from '@/lib/async';
 
@@ -32,11 +34,15 @@ function describeError(e: unknown): string {
  * Read over the localhost bridge (no adb, so it can't hit libadb's BufferOverflowException); the
  * daemon stamps each line with its own HH:mm:ss when it writes it (the whole buffer is fetched at
  * once, so the app can't time individual lines). "Restart" reloads a rebuilt dex without a reboot.
+ *
+ * Privacy: `text` is the raw blob, but what is drawn and what Share sends are sanitized (see
+ * `logs.tsx`); only a `__DEV__` build draws the raw text, and Share is sanitized even there.
  */
 export default function DaemonLogsScreen() {
   const colors = useM3Colors();
   const icons = useIcons();
   const insets = useSafeAreaInsets();
+  const known = useKnownValues();
   const [text, setText] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -68,14 +74,20 @@ export default function DaemonLogsScreen() {
       .finally(() => setRestarting(false));
   }, []);
 
+  const clean = useMemo(() => (text == null ? null : sanitizeText(text, known)), [text, known]);
+
   const shareAll = useCallback(() => {
-    Share.share({ message: text ?? '' }).catch(() => {});
-  }, [text]);
+    Share.share({ message: clean ?? '' }).catch(() => {});
+  }, [clean]);
 
   // An error/timeout lands in `text` as "Error: …" / "Restart error: …" — show it as a banner
-  // (tap = try again) rather than as a log line.
-  const failure = text && /^(Restart error|Error): /.test(text) ? text.replace(/^(Restart error|Error): /, '') : null;
-  const lines = failure || !text ? [] : text.split('\n');
+  // (tap = try again) rather than as a log line. Error text can carry a host, so it is sanitized too.
+  const shownText = __DEV__ ? text : clean;
+  const failure =
+    shownText && /^(Restart error|Error): /.test(shownText)
+      ? shownText.replace(/^(Restart error|Error): /, '')
+      : null;
+  const lines = failure || !shownText ? [] : shownText.split('\n');
 
   return (
     <M3Host>

@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in the Android app, the Mac app or the relay isn't working
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ⚠️ This page is public
+
+        Anything you type here, or attach, can be read by anyone. Link to Mac never uploads anything
+        for you, so **read the diagnostics report before you attach it**.
+
+        On Android, open **Settings ▸ Send diagnostics**. It is built on your phone, shows exactly
+        what it contains, and has clipboard text, file names, addresses and device names removed.
+        Share it as a file, or tap **GitHub issue** to open this form with the summary filled in.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part?
+      options:
+        - Android app
+        - Mac app
+        - Relay server
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did and what you saw instead of what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary from the app
+      description: Filled in for you when you open this form from Settings ▸ Send diagnostics. Safe to leave as is; edit anything you don't want public.
+      render: text
+
+  - type: markdown
+    attributes:
+      value: |
+        **Attach the full report** (the file you shared from **Send diagnostics**) by dragging it into
+        the box above, after you've read it. Mac app problems: the app version and macOS version are
+        enough to start with.

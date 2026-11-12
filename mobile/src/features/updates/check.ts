@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 
+import { LATEST_RELEASE_API } from '@/constants/links';
 import SelfAdb, { type AppUpdateState, type AppUpdateStatus } from '@/features/selfadb/client';
 
 /**
@@ -18,8 +19,6 @@ import SelfAdb, { type AppUpdateState, type AppUpdateStatus } from '@/features/s
  *    for the JS side and TECHNICAL.md for the native one.
  */
 
-const REPO = 'grkndev/LinkToMac';
-const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 /** A newer APK, as the sheet needs it. `state` is the native downloader's. */
 export type NativeUpdate = {

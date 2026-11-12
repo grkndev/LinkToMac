@@ -173,6 +173,15 @@ cd server && npm run typecheck && npm run smoke                # smoke needs `np
   LAN) only ever sees opaque ciphertext — never your clipboard, your files, the command, your
   notifications, your texts, or the key. Anything a peer sends (file names, folder paths, sizes)
   is validated before it touches the disk.
+- **No telemetry, and logs you can read.** Nothing reports crashes or usage anywhere, and the
+  apps have no analytics. When something breaks, **Settings ▸ Send diagnostics** on the phone builds
+  a report _on the device_ (versions, device model, link and permission state, why Android last
+  ended the app, and the tail of the logs) and shows you exactly what it contains; you then choose
+  to share it or open a pre-filled GitHub issue. The app's own log lines record lengths, counts
+  and states rather than clipboard text, file names or addresses, and everything is scrubbed again
+  (clipboard text, file names, addresses, your Mac's and phone's names, package names, the room and
+  the key) before it is shown or shared. That scrubbing is best-effort, which is why you read the
+  report first — GitHub issues are public.
 
 ## Scope & status
 
