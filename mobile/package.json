@@ -1,7 +1,6 @@
 {
   "name": "linktomac",
   "main": "expo-router/entry",
-  "version": "1.0.0",
   "dependencies": {
     "@expo-google-fonts/google-sans-flex": "^0.4.7",
     "@expo-google-fonts/jetbrains-mono": "^0.4.1",

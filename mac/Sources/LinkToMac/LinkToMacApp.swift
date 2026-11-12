@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Files staged from dragged promises last run can no longer be a retry source (the transfer
+        // history lives in memory), so they are just clutter.
+        DropStaging.purgeAll()
         client.connect()
         // A local copy fans out to whichever LAN server is live (re-read at call time).
         client.onLocalClip = { [weak self] text in self?.lan?.sendClip(text) }
@@ -99,26 +102,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quit only via the menu or ⌘Q.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    /// Handle `linktomac://send?path=…` — the Finder Share extension handing over a file it can't
-    /// send itself (it's sandboxed; this app is not, so the path is readable as-is).
+    /// Handle `linktomac://send?id=<uuid>` — the Finder Share extension handing over what it can't
+    /// send itself (it's sandboxed; this app is not, so the paths are readable as-is).
     ///
-    /// The path arrives from our own extension, but it is still just a string from outside the
-    /// process, so it is checked for being a real file before anything is read.
+    /// **The URL names no file.** Any process or web page can open a URL, so a `path=` in it would let
+    /// them make this Mac send any readable file to the phone. The id is only a key to a one-shot
+    /// record the extension wrote into its own sandbox container (see `ShareHandoff`) — one record
+    /// for everything the share selected; an id nobody planted finds nothing, and the retired
+    /// `path=` form is simply ignored. Each recorded path is still checked for being on disk before
+    /// anything is read.
     func application(_ application: NSApplication, open urls: [URL]) {
         var files: [URL] = []
         for url in urls where url.scheme == "linktomac" && url.host == "send" {
-            guard let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "path" })?.value,
-                  !path.isEmpty
-            else { continue }
-            let file = URL(fileURLWithPath: path)
-            // Files and folders both go; anything that isn't on disk doesn't.
-            guard FileManager.default.fileExists(atPath: file.path) else {
-                NSLog("[LinkToMac] share extension handed over a path that doesn't exist")
+            guard let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "id" })?.value
+            else {
+                NSLog("[LinkToMac] ignored a send URL without a hand-off id")
                 continue
             }
-            files.append(file)
+            guard let recorded = ShareHandoff.consume(id: id, home: ShareHandoff.extensionHome()) else {
+                NSLog("[LinkToMac] ignored a send URL with no matching hand-off")
+                continue
+            }
+            // Files and folders both go; anything that isn't on disk doesn't.
+            let present = recorded.filter { FileManager.default.fileExists(atPath: $0.path) }
+            if present.count < recorded.count {
+                NSLog("[LinkToMac] share extension handed over %d path(s) that don't exist", recorded.count - present.count)
+            }
+            files.append(contentsOf: present)
         }
+        guard !files.isEmpty else { return }
         // One call for all of them, so several arrivals are one batch with one summary.
         client.sendFilesToPhone(files)
     }

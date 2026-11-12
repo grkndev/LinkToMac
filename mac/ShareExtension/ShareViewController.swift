@@ -25,10 +25,12 @@ import UniformTypeIdentifiers
 ///
 /// **How it reaches the app.** An extension is sandboxed even though the host app is not, so it
 /// can't do the sending itself — the relay/LAN connection and the pairing key live in the app.
-/// It hands the path over with `linktomac://send?path=…` through `NSExtensionContext.open`, and
-/// the app (unsandboxed, so no bookmark needed) reads the file directly. A shared app-group
-/// container would be the usual channel, but app groups need a real team identity and this app is
-/// ad-hoc signed with no Apple Developer account.
+/// It records the path in a small file inside *its own* container (`ShareHandoff`, compiled into
+/// both targets) and opens `linktomac://send?id=<uuid>`; the app (unsandboxed, so it can read the
+/// container and the file, no bookmark needed) looks the id up. The URL itself names no file:
+/// anything can open a URL, and a `path=` in it would have let any process or web page make this
+/// Mac send any readable file to the phone. A shared app-group container would be the usual
+/// channel, but it needs a team-provisioned entitlement and would break ad-hoc local builds.
 /// `@objc(ShareViewController)` is load-bearing: `NSExtensionPrincipalClass` in Info.plist is
 /// looked up through the Objective-C runtime, and a plain Swift class registers under its
 /// *module-qualified* name (`SendToPhone.ShareViewController`), which that lookup would miss.
@@ -43,32 +45,45 @@ final class ShareViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        NSLog("[SendToPhone] viewDidLoad, inputItems=%d", extensionContext?.inputItems.count ?? -1)
-
-        guard let item = extensionContext?.inputItems.first as? NSExtensionItem,
-              let attachment = item.attachments?.first
-        else {
+        // Everything Finder selected: every attachment of every item, in the order it listed them.
+        let items = (extensionContext?.inputItems as? [NSExtensionItem]) ?? []
+        let attachments = items.flatMap { $0.attachments ?? [] }
+        NSLog("[SendToPhone] viewDidLoad, items=%d attachments=%d", items.count, attachments.count)
+        guard !attachments.isEmpty else {
             NSLog("[SendToPhone] no attachment on the extension item")
             return complete()
         }
-        NSLog("[SendToPhone] offered types: %@", attachment.registeredTypeIdentifiers.joined(separator: ", "))
 
-        // `loadItem`, not `loadDataRepresentation`: a Finder share hands over an NSURL, and which
-        // concrete form arrives varies, so accept all three rather than betting on one.
-        attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] coded, error in
-            let url: URL? = (coded as? URL)
-                ?? (coded as? NSURL) as URL?
-                ?? (coded as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
-            if let error {
-                NSLog("[SendToPhone] loadItem failed: %@", error.localizedDescription)
+        // One slot per attachment, so the files keep their order whichever load finishes first.
+        let slots = URLSlots(count: attachments.count)
+        let group = DispatchGroup()
+        for (index, attachment) in attachments.enumerated() {
+            group.enter()
+            // `loadItem`, not `loadDataRepresentation`: a Finder share hands over an NSURL, and which
+            // concrete form arrives varies, so accept all three rather than betting on one.
+            attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { coded, error in
+                let url: URL? = (coded as? URL)
+                    ?? (coded as? NSURL) as URL?
+                    ?? (coded as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
+                if let error {
+                    NSLog("[SendToPhone] loadItem failed: %@", error.localizedDescription)
+                }
+                // The type only: `coded` is the shared file's URL, i.e. its path.
+                if url == nil { NSLog("[SendToPhone] attachment %d has no file URL (got %@)", index, String(describing: type(of: coded))) }
+                slots.set(index, url)
+                group.leave()
             }
-            guard let url, let handoff = Self.handoffURL(for: url) else {
-                NSLog("[SendToPhone] no usable file URL (got %@)", String(describing: coded))
-                DispatchQueue.main.async { self?.complete() }
+        }
+        group.notify(queue: .main) { [weak self] in
+            let urls = slots.fileURLs()
+            guard !urls.isEmpty, let handoff = Self.handoffURL(for: urls) else {
+                NSLog("[SendToPhone] no usable file URL, or the hand-off couldn't be recorded")
+                self?.complete()
                 return
             }
-            Self.log.info("handing off \(handoff.absoluteString, privacy: .public)")
-            DispatchQueue.main.async { self?.handOff(handoff) }
+            // A count, never the paths: they are the user's file names.
+            Self.log.info("handing off \(urls.count, privacy: .public) file(s)")
+            self?.handOff(handoff)
         }
     }
 
@@ -96,16 +111,47 @@ final class ShareViewController: NSViewController {
         }
     }
 
-    /// `linktomac://send?path=<percent-encoded absolute path>`.
-    private static func handoffURL(for file: URL) -> URL? {
+    /// `linktomac://send?id=<uuid>`. The paths are recorded, together, in this extension's container
+    /// — not in the URL (see `ShareHandoff`). `NSHomeDirectory()` inside the sandbox is the
+    /// container's `Data` folder — the same place the app resolves with `ShareHandoff.extensionHome()`.
+    private static func handoffURL(for files: [URL]) -> URL? {
+        let id: String
+        do {
+            id = try ShareHandoff.write(paths: files.map(\.path), home: NSHomeDirectory())
+        } catch {
+            // Domain and code only: a Cocoa error's description can quote a file's path.
+            let e = error as NSError
+            log.error("couldn't record the hand-off: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+            return nil
+        }
         var components = URLComponents()
         components.scheme = "linktomac"
         components.host = "send"
-        components.queryItems = [URLQueryItem(name: "path", value: file.path)]
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
         return components.url
     }
 
     private func complete() {
         extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+    }
+}
+
+/// Collects the attachment loads, which finish on arbitrary threads, into fixed slots.
+private final class URLSlots: @unchecked Sendable {
+    private let lock = NSLock()
+    private var slots: [URL?]
+
+    init(count: Int) { slots = Array(repeating: nil, count: count) }
+
+    func set(_ index: Int, _ url: URL?) {
+        lock.lock(); defer { lock.unlock() }
+        slots[index] = url
+    }
+
+    /// The file URLs that loaded, in the order they were listed, each path once.
+    func fileURLs() -> [URL] {
+        lock.lock(); defer { lock.unlock() }
+        var seen = Set<String>()
+        return slots.compactMap { $0 }.filter { $0.isFileURL && seen.insert($0.path).inserted }
     }
 }

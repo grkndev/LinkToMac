@@ -164,7 +164,12 @@ enum FileBatchPlanner {
             plan.problems.append("\(name) is larger than \(limit)")
             return
         }
-        plan.items.append(OutgoingItem(url: file, name: name, dir: dir, size: size))
+        // The modification time is part of the transfer's identity (`FileSender.transferID`): it is
+        // what keeps a different file of the same name and size from being mistaken for a half-sent
+        // one and spliced onto the receiver's partial. It was never filled in, so the id was really
+        // `name|size|0|dir`.
+        let mtime = Int(values.contentModificationDate?.timeIntervalSince1970 ?? 0)
+        plan.items.append(OutgoingItem(url: file, name: name, dir: dir, size: size, mtime: mtime))
     }
 }
 
@@ -293,10 +298,27 @@ final class FileSender: @unchecked Sendable {
     private final class Transfer: @unchecked Sendable {
         let id: String
         let window: AckWindow
+        let item: OutgoingItem
+        /// 1-based position of the file in the batch.
+        let index: Int
         /// Leading chunks the phone says it already holds (from an ack's `have`); guarded by the
         /// sender's lock. Only ever grows.
         var have = 0
-        init(id: String, window: AckWindow) { self.id = id; self.window = window }
+        /// Chunks the phone has acknowledged, i.e. *stored* — the last one only once the whole
+        /// file is saved. Guarded by the sender's lock. Only ever grows.
+        var acked = Set<Int>()
+        init(id: String, window: AckWindow, item: OutgoingItem, index: Int) {
+            self.id = id; self.window = window; self.item = item; self.index = index
+        }
+
+        /// Bytes the phone really has: every acknowledged chunk plus the leading `have` ones it
+        /// already held from an earlier attempt. The final chunk is usually short.
+        func acknowledgedBytes(chunk: Int) -> Int {
+            let count = (item.size + chunk - 1) / chunk
+            var done = acked
+            if have > 0 { done.formUnion(0..<min(have, count)) }
+            return done.reduce(0) { $0 + max(0, min(chunk, item.size - $1 * chunk)) }
+        }
     }
 
     private final class Batch: @unchecked Sendable {
@@ -308,6 +330,10 @@ final class FileSender: @unchecked Sendable {
         var doneBytes = 0
         /// When the last relay chunk left, across files: the relay's rate limit is per connection.
         var lastRelayAt = Date.distantPast
+        /// The last progress reported for the file in flight (its index and bytes), so a callback
+        /// that arrives late — acks come in on another thread — never moves the bar backwards.
+        var lastReportedIndex = 0
+        var lastReportedBytes = 0
         let transport: Transport
         let progress: @Sendable (BatchProgress) -> Void
         let done: @Sendable (BatchResult) -> Void
@@ -378,11 +404,19 @@ final class FileSender: @unchecked Sendable {
     /// it already holds from an earlier attempt at the same file. Safe from any thread.
     func ack(id: String, seq: Int, have: Int? = nil) {
         lock.lock()
-        let transfer = active?.transfer?.id == id ? active?.transfer : nil
+        let batch = active
+        let transfer = batch?.transfer?.id == id ? batch?.transfer : nil
         if let transfer, let have, have > transfer.have { transfer.have = have }
+        transfer?.acked.insert(seq)
+        let acknowledged = transfer?.acknowledgedBytes(chunk: config.chunkBytes)
         let window = transfer?.window
         lock.unlock()
         window?.acknowledge(seq)
+        // The bar is what the phone has *stored*, not what was handed to the socket: handing a chunk
+        // over only queues it behind the upload, which on a slow uplink takes many seconds.
+        if let batch, let transfer, let acknowledged {
+            report(batch, transfer.item, index: transfer.index, sent: acknowledged)
+        }
     }
 
     /// The transfer id for a file: **deterministic**, so sending the same file again reuses it —
@@ -469,14 +503,13 @@ final class FileSender: @unchecked Sendable {
         let mime = Self.mimeType(for: item.url)
 
         lock.lock()
-        batch.transfer = Transfer(id: id, window: window)
+        batch.transfer = Transfer(id: id, window: window, item: item, index: index)
         let cancelledEarly = batch.cancelled
         lock.unlock()
         if cancelledEarly { return .failed("Cancelled", fatal: false) }
 
         report(batch, item, index: index, sent: 0)
 
-        var sent = 0
         var seq = 0
         while seq < count {
             // Resume: the phone's acks say how many leading chunks it already holds. Jump over
@@ -487,8 +520,7 @@ final class FileSender: @unchecked Sendable {
             if seq < have {
                 try? handle.seek(toOffset: UInt64(have) * UInt64(chunk))
                 seq = have
-                sent = min(item.size, have * chunk)
-                report(batch, item, index: index, sent: sent)
+                report(batch, item, index: index, sent: min(item.size, have * chunk))
                 continue
             }
             switch window.reserve(seq, timeout: config.ackTimeout) {
@@ -512,13 +544,16 @@ final class FileSender: @unchecked Sendable {
                 return .failed("Lost the connection to your phone", fatal: true)
             }
             if route == .relay { batch.lastRelayAt = Date() }
-            sent += data.count
+            // No progress report here: the chunk is only *queued* behind the upload. The bar moves
+            // when the phone acknowledges it (`ack`), so it can't read 100% while the file is
+            // still on its way.
             seq += 1
-            report(batch, item, index: index, sent: sent)
         }
 
         switch window.drain(timeout: config.ackTimeout) {
-        case .ok: return .sent
+        case .ok:
+            report(batch, item, index: index, sent: item.size)
+            return .sent
         case .timeout: return .failed("Your phone stopped responding", fatal: true)
         case let .failed(reason): return .failed(reason, fatal: reason != "Cancelled" && Self.isLinkFailure(reason))
         }
@@ -532,6 +567,12 @@ final class FileSender: @unchecked Sendable {
 
     private func report(_ batch: Batch, _ item: OutgoingItem, index: Int, sent: Int) {
         lock.lock()
+        if index == batch.lastReportedIndex, sent < batch.lastReportedBytes {
+            lock.unlock()
+            return
+        }
+        batch.lastReportedIndex = index
+        batch.lastReportedBytes = sent
         let progress = BatchProgress(
             currentName: item.name, currentDone: sent, currentTotal: item.size,
             index: index, count: batch.items.count,
