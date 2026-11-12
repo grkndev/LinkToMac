@@ -23,6 +23,38 @@ import Testing
         #expect(plan.problems.isEmpty)
     }
 
+    @Test func everyPlannedFileCarriesItsModificationTime() throws {
+        let root = try tree(); defer { try? FileManager.default.removeItem(at: root) }
+        try write("a.txt", in: root)
+        try write("Album/b.txt", in: root)
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        for path in ["a.txt", "Album/b.txt"] {
+            try FileManager.default.setAttributes([.modificationDate: stamp], ofItemAtPath: root.appendingPathComponent(path).path)
+        }
+        let plan = FileBatchPlanner.plan(urls: [root.appendingPathComponent("a.txt"), root.appendingPathComponent("Album")])
+        #expect(plan.items.count == 2)
+        #expect(plan.items.allSatisfy { $0.mtime == 1_700_000_000 }, "got \(plan.items.map(\.mtime))")
+    }
+
+    @Test func sameNameAndSizeButOtherContentGetsAnotherTransferID() throws {
+        let first = try tree(); defer { try? FileManager.default.removeItem(at: first) }
+        let second = try tree(); defer { try? FileManager.default.removeItem(at: second) }
+        try write("report.pdf", in: first)
+        try write("report.pdf", in: second)   // same name, same size…
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_000_000)],
+                                              ofItemAtPath: first.appendingPathComponent("report.pdf").path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_005_000)],
+                                              ofItemAtPath: second.appendingPathComponent("report.pdf").path)  // …edited later
+
+        let a = FileBatchPlanner.plan(urls: [first.appendingPathComponent("report.pdf")]).items[0]
+        let b = FileBatchPlanner.plan(urls: [second.appendingPathComponent("report.pdf")]).items[0]
+        #expect(FileSender.transferID(for: a) != FileSender.transferID(for: b),
+                "an edited file must not resume onto the old file's partial")
+        // and the same file planned twice keeps its id, which is what makes a retry resume
+        let again = FileBatchPlanner.plan(urls: [first.appendingPathComponent("report.pdf")]).items[0]
+        #expect(FileSender.transferID(for: a) == FileSender.transferID(for: again))
+    }
+
     @Test func foldersKeepTheirStructure() throws {
         let root = try tree(); defer { try? FileManager.default.removeItem(at: root) }
         try write("Album/one.jpg", in: root)

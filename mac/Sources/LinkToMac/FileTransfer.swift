@@ -164,7 +164,12 @@ enum FileBatchPlanner {
             plan.problems.append("\(name) is larger than \(limit)")
             return
         }
-        plan.items.append(OutgoingItem(url: file, name: name, dir: dir, size: size))
+        // The modification time is part of the transfer's identity (`FileSender.transferID`): it is
+        // what keeps a different file of the same name and size from being mistaken for a half-sent
+        // one and spliced onto the receiver's partial. It was never filled in, so the id was really
+        // `name|size|0|dir`.
+        let mtime = Int(values.contentModificationDate?.timeIntervalSince1970 ?? 0)
+        plan.items.append(OutgoingItem(url: file, name: name, dir: dir, size: size, mtime: mtime))
     }
 }
 
