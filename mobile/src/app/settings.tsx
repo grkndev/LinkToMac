@@ -250,6 +250,14 @@ export default function SettingsScreen() {
           />
           <ActionRow
             colors={colors}
+            icon={icons.share}
+            label="Send diagnostics"
+            hint="Prepared on this device, shared only by you"
+            onPress={() => router.push("/diagnostics")}
+            chevron
+          />
+          <ActionRow
+            colors={colors}
             icon={icons.info}
             label="About"
             hint={`Version ${Constants.expoConfig?.version ?? "—"}`}
