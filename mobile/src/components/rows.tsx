@@ -302,9 +302,19 @@ export function SwitchRow({
       onCheckedChange={onValueChange}
       footer={footer}
       shape={shape}
-      // Display-only: the toggleable Surface owns the change (with haptics). Wiring the
-      // Switch too made a direct tap fire BOTH handlers — a latent double-toggle.
-      trailing={<Switch value={value} />}
+      // The native Switch is an interactive toggle even without a handler: a tap that lands on
+      // it is consumed there and never reaches the Surface, so with no handler the row only
+      // toggled when tapped *beside* the switch. It gets its own handler; a tap on the rest of
+      // the row still goes to the Surface. The two never both fire — the innermost target wins.
+      trailing={
+        <Switch
+          value={value}
+          onCheckedChange={(v) => {
+            onValueChange(v);
+            haptic();
+          }}
+        />
+      }
     />
   );
 }
