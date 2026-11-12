@@ -637,7 +637,7 @@ phone panel, a Notifications / Messages tab strip, clip history and Settings.
 
 | File | Role |
 |---|---|
-| `LinkToMacApp.swift` | `@main` + `AppDelegate`: owns `RelayClient`, `LanServer`, `ProximityMonitor`, `AppearanceStore`, the Sparkle updater and the dashboard window; handles `linktomac://send?path=…` |
+| `LinkToMacApp.swift` | `@main` + `AppDelegate`: owns `RelayClient`, `LanServer`, `ProximityMonitor`, `AppearanceStore`, the Sparkle updater and the dashboard window; handles `linktomac://send?id=…` (a one-shot hand-off key, see `ShareHandoff`) |
 | `StatusItemController.swift` | The `NSStatusItem` + popover; a transparent overlay makes the status button a drag destination |
 | `RelayClient.swift` | The hub (§4.1): relay WebSocket, pasteboard + battery owners, inbound decode of `stat`/`note`/`sms`/`file`, the clip/notification/message stores, outbound `clip`/`stat`/`sms`/`file` |
 | `RelayProtocol.swift` | `ClientMessage`/`ServerMessage` (mirror of `server/src/protocol.ts`) and the **`FileFrame`** codec (§5.4) |
@@ -656,7 +656,8 @@ phone panel, a Notifications / Messages tab strip, clip history and Settings.
 | `LoginItem.swift` | `SMAppService` auto-start at login |
 | `MenuPanel.swift`, `DashboardWindow.swift`, `PhonePanel.swift`, `FeaturePanel.swift`, `ClipHistoryScreen.swift` | The popover and the dashboard: phone identity, Notifications/Messages tabs (the Messages tab has the reply composer), clip history |
 | `SettingsWindow.swift`, `AppearanceSettings.swift`, `AboutView.swift`, `DashboardComponents.swift`, `PanelComponents.swift` | Settings, appearance, relay, about, shared M3 components |
-| `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — sandboxed, so it hands the path over via `linktomac://` (`NSWorkspace.open`; `NSExtensionContext.open` does nothing for a Finder share extension). Inert under ad-hoc signing, runs in the Developer-ID build |
+| `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — sandboxed, so it records the path in its own container (`ShareHandoff`) and opens `linktomac://send?id=<uuid>` (`NSWorkspace.open`; `NSExtensionContext.open` does nothing for a Finder share extension). Inert under ad-hoc signing, runs in the Developer-ID build |
+| `ShareHandoff.swift` | Foundation-only, compiled into the app, the extension **and** the test target so the writer and the reader are one source. `write` (extension) puts `{path, created}` in `<container>/Data/Library/Caches/ShareHandoff/<uuid>.json`; `consume` (app) accepts only a canonical-UUID id, a regular file owned by the user, ≤ 8 KB, well-formed, ≤ 120 s old, absolute path — and deletes the record whether or not it passes (single use); leftovers older than 10 min are swept. `ShareHandoffTests` |
 
 ### 4.1 RelayClient (Swift)
 
@@ -703,7 +704,7 @@ The wire side is §5.4; this is how the Mac implements it.
 dashboard window and popover (`.phoneFileDrop`: an `.onDrop` that resolves **every** provider through a
 lock-guarded box, reporting items that carry no file URL — Mail/Photos "file promises" — instead of
 ignoring them), the menu-bar icon (`StatusDropView.performDragOperation`, file URLs only), and a
-`linktomac://send?path=…` URL (the Share extension, or `open` from a shell). A folder is allowed.
+`linktomac://send?id=…` URL (the Share extension only — the id keys a one-shot record in its container, so a bare `open linktomac://send?path=…` sends nothing). A folder is allowed.
 
 **Planning.** `FileBatchPlanner.plan` flattens the drop off the main actor: folders are walked with
 `FileManager.enumerator` (hidden files and nested symlinks skipped, packages sent as trees, at most 1,000
@@ -1192,11 +1193,13 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   Relay server** / pairing QR → SecureStore). Only `server/.env` holds the server's
   `RELAY_AUTH_TOKEN`. Rotating the password means updating `server/.env` and re-scanning the QR
   (or re-entering it in the app); nothing sensitive sits in tracked source.
-- 🟡 **The Mac's `linktomac://send?path=…` URL scheme can be invoked by any local app or web page**
-  (it exists for the Share extension, §4). It checks the path exists but not who asked, so a page
-  could make the Mac send a chosen file *to the paired phone* — never anywhere else, but still a
-  surprise on the phone. Gating it (a confirmation, or removing the scheme until the extension can run)
-  is open.
+- 🟢 **The Mac's `linktomac://send` URL names no file.** Anything — a local app, a web page — can open a URL,
+  and the scheme used to take `?path=`, so it could make the Mac send any readable file to the paired
+  phone (never anywhere else, but a surprise on it). The URL now carries only an unguessable id; the path
+  lives in a one-shot record the Share extension writes into its own sandbox container (`ShareHandoff`, §4),
+  which a web page or sandboxed app can't write, and the retired `path=` form is ignored. What remains: an
+  unsandboxed process running as the same user can still plant a record — but it could already read every
+  file the old URL exposed. Verify end to end on a Developer-ID build (the extension doesn't run ad-hoc).
 - 🟡 **Mac release signing is new.** Releases are Developer ID signed + notarized (`build-release.sh`);
   releases up to 0.11.0 were ad-hoc (right-click → Open, and no Share extension). Signing, notarization,
   stapling, Gatekeeper and the Finder Share extension are verified on a real build. **Still unverified

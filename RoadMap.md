@@ -20,7 +20,7 @@
 - [ ] Notarized build, still to check: run it on a clean Mac and re-check screen lock (`SACLockScreenImmediate`), BLE proximity, LAN server, notifications and a Sparkle update from the last ad-hoc build, all under the hardened runtime.
 - [ ] Drag from Mail / Photos / Safari's download list onto the Mac — they hand over a *file promise*, not a file URL, so the drop is reported as unsupported today; resolving promises (`NSFilePromiseReceiver`) would fix it.
 - [ ] Send folders from the phone's **share sheet** — Android's share sheet never offers a folder, so today a folder goes through the Files screen's picker only.
-- [ ] Gate (or remove) the Mac's `linktomac://send` URL scheme — any local app or page can ask it to send a file to the paired phone; it exists only for the Finder Share extension.
+- [x] Gate the Mac's `linktomac://send` URL scheme — the URL no longer names a file: the Finder Share extension records the path in its own sandbox container and the URL carries a one-shot id (`ShareHandoff`), so opening it from anywhere else sends nothing. To check on the next Developer-ID build (the extension doesn't run ad-hoc): share a file from Finder, then `open "linktomac://send?path=/etc/hosts"` must send nothing.
 - [ ] FCM push-wake for minimum background battery — while the Mac is offline, drop the persistent relay socket (no idle ping all day) and let a high-priority push wake the phone when the Mac reconnects. Only way to reach ~0 idle battery; relay-path only (not LAN). Big lift: GMS/FCM dependency + the relay must be able to push.
 - [ ] Mirror your Android screen to Mac
 - [ ] Access Phone Gallery from Mac
