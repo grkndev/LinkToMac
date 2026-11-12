@@ -7,8 +7,8 @@ import Foundation
 /// capability: anything that can open a URL (Terminal's `open`, another app, a web page) could make
 /// the Mac send any readable file or folder to the paired phone.
 ///
-/// Now the URL is `linktomac://send?id=<uuid>` and carries nothing. The real path sits in a small
-/// JSON file in the **extension's own sandbox container**:
+/// Now the URL is `linktomac://send?id=<uuid>` and carries nothing. The real paths (everything one
+/// share selected, in order) sit in a small JSON file in the **extension's own sandbox container**:
 ///
 ///     ~/Library/Containers/dev.grkn.LinkToMac.ShareExtension/Data/Library/Caches/ShareHandoff/<uuid>.json
 ///
@@ -27,16 +27,28 @@ enum ShareHandoff {
     static let maxAge: TimeInterval = 120
     /// Leftovers (an id whose URL never arrived) are swept after this.
     static let sweepAge: TimeInterval = 600
-    /// A real record is ~200 bytes; anything bigger isn't one.
-    static let maxRecordBytes = 8 * 1024
+    /// One share can carry several files (Finder hands over everything selected). Matches the
+    /// extension's `NSExtensionActivationSupportsFileWithMaxCount`: past this the entry isn't offered.
+    static let maxPaths = 500
+    /// macOS's `PATH_MAX`; no real path is longer.
+    static let maxPathLength = 1024
+    /// `maxPaths` × `maxPathLength` plus JSON overhead fits well under this; anything bigger isn't
+    /// a record the extension wrote.
+    static let maxRecordBytes = 1024 * 1024
 
     struct Record: Codable, Equatable {
-        var path: String
+        var paths: [String]
         /// Seconds since 1970.
         var created: TimeInterval
     }
 
-    enum WriteError: Error { case notAbsolute }
+    enum WriteError: Error { case noPaths, tooManyPaths, notAbsolute, pathTooLong }
+
+    /// What a record's paths must satisfy, on the way out and on the way back in.
+    private static func valid(_ paths: [String]) -> Bool {
+        !paths.isEmpty && paths.count <= maxPaths
+            && paths.allSatisfy { $0.hasPrefix("/") && $0.utf8.count <= maxPathLength }
+    }
 
     /// `<home>/Library/Caches/ShareHandoff`.
     static func directory(home: String) -> URL {
@@ -49,25 +61,31 @@ enum ShareHandoff {
         userHome + "/Library/Containers/\(extensionBundleID)/Data"
     }
 
-    /// Extension side: record `path` and return the id to put in the URL.
-    static func write(path: String, home: String, now: Date = Date()) throws -> String {
-        guard path.hasPrefix("/") else { throw WriteError.notAbsolute }
+    /// Extension side: record everything one share carries (in order) under ONE id, to put in the
+    /// URL. One record per share, not one URL per file: each `open` is its own LaunchServices
+    /// delivery, and the app wants the files as a single batch anyway.
+    static func write(paths: [String], home: String, now: Date = Date()) throws -> String {
+        guard !paths.isEmpty else { throw WriteError.noPaths }
+        guard paths.count <= maxPaths else { throw WriteError.tooManyPaths }
+        guard paths.allSatisfy({ $0.hasPrefix("/") }) else { throw WriteError.notAbsolute }
+        guard paths.allSatisfy({ $0.utf8.count <= maxPathLength }) else { throw WriteError.pathTooLong }
         let id = UUID().uuidString
         let dir = directory(home: home)
         try FileManager.default.createDirectory(
             at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let data = try JSONEncoder().encode(Record(path: path, created: now.timeIntervalSince1970))
+        let data = try JSONEncoder().encode(Record(paths: paths, created: now.timeIntervalSince1970))
         try data.write(to: dir.appendingPathComponent("\(id).json"), options: .atomic)
         return id
     }
 
-    /// App side: the file the extension recorded under `id`, or nil.
+    /// App side: the files the extension recorded under `id`, in order, or nil.
     ///
-    /// Refuses anything that isn't exactly what the extension writes, and **uses the record up**:
-    /// once the file exists it is deleted whether or not it passes, so an id works at most once.
+    /// Refuses anything that isn't exactly what the extension writes — **one bad path rejects the
+    /// whole record** — and **uses the record up**: once the file exists it is deleted whether or
+    /// not it passes, so an id works at most once.
     static func consume(
         id: String, home: String, now: Date = Date(), fileManager fm: FileManager = .default
-    ) -> URL? {
+    ) -> [URL]? {
         let dir = directory(home: home)
         defer { sweep(dir, now: now, fileManager: fm) }
 
@@ -89,8 +107,8 @@ enum ShareHandoff {
 
         let age = now.timeIntervalSince1970 - record.created
         guard age >= -2, age <= maxAge else { return nil }
-        guard record.path.hasPrefix("/") else { return nil }
-        return URL(fileURLWithPath: record.path)
+        guard valid(record.paths) else { return nil }
+        return record.paths.map { URL(fileURLWithPath: $0) }
     }
 
     /// Removes records nobody collected. Best effort, never throws.

@@ -45,34 +45,45 @@ final class ShareViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        NSLog("[SendToPhone] viewDidLoad, inputItems=%d", extensionContext?.inputItems.count ?? -1)
-
-        guard let item = extensionContext?.inputItems.first as? NSExtensionItem,
-              let attachment = item.attachments?.first
-        else {
+        // Everything Finder selected: every attachment of every item, in the order it listed them.
+        let items = (extensionContext?.inputItems as? [NSExtensionItem]) ?? []
+        let attachments = items.flatMap { $0.attachments ?? [] }
+        NSLog("[SendToPhone] viewDidLoad, items=%d attachments=%d", items.count, attachments.count)
+        guard !attachments.isEmpty else {
             NSLog("[SendToPhone] no attachment on the extension item")
             return complete()
         }
-        NSLog("[SendToPhone] offered types: %@", attachment.registeredTypeIdentifiers.joined(separator: ", "))
 
-        // `loadItem`, not `loadDataRepresentation`: a Finder share hands over an NSURL, and which
-        // concrete form arrives varies, so accept all three rather than betting on one.
-        attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] coded, error in
-            let url: URL? = (coded as? URL)
-                ?? (coded as? NSURL) as URL?
-                ?? (coded as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
-            if let error {
-                NSLog("[SendToPhone] loadItem failed: %@", error.localizedDescription)
-            }
-            guard let url, let handoff = Self.handoffURL(for: url) else {
+        // One slot per attachment, so the files keep their order whichever load finishes first.
+        let slots = URLSlots(count: attachments.count)
+        let group = DispatchGroup()
+        for (index, attachment) in attachments.enumerated() {
+            group.enter()
+            // `loadItem`, not `loadDataRepresentation`: a Finder share hands over an NSURL, and which
+            // concrete form arrives varies, so accept all three rather than betting on one.
+            attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { coded, error in
+                let url: URL? = (coded as? URL)
+                    ?? (coded as? NSURL) as URL?
+                    ?? (coded as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
+                if let error {
+                    NSLog("[SendToPhone] loadItem failed: %@", error.localizedDescription)
+                }
                 // The type only: `coded` is the shared file's URL, i.e. its path.
-                NSLog("[SendToPhone] no usable file URL, or the hand-off couldn't be recorded (got %@)",
-                      String(describing: type(of: coded)))
-                DispatchQueue.main.async { self?.complete() }
+                if url == nil { NSLog("[SendToPhone] attachment %d has no file URL (got %@)", index, String(describing: type(of: coded))) }
+                slots.set(index, url)
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            let urls = slots.fileURLs()
+            guard !urls.isEmpty, let handoff = Self.handoffURL(for: urls) else {
+                NSLog("[SendToPhone] no usable file URL, or the hand-off couldn't be recorded")
+                self?.complete()
                 return
             }
-            Self.log.info("handing off \(handoff.absoluteString, privacy: .public)")
-            DispatchQueue.main.async { self?.handOff(handoff) }
+            // A count, never the paths: they are the user's file names.
+            Self.log.info("handing off \(urls.count, privacy: .public) file(s)")
+            self?.handOff(handoff)
         }
     }
 
@@ -100,15 +111,15 @@ final class ShareViewController: NSViewController {
         }
     }
 
-    /// `linktomac://send?id=<uuid>`. The path is recorded in this extension's container, not in the
-    /// URL (see `ShareHandoff`). `NSHomeDirectory()` inside the sandbox is the container's `Data`
-    /// folder — the same place the app resolves with `ShareHandoff.extensionHome()`.
-    private static func handoffURL(for file: URL) -> URL? {
+    /// `linktomac://send?id=<uuid>`. The paths are recorded, together, in this extension's container
+    /// — not in the URL (see `ShareHandoff`). `NSHomeDirectory()` inside the sandbox is the
+    /// container's `Data` folder — the same place the app resolves with `ShareHandoff.extensionHome()`.
+    private static func handoffURL(for files: [URL]) -> URL? {
         let id: String
         do {
-            id = try ShareHandoff.write(path: file.path, home: NSHomeDirectory())
+            id = try ShareHandoff.write(paths: files.map(\.path), home: NSHomeDirectory())
         } catch {
-            // Domain and code only: a Cocoa error's description can quote the file's path.
+            // Domain and code only: a Cocoa error's description can quote a file's path.
             let e = error as NSError
             log.error("couldn't record the hand-off: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
             return nil
@@ -122,5 +133,25 @@ final class ShareViewController: NSViewController {
 
     private func complete() {
         extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+    }
+}
+
+/// Collects the attachment loads, which finish on arbitrary threads, into fixed slots.
+private final class URLSlots: @unchecked Sendable {
+    private let lock = NSLock()
+    private var slots: [URL?]
+
+    init(count: Int) { slots = Array(repeating: nil, count: count) }
+
+    func set(_ index: Int, _ url: URL?) {
+        lock.lock(); defer { lock.unlock() }
+        slots[index] = url
+    }
+
+    /// The file URLs that loaded, in the order they were listed, each path once.
+    func fileURLs() -> [URL] {
+        lock.lock(); defer { lock.unlock() }
+        var seen = Set<String>()
+        return slots.compactMap { $0 }.filter { $0.isFileURL && seen.insert($0.path).inserted }
     }
 }
