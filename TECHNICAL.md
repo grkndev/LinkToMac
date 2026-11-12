@@ -655,9 +655,10 @@ phone panel, a Notifications / Messages tab strip, clip history and Settings.
 | `Pairing.swift` / `PairingWindow.swift` | Room/key generation, Keychain, the v3 QR |
 | `LoginItem.swift` | `SMAppService` auto-start at login |
 | `MenuPanel.swift`, `DashboardWindow.swift`, `PhonePanel.swift`, `FeaturePanel.swift`, `ClipHistoryScreen.swift` | The popover and the dashboard: phone identity, Notifications/Messages tabs (the Messages tab has the reply composer), clip history |
-| `SettingsWindow.swift`, `AppearanceSettings.swift`, `AboutView.swift`, `DashboardComponents.swift`, `PanelComponents.swift` | Settings, appearance, relay, about, shared M3 components |
-| `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — sandboxed, so it records the path in its own container (`ShareHandoff`) and opens `linktomac://send?id=<uuid>` (`NSWorkspace.open`; `NSExtensionContext.open` does nothing for a Finder share extension). Inert under ad-hoc signing, runs in the Developer-ID build |
-| `ShareHandoff.swift` | Foundation-only, compiled into the app, the extension **and** the test target so the writer and the reader are one source. `write` (extension) puts `{path, created}` in `<container>/Data/Library/Caches/ShareHandoff/<uuid>.json`; `consume` (app) accepts only a canonical-UUID id, a regular file owned by the user, ≤ 8 KB, well-formed, ≤ 120 s old, absolute path — and deletes the record whether or not it passes (single use); leftovers older than 10 min are swept. `ShareHandoffTests` |
+| `SettingsWindow.swift`, `AppearanceSettings.swift`, `AboutView.swift`, `DashboardComponents.swift` | Settings, appearance, relay, about, shared M3 components |
+| `ShareExtension/` | Finder ▸ Share ▸ "Send to Phone" — sandboxed, so it records **everything the share selected** (up to 500 files/folders, in order) in its own container (`ShareHandoff`) and opens ONE `linktomac://send?id=<uuid>` (`NSWorkspace.open`; `NSExtensionContext.open` does nothing for a Finder share extension). Inert under ad-hoc signing, runs in the Developer-ID build |
+| `ShareHandoff.swift` | Foundation-only, compiled into the app, the extension **and** the test target so the writer and the reader are one source. `write` (extension) puts `{paths, created}` in `<container>/Data/Library/Caches/ShareHandoff/<uuid>.json`; `consume` (app) returns the paths as `[URL]` and accepts only a canonical-UUID id, a regular file owned by the user, ≤ 1 MiB, well-formed, ≤ 120 s old, 1…500 absolute paths of ≤ 1024 bytes — **one bad path rejects the whole record** — and deletes the record whether or not it passes (single use); leftovers older than 10 min are swept. `maxPaths` (500) equals the extension's `NSExtensionActivationSupportsFileWithMaxCount`: with a smaller activation count Finder hides the entry for a selection the app would accept, with a larger one it would offer a selection the app refuses. `ShareHandoffTests` |
+| `DropStaging.swift` | Foundation-only (test target compiles it). Where a dragged **file promise** (Mail attachment, Photos item, Safari download) is materialised before it is sent: `<temp>/LinkToMacDrops/<uuid>/`, one folder per drop, files under their real (sanitised, de-duplicated) names. `fileLikeType` decides whether an item provider is a promise — **only when AppKit's promise markers are present** (a text selection, a link and a bare image are never sent as files; `public.url-name` and `webarchive` would pass any content-type test) — and falls back to `public.data` when the markers are there but no concrete type is (measured with a real `NSFilePromiseProvider`: the type lives on `NSFilePromiseReceiver.fileTypes`, not among the pasteboard types). Staged files must outlive `finishBatch` (a failed row's retry source is the staged URL), so they are swept after 24 h when a new folder is made and **all cleared at launch** (the history that could point at them is in memory). `DropStagingTests` |
 
 ### 4.1 RelayClient (Swift)
 
@@ -702,8 +703,11 @@ The wire side is §5.4; this is how the Mac implements it.
 
 **Ways in.** Every one hands *all* the dropped items to `RelayClient.sendFilesToPhone(_:)` at once: the
 dashboard window and popover (`.phoneFileDrop`: an `.onDrop` that resolves **every** provider through a
-lock-guarded box, reporting items that carry no file URL — Mail/Photos "file promises" — instead of
-ignoring them), the menu-bar icon (`StatusDropView.performDragOperation`, file URLs only), and a
+lock-guarded box; an item with no readable file URL that is a **file promise** is copied from the provider's
+temporary file into `DropStaging` and sent from there, anything else is reported instead of ignored), the
+menu-bar icon (`StatusDropView.performDragOperation`: file URLs first and authoritative — some sources offer a
+URL *and* a promise for one file — otherwise `NSFilePromiseReceiver.receivePromisedFiles` into `DropStaging`,
+reported once when all have answered or after 120 s), and a
 `linktomac://send?id=…` URL (the Share extension only — the id keys a one-shot record in its container, so a bare `open linktomac://send?path=…` sends nothing). A folder is allowed.
 
 **Planning.** `FileBatchPlanner.plan` flattens the drop off the main actor: folders are walked with
@@ -1355,7 +1359,7 @@ mac/
     LoginItem.swift              SMAppService auto-start
     MenuPanel.swift / DashboardWindow.swift / PhonePanel.swift / FeaturePanel.swift / ClipHistoryScreen.swift   popover + dashboard
     SettingsWindow.swift / AppearanceSettings.swift / AboutView.swift   settings surfaces
-    DashboardComponents.swift / PanelComponents.swift   shared M3 components
+    DashboardComponents.swift                           shared M3 components
   ShareExtension/                Finder ▸ Share ▸ "Send to Phone" (needs a Developer ID build to run; hands the path over via linktomac://)
   Tests/                         swift-testing: AckWindow, FileSender (resume), FileInbox, FileBatchPlanner, FileFrame, FileFrameVectors, BurstCounter
 

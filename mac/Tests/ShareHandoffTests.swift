@@ -23,20 +23,22 @@ import Testing
         return id
     }
 
-    private func record(_ path: String, created: Date) -> Data {
-        try! JSONEncoder().encode(ShareHandoff.Record(path: path, created: created.timeIntervalSince1970))
+    private func record(_ path: String, created: Date) -> Data { record(paths: [path], created: created) }
+
+    private func record(paths: [String], created: Date) -> Data {
+        try! JSONEncoder().encode(ShareHandoff.Record(paths: paths, created: created.timeIntervalSince1970))
     }
 
     @Test func roundTripReturnsThePath() throws {
         let home = try makeHome()
-        let id = try ShareHandoff.write(path: "/Users/someone/report.pdf", home: home)
+        let id = try ShareHandoff.write(paths: ["/Users/someone/report.pdf"], home: home)
         #expect(UUID(uuidString: id)?.uuidString == id)
-        #expect(ShareHandoff.consume(id: id, home: home) == URL(fileURLWithPath: "/Users/someone/report.pdf"))
+        #expect(ShareHandoff.consume(id: id, home: home) == [URL(fileURLWithPath: "/Users/someone/report.pdf")])
     }
 
     @Test func aHandoffWorksOnlyOnce() throws {
         let home = try makeHome()
-        let id = try ShareHandoff.write(path: "/tmp/a", home: home)
+        let id = try ShareHandoff.write(paths: ["/tmp/a"], home: home)
         #expect(ShareHandoff.consume(id: id, home: home) != nil)
         #expect(ShareHandoff.consume(id: id, home: home) == nil)
         #expect(files(home).isEmpty)
@@ -45,7 +47,7 @@ import Testing
     @Test func idsThatAreNotACanonicalUUIDAreRefused() throws {
         let home = try makeHome()
         // A real record sits there; none of these may reach it or anything outside the directory.
-        let id = try ShareHandoff.write(path: "/tmp/a", home: home)
+        let id = try ShareHandoff.write(paths: ["/tmp/a"], home: home)
         let bad = ["", "..", "../x", "a/b", "\(id)/..", id.lowercased(), "\(id).json", String(id.dropLast()),
                    id + "0", "not-a-uuid", String(repeating: "A", count: 4096)]
         for candidate in bad {
@@ -67,7 +69,7 @@ import Testing
         let home = try makeHome()
         let now = Date()
         let id = try plant(home, bytes: record("/tmp/a", created: now.addingTimeInterval(-ShareHandoff.maxAge + 5)))
-        #expect(ShareHandoff.consume(id: id, home: home, now: now) == URL(fileURLWithPath: "/tmp/a"))
+        #expect(ShareHandoff.consume(id: id, home: home, now: now) == [URL(fileURLWithPath: "/tmp/a")])
     }
 
     @Test func aRecordFromTheFutureIsRefused() throws {
@@ -133,7 +135,57 @@ import Testing
 
     @Test func writeRefusesARelativePath() throws {
         let home = try makeHome()
-        #expect(throws: ShareHandoff.WriteError.self) { try ShareHandoff.write(path: "relative.txt", home: home) }
+        #expect(throws: ShareHandoff.WriteError.self) { try ShareHandoff.write(paths: ["relative.txt"], home: home) }
+        #expect(files(home).isEmpty)
+    }
+
+    @Test func severalPathsRoundTripInOrder() throws {
+        let home = try makeHome()
+        let paths = ["/Users/someone/b.pdf", "/Users/someone/a.txt", "/Users/someone/Trip", "/tmp/c"]
+        let id = try ShareHandoff.write(paths: paths, home: home)
+        #expect(ShareHandoff.consume(id: id, home: home) == paths.map { URL(fileURLWithPath: $0) })
+        #expect(files(home).isEmpty, "one record, used up in one go")
+    }
+
+    @Test func theLargestShareTheMenuOffersIsAccepted() throws {
+        let home = try makeHome()
+        let paths = (0..<ShareHandoff.maxPaths).map { "/Users/someone/Photos/IMG_\($0).jpg" }
+        let id = try ShareHandoff.write(paths: paths, home: home)
+        let back = ShareHandoff.consume(id: id, home: home)
+        #expect(back?.count == ShareHandoff.maxPaths)
+        #expect(back?.last == URL(fileURLWithPath: paths.last!))
+    }
+
+    @Test func writeRefusesWhatTheAppWouldRefuse() throws {
+        let home = try makeHome()
+        #expect(throws: ShareHandoff.WriteError.noPaths) { try ShareHandoff.write(paths: [], home: home) }
+        #expect(throws: ShareHandoff.WriteError.notAbsolute) {
+            try ShareHandoff.write(paths: ["/tmp/a", "relative.txt", "/tmp/b"], home: home)
+        }
+        #expect(throws: ShareHandoff.WriteError.tooManyPaths) {
+            try ShareHandoff.write(paths: Array(repeating: "/tmp/a", count: ShareHandoff.maxPaths + 1), home: home)
+        }
+        #expect(throws: ShareHandoff.WriteError.pathTooLong) {
+            try ShareHandoff.write(paths: ["/" + String(repeating: "x", count: ShareHandoff.maxPathLength)], home: home)
+        }
+        #expect(files(home).isEmpty, "a refused write leaves nothing behind")
+    }
+
+    @Test func oneBadPathRejectsTheWholeRecordAndUsesItUp() throws {
+        let home = try makeHome()
+        let now = Date()
+        let tooLong = "/" + String(repeating: "x", count: ShareHandoff.maxPathLength)
+        let bad: [[String]] = [
+            [],                                              // nothing to send
+            ["/tmp/a", "relative.txt"],                      // one relative path among good ones
+            ["/tmp/a", ""],                                  // an empty one
+            [tooLong],                                       // longer than PATH_MAX
+            Array(repeating: "/tmp/a", count: ShareHandoff.maxPaths + 1),
+        ]
+        for paths in bad {
+            let id = try plant(home, bytes: record(paths: paths, created: now))
+            #expect(ShareHandoff.consume(id: id, home: home, now: now) == nil, "accepted \(paths.count) path(s)")
+        }
         #expect(files(home).isEmpty)
     }
 

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -78,16 +79,22 @@ struct PhoneFileDrop: ViewModifier {
     let client: RelayClient
     @Binding var isTargeted: Bool
 
+    /// File URLs (Finder) plus the pasteboard types of a file *promise* — a Mail attachment, a Photos
+    /// item, a Safari download. Those are AppKit pasteboard types, not declared UTIs, hence
+    /// `importedAs:`. Without them a promise-only drag is never offered to this view.
+    private static let acceptedTypes: [UTType] =
+        [.fileURL] + NSFilePromiseReceiver.readableDraggedTypes.map { UTType(importedAs: $0) }
+
     func body(content: Content) -> some View {
         content
-            .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
+            .onDrop(of: Self.acceptedTypes, isTargeted: $isTargeted) { providers in
                 NSLog("[LinkToMac] drop received: %d provider(s)", providers.count)
                 guard !providers.isEmpty else { return false }
                 Self.collect(providers) { urls, unreadable in
                     if !urls.isEmpty { client.sendFilesToPhone(urls) }
                     if unreadable > 0 {
-                        // A drag that carries no file URL (a Mail attachment, a Photos item) is a
-                        // file *promise*; it can't be read from here. Say so rather than nothing.
+                        // Something that is neither a readable file nor a file promise we could
+                        // receive (or a promise whose source app didn't deliver). Say so, not nothing.
                         let what = unreadable == 1 ? "1 item" : "\(unreadable) items"
                         Task { await MacNotifier.post(title: "Couldn't read \(what)", body: "Drop files from Finder instead.") }
                     }
@@ -110,10 +117,25 @@ struct PhoneFileDrop: ViewModifier {
             provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
                 if let data, let url = URL(dataRepresentation: data, relativeTo: nil) {
                     box.add(url)
+                    group.leave()
+                } else if let type = DropStaging.fileLikeType(among: provider.registeredTypeIdentifiers),
+                          let folder = box.stagingFolder() {
+                    // A file *promise* (Mail, Photos, Safari): ask the source app to write the file,
+                    // and keep a copy where the sender can read it for as long as the app runs.
+                    provider.loadFileRepresentation(forTypeIdentifier: type) { temp, _ in
+                        // `temp` is deleted when this block returns, so the copy has to happen here.
+                        if let temp, let staged = try? DropStaging.stage(
+                            copying: temp, suggestedName: provider.suggestedName, typeIdentifier: type, into: folder) {
+                            box.add(staged)
+                        } else {
+                            box.addUnreadable()
+                        }
+                        group.leave()
+                    }
                 } else {
                     box.addUnreadable()
+                    group.leave()
                 }
-                group.leave()
             }
         }
         group.notify(queue: .main) {
@@ -129,8 +151,17 @@ private final class URLBox: @unchecked Sendable {
     private var urls: [URL] = []
     private var unreadable = 0
 
+    private var folder: URL?
+
     func add(_ url: URL) { lock.lock(); urls.append(url); lock.unlock() }
     func addUnreadable() { lock.lock(); unreadable += 1; lock.unlock() }
+
+    /// One staging folder for the whole drop, made the first time a promise needs it.
+    func stagingFolder() -> URL? {
+        lock.lock(); defer { lock.unlock() }
+        if folder == nil { folder = try? DropStaging.makeFolder() }
+        return folder
+    }
     func snapshot() -> ([URL], Int) { lock.lock(); defer { lock.unlock() }; return (urls, unreadable) }
 }
 

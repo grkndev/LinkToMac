@@ -27,12 +27,14 @@
 		<string>ShareViewController</string>
 		<key>NSExtensionAttributes</key>
 		<dict>
-			<!-- One file at a time: the transfer is chunked and serialized, and a multi-file
-			     drop would need a queue the app doesn't have yet. -->
+			<!-- Offered for up to this many selected files (and folders). With 1, Finder hid
+			     "Send to Phone" as soon as two things were selected. The app sends them as one
+			     batch (`RelayClient.sendFilesToPhone`), and ShareHandoff.maxPaths is the same number:
+			     keep the two equal, or a selection the menu offers would be refused by the app. -->
 			<key>NSExtensionActivationRule</key>
 			<dict>
 				<key>NSExtensionActivationSupportsFileWithMaxCount</key>
-				<integer>1</integer>
+				<integer>500</integer>
 			</dict>
 		</dict>
 	</dict>
