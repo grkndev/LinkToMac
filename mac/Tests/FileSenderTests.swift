@@ -214,6 +214,64 @@ private func run(_ sender: FileSender, _ items: [OutgoingItem], _ phone: FakePho
         #expect(zip(all, all.dropFirst()).allSatisfy { $0.doneBytes <= $1.doneBytes })
         #expect(all.contains { $0.index == 2 })
     }
+
+    /// Polls `condition` for up to `seconds`; the sender runs on its own queue, so a test waits for it.
+    private func waitUntil(_ seconds: TimeInterval = 3, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return condition()
+    }
+
+    @Test func theBarMovesWithThePhonesAcknowledgementsNotWithTheHandOff() async throws {
+        // Handing a chunk to the transport only QUEUES it behind the upload, which on a slow uplink
+        // takes seconds; the bar used to read 100% the moment the last chunk was queued, then sat
+        // there while the phone had not received a byte.
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let item = try makeFile(12, in: dir)                 // 3 chunks of 4 bytes; the window (4) holds them all
+        let sender = FileSender(config: config(timeout: 10))
+        let phone = FakePhone(.silent)                       // takes every chunk and says nothing
+        phone.sender = sender
+        let seen = Locked<[BatchProgress]>([])
+        let result = Locked<BatchResult?>(nil)
+        sender.send(items: [item], transport: phone.transport,
+                    progress: { p in seen.mutate { $0.append(p) } }, done: { r in result.mutate { $0 = r } })
+
+        // All three chunks are handed over…
+        #expect(await waitUntil { phone.frames.count == 3 })
+        let id = try #require(phone.frames.first?.id)
+        // …and the bar has not moved: nothing was acknowledged.
+        #expect(seen.value.allSatisfy { $0.currentDone == 0 }, "queued is not delivered: \(seen.value.map(\.currentDone))")
+
+        sender.ack(id: id, seq: 0)
+        #expect(await waitUntil { seen.value.last?.currentDone == 4 })
+        sender.ack(id: id, seq: 1)
+        #expect(await waitUntil { seen.value.last?.currentDone == 8 })
+        #expect(result.value == nil, "still waiting for the last chunk")
+
+        sender.ack(id: id, seq: 2)
+        #expect(await waitUntil { result.value != nil })
+        #expect(result.value?.sent == ["f.bin"])
+        #expect(seen.value.last?.currentDone == 12)
+        #expect(zip(seen.value, seen.value.dropFirst()).allSatisfy { $0.currentDone <= $1.currentDone })
+    }
+
+    @Test func aShortFinalChunkIsCountedAtItsRealSize() async throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let item = try makeFile(10, in: dir)                 // chunks of 4, 4, 2
+        let sender = FileSender(config: config(timeout: 10))
+        let phone = FakePhone(.silent)
+        phone.sender = sender
+        let seen = Locked<[BatchProgress]>([])
+        sender.send(items: [item], transport: phone.transport,
+                    progress: { p in seen.mutate { $0.append(p) } }, done: { _ in })
+        #expect(await waitUntil { phone.frames.count == 3 })
+        let id = try #require(phone.frames.first?.id)
+        for seq in 0..<3 { sender.ack(id: id, seq: seq) }
+        #expect(await waitUntil { seen.value.last?.currentDone == 10 }, "10 bytes, not 12: \(seen.value.map(\.currentDone))")
+    }
 }
 
 final class Locked<T>: @unchecked Sendable {
