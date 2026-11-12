@@ -1,0 +1,221 @@
+{
+  "description": "The media fields carried inside the `stat` frame plaintext. Phone -> Mac: `media` (now playing) and `mediaArt`. Mac -> phone: `mediaCmd`. The phone builds `media`/parses `mediaCmd` (MediaState.kt); the Mac parses `media`/builds `mediaCmd` (NowPlaying.swift). `kind: state` is a media object the phone must produce exactly and the Mac must read back as `expect`; `kind: special` is a non-track state; `kind: absent` is a stat with no media field (the Mac must leave what it shows alone); `kind: command` is a Mac command and what the phone must read out of it; `kind: position` is the Mac's progress interpolation (`pos + dt * speed` while playing, never past `dur`, never negative).",
+  "cases": [
+    {
+      "name": "playing_full",
+      "kind": "state",
+      "wire": {
+        "media": {
+          "on": true, "pkg": "com.google.android.youtube", "app": "YouTube", "id": "a1b2c3d4e5f6",
+          "title": "Baktın Olmuyo", "artist": "Can Ozan", "album": "Single",
+          "state": "playing", "pos": 793000, "dur": 214000, "speed": 1.0,
+          "can": { "prev": true, "next": true, "seek": true },
+          "vol": 7, "volMax": 15
+        }
+      },
+      "expect": {
+        "update": "track", "pkg": "com.google.android.youtube", "app": "YouTube", "id": "a1b2c3d4e5f6",
+        "title": "Baktın Olmuyo", "artist": "Can Ozan", "album": "Single", "state": "playing",
+        "posMs": 793000, "durMs": 214000, "speed": 1.0,
+        "canPrev": true, "canNext": true, "canSeek": true, "vol": 7, "volMax": 15
+      }
+    },
+    {
+      "name": "paused_blank_artist_and_album_are_omitted",
+      "kind": "state",
+      "wire": {
+        "media": {
+          "on": true, "pkg": "com.example.podcasts", "app": "Podcasts", "id": "00ff00ff00ff",
+          "title": "Episode 12", "state": "paused", "pos": 60000, "dur": 1800000, "speed": 1.0,
+          "can": { "prev": false, "next": true, "seek": true },
+          "vol": 3, "volMax": 15
+        }
+      },
+      "expect": {
+        "update": "track", "pkg": "com.example.podcasts", "app": "Podcasts", "id": "00ff00ff00ff",
+        "title": "Episode 12", "artist": "", "album": "", "state": "paused",
+        "posMs": 60000, "durMs": 1800000, "speed": 1.0,
+        "canPrev": false, "canNext": true, "canSeek": true, "vol": 3, "volMax": 15
+      }
+    },
+    {
+      "name": "unknown_duration_is_omitted_and_cannot_seek",
+      "kind": "state",
+      "wire": {
+        "media": {
+          "on": true, "pkg": "com.example.radio", "app": "Radio", "id": "abababababab",
+          "title": "Live stream", "artist": "Station", "state": "playing", "pos": 0, "speed": 1.0,
+          "can": { "prev": false, "next": false, "seek": false },
+          "vol": 10, "volMax": 15
+        }
+      },
+      "expect": {
+        "update": "track", "pkg": "com.example.radio", "app": "Radio", "id": "abababababab",
+        "title": "Live stream", "artist": "Station", "album": "", "state": "playing",
+        "posMs": 0, "durMs": 0, "speed": 1.0,
+        "canPrev": false, "canNext": false, "canSeek": false, "vol": 10, "volMax": 15
+      }
+    },
+    {
+      "name": "buffering",
+      "kind": "state",
+      "wire": {
+        "media": {
+          "on": true, "pkg": "com.spotify.music", "app": "Spotify", "id": "123456789abc",
+          "title": "Song", "artist": "Artist", "state": "buffering", "pos": 1500, "dur": 200000, "speed": 1.0,
+          "can": { "prev": true, "next": true, "seek": true },
+          "vol": 0, "volMax": 15
+        }
+      },
+      "expect": {
+        "update": "track", "pkg": "com.spotify.music", "app": "Spotify", "id": "123456789abc",
+        "title": "Song", "artist": "Artist", "album": "", "state": "buffering",
+        "posMs": 1500, "durMs": 200000, "speed": 1.0,
+        "canPrev": true, "canNext": true, "canSeek": true, "vol": 0, "volMax": 15
+      }
+    },
+    {
+      "name": "no_session_clears_the_card",
+      "kind": "special",
+      "wire": { "media": null },
+      "expect": { "update": "cleared" }
+    },
+    {
+      "name": "notification_access_missing",
+      "kind": "special",
+      "wire": { "media": { "on": false, "reason": "no-access" } },
+      "expect": { "update": "unavailable", "reason": "no-access" }
+    },
+    {
+      "name": "a_stat_without_media_leaves_the_card_alone",
+      "kind": "absent",
+      "wire": { "level": 80, "charging": false, "prox": "near", "rssi": -61 },
+      "expect": { "update": "absent" }
+    },
+    {
+      "name": "an_unknown_state_reads_as_stopped",
+      "kind": "parse_only",
+      "wire": {
+        "media": {
+          "on": true, "pkg": "p", "app": "A", "id": "x", "title": "T", "state": "rewinding", "pos": 5, "dur": 10, "speed": 1.0,
+          "can": { "prev": true, "next": true, "seek": true }, "vol": 1, "volMax": 2
+        }
+      },
+      "expect": { "update": "track", "state": "stopped", "posMs": 5, "durMs": 10 }
+    },
+    {
+      "name": "garbage_media_is_ignored_not_crashed_on",
+      "kind": "parse_only",
+      "wire": { "media": "nope" },
+      "expect": { "update": "absent" }
+    },
+    {
+      "name": "toggle",
+      "kind": "command",
+      "cmd": { "mediaCmd": { "a": "toggle" } },
+      "expect": { "action": "toggle" }
+    },
+    {
+      "name": "play",
+      "kind": "command",
+      "cmd": { "mediaCmd": { "a": "play" } },
+      "expect": { "action": "play" }
+    },
+    {
+      "name": "pause",
+      "kind": "command",
+      "cmd": { "mediaCmd": { "a": "pause" } },
+      "expect": { "action": "pause" }
+    },
+    {
+      "name": "next",
+      "kind": "command",
+      "cmd": { "mediaCmd": { "a": "next" } },
+      "expect": { "action": "next" }
+    },
+    {
+      "name": "prev",
+      "kind": "command",
+      "cmd": { "mediaCmd": { "a": "prev" } },
+      "expect": { "action": "prev" }
+    },
+    {
+      "name": "seek",
+      "kind": "command",
+      "cmd": { "mediaCmd": { "a": "seek", "v": 120000 } },
+      "expect": { "action": "seek", "value": 120000 }
+    },
+    {
+      "name": "volume",
+      "kind": "command",
+      "cmd": { "mediaCmd": { "a": "vol", "v": 9 } },
+      "expect": { "action": "vol", "value": 9 }
+    },
+    {
+      "name": "phone_refuses_what_it_does_not_know",
+      "kind": "phone_only",
+      "cmd": { "mediaCmd": { "a": "eject" } },
+      "expect": null
+    },
+    {
+      "name": "phone_refuses_seek_without_a_value",
+      "kind": "phone_only",
+      "cmd": { "mediaCmd": { "a": "seek" } },
+      "expect": null
+    },
+    {
+      "name": "phone_refuses_a_negative_seek",
+      "kind": "phone_only",
+      "cmd": { "mediaCmd": { "a": "seek", "v": -5 } },
+      "expect": null
+    },
+    {
+      "name": "phone_ignores_a_stat_with_no_command",
+      "kind": "phone_only",
+      "cmd": { "level": 80, "charging": true },
+      "expect": null
+    },
+    {
+      "name": "position_advances_while_playing",
+      "kind": "position",
+      "params": { "state": "playing", "pos": 10000, "dur": 200000, "speed": 1.0, "dt_ms": 4000 },
+      "expect_ms": 14000
+    },
+    {
+      "name": "position_honours_playback_speed",
+      "kind": "position",
+      "params": { "state": "playing", "pos": 10000, "dur": 200000, "speed": 2.0, "dt_ms": 4000 },
+      "expect_ms": 18000
+    },
+    {
+      "name": "position_is_frozen_while_paused",
+      "kind": "position",
+      "params": { "state": "paused", "pos": 10000, "dur": 200000, "speed": 1.0, "dt_ms": 9000 },
+      "expect_ms": 10000
+    },
+    {
+      "name": "position_is_frozen_while_buffering",
+      "kind": "position",
+      "params": { "state": "buffering", "pos": 10000, "dur": 200000, "speed": 1.0, "dt_ms": 9000 },
+      "expect_ms": 10000
+    },
+    {
+      "name": "position_never_passes_the_duration",
+      "kind": "position",
+      "params": { "state": "playing", "pos": 199000, "dur": 200000, "speed": 1.0, "dt_ms": 30000 },
+      "expect_ms": 200000
+    },
+    {
+      "name": "position_runs_free_when_the_duration_is_unknown",
+      "kind": "position",
+      "params": { "state": "playing", "pos": 5000, "dur": 0, "speed": 1.0, "dt_ms": 3000 },
+      "expect_ms": 8000
+    },
+    {
+      "name": "position_is_never_negative",
+      "kind": "position",
+      "params": { "state": "playing", "pos": 1000, "dur": 200000, "speed": -2.0, "dt_ms": 5000 },
+      "expect_ms": 0
+    }
+  ]
+}

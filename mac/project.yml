@@ -82,6 +82,7 @@ targets:
       - path: Sources/LinkToMac/FileHistory.swift
       - path: Sources/LinkToMac/ShareHandoff.swift
       - path: Sources/LinkToMac/DropStaging.swift
+      - path: Sources/LinkToMac/NowPlaying.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
