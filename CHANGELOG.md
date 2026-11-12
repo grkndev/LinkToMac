@@ -2,6 +2,13 @@
 
 ## Unreleased (Mac)
 
+### Features
+- **Finder ▸ Share ▸ Send to Phone now works for several files and folders at once.** It used to be offered only when exactly one item was selected; it is now offered for up to 500 and everything goes as one batch with one summary.
+- **Dragging from Mail, Photos and Safari's download list can be sent** (they hand over a *file promise* rather than a file, which was reported as "Couldn't read N items"). Promised files are written to a temporary staging folder and sent from there; the folder is swept after a day and cleared at launch. *Implemented but not yet verified with a real drag.*
+
+### Fixes
+- **A resumed transfer could splice a different file onto an old partial.** The transfer id (name, size, modification time, folder) was computed with a modification time that was never filled in, so a different file of the same name and size looked like the half-sent one. It now includes the real modification time.
+
 ### Changes
 - **The Finder "Send to Phone" hand-off no longer puts a file path in a URL.** `linktomac://send?path=…` could be opened by any local app or web page, making the Mac send any readable file to your phone. The URL now carries only a one-time id; the path is recorded by the share extension in its own sandbox container and used once (it expires after two minutes). Opening `linktomac://send?path=…` by hand now does nothing.
 
