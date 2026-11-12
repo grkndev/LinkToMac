@@ -303,7 +303,7 @@ class SelfAdbModule : Module() {
         // If we couldn't self-toggle, the user just enabled it manually -> grab
         // the permission now so every future reboot is silent.
         if (!canToggle) {
-          log("grant for future silent reconnects: " + adb.grantSecureSettings(appCtx.packageName))
+          log("grant for future silent reconnects: " + adb.grantSecureSettings(appCtx.packageName)) // log-privacy: ok — our own package; the log prints the command output
         }
         deploy(clipPort)
         status("connected", "running")
@@ -356,7 +356,7 @@ class SelfAdbModule : Module() {
         log("adb session already live, reusing")
       }
       status("connected", "idle")
-      log("grant WRITE_SECURE_SETTINGS: " + adb.grantSecureSettings(appCtx.packageName))
+      log("grant WRITE_SECURE_SETTINGS: " + adb.grantSecureSettings(appCtx.packageName)) // log-privacy: ok — our own package; the log prints the command output
       deploy(clipPort)
       status("connected", "running")
       "ready"
@@ -954,7 +954,7 @@ class SelfAdbModule : Module() {
       log("pushing clipboard-agent.dex -> /data/local/tmp")
       adb.pushAsset("clipboard-agent.dex", "/data/local/tmp/clipboard-agent.dex") { log(it) }
       log("launching detached daemon...")
-      log("launch: " + adb.launchDaemon(clipPort, secret))
+      log("launch: " + adb.launchDaemon(clipPort, secret)) // log-privacy: ok — secret is only an argument; the log prints the command output (LAUNCHED)
       // launchDaemon only echoes LAUNCHED; confirm the daemon actually bound its socket.
       // On the half-trusted first adb session after a reboot the launch can silently fail,
       // and without this check autoStart would report a false "ready" while the bridge loops

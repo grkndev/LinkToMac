@@ -53,8 +53,8 @@
     "android": "APP_VARIANT=development expo run:android",
     "ios": "APP_VARIANT=development expo run:ios",
     "web": "APP_VARIANT=development expo start --web",
-    "lint": "APP_VARIANT=development expo lint",
-    "test": "bun test src/"
+    "lint": "APP_VARIANT=development expo lint && node scripts/check-log-privacy.mjs",
+    "test": "bun test src/ scripts/"
   },
   "private": true
 }

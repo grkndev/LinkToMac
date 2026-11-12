@@ -113,7 +113,7 @@ class InstallActivity : Activity() {
         )
         session.commit(result.intentSender)
       }
-      ClipBus.log("update: handed ${file.name} to the system installer")
+      ClipBus.log("update: handed ${file.name} to the system installer") // log-privacy: ok — our own update APK
     } catch (e: Exception) {
       ClipBus.log("update: install failed to start (${e.message})")
       toast("Couldn't start the update")
