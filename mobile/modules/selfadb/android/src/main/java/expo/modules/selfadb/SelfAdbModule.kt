@@ -1,6 +1,7 @@
 package expo.modules.selfadb
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -156,6 +157,23 @@ class SelfAdbModule : Module() {
 
     AsyncFunction("setAutoUpdate") { enabled: Boolean ->
       AppUpdater.get(appCtx).setAutoUpdate(enabled)
+    }
+
+    // Why Android last ended this app's process (newest first). The OS keeps these itself, so no
+    // storage of ours is involved. Only the reason, importance, status and a capped description go
+    // out — never the ANR trace stream, which is large and can carry data. minSdk is 30, which is
+    // where getHistoricalProcessExitReasons starts, so there is no version gate.
+    AsyncFunction("getExitReasons") { limit: Int ->
+      val am = appCtx.getSystemService(ActivityManager::class.java)
+      am.getHistoricalProcessExitReasons(appCtx.packageName, 0, limit.coerceIn(1, 30)).map { info ->
+        mapOf(
+          "timestamp" to info.timestamp,
+          "reason" to ExitReasons.reasonName(info.reason),
+          "importance" to ExitReasons.importanceName(info.importance),
+          "status" to info.status,
+          "description" to ExitReasons.cleanDescription(info.description),
+        )
+      }
     }
 
     // Rehearsal hook: point the release feed at a local server. Only honoured by a debuggable build.

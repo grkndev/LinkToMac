@@ -4,6 +4,7 @@ import type {
   AppUpdateCheck,
   AppUpdateState,
   ClipEvent,
+  ExitReason,
   FileTransferEntry,
   InstalledApp,
   NotifAppFilter,
@@ -163,6 +164,12 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
   getLogs(): Promise<string[]>;
   /** clear the in-app log ring buffer. */
   clearLogs(): Promise<void>;
+  /**
+   * why Android last ended this app's process, newest first (`ApplicationExitInfo`: LOW_MEMORY,
+   * CRASH, ANR, USER_REQUESTED, …). Absent in APKs built before the diagnostics work — callers
+   * feature-detect (`typeof SelfAdb.getExitReasons === 'function'`).
+   */
+  getExitReasons(limit: number): Promise<ExitReason[]>;
   /**
    * fetch the privileged daemon's own on-device log + a liveness/socket probe.
    * (Re)connects adb over mDNS, self-enabling wireless debugging if permitted.

@@ -113,6 +113,20 @@ export type AppUpdateState = {
   error: string | null;
 };
 
+/** One entry of `ApplicationExitInfo`: why Android ended this app's process. */
+export type ExitReason = {
+  /** epoch milliseconds */
+  timestamp: number;
+  /** readable name: LOW_MEMORY, CRASH, CRASH_NATIVE, ANR, USER_REQUESTED, … (`REASON_<n>` when unknown) */
+  reason: string;
+  /** the process's importance when it died: FOREGROUND, FOREGROUND_SERVICE, CACHED, … */
+  importance: string;
+  /** exit status / signal number, as the OS reports it */
+  status: number;
+  /** OEM free text, capped; empty when there is none */
+  description: string;
+};
+
 export type AppUpdateCheck = AppUpdateState & {
   /** false when the probe itself failed (offline / API error) — "no update" must not be claimed then */
   checked: boolean;

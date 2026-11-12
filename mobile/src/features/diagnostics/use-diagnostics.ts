@@ -32,13 +32,14 @@ async function probe<T>(run: () => Promise<T>, ms = PROBE_MS): Promise<T | null>
   }
 }
 
-/** `getExitReasons` only exists in APKs built after the diagnostics work; older ones skip the section. */
-type WithExitReasons = { getExitReasons?: (limit: number) => Promise<ExitRecord[]> };
-
+/**
+ * `getExitReasons` only exists in APKs built after the diagnostics work. An OTA of this JS onto an
+ * older APK has to skip the section instead of throwing, hence the feature check (same pattern as
+ * `getAutoUpdate` in settings).
+ */
 async function readExits(): Promise<ExitRecord[] | 'unsupported' | null> {
-  const fn = (SelfAdb as unknown as WithExitReasons).getExitReasons;
-  if (typeof fn !== 'function') return 'unsupported';
-  return probe(() => fn.call(SelfAdb, EXIT_REASON_LIMIT));
+  if (typeof SelfAdb.getExitReasons !== 'function') return 'unsupported';
+  return probe(() => SelfAdb.getExitReasons(EXIT_REASON_LIMIT));
 }
 
 const PERMISSIONS: { name: string; check: () => Promise<boolean> }[] = [
