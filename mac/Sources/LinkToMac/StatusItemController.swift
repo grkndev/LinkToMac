@@ -267,7 +267,8 @@ private final class StatusDropView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        registerForDraggedTypes([.fileURL])
+        // File URLs (Finder) and file promises (Mail attachments, Photos, Safari downloads).
+        registerForDraggedTypes([.fileURL] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
     }
 
     required init?(coder: NSCoder) { nil }
@@ -282,17 +283,92 @@ private final class StatusDropView: NSView {
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pasteboard = sender.draggingPasteboard
         // `fileURLsOnly`: without it a dragged web link or a text clip also reads back as an NSURL.
-        guard let urls = sender.draggingPasteboard.readObjects(
+        let urls = (pasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL], !urls.isEmpty
-        else { return false }
-        onDrop?(urls)
+        ) as? [URL]) ?? []
+        // Real file URLs are authoritative: some sources offer a URL AND a promise for the same
+        // file, and acting on both would send it twice.
+        if !urls.isEmpty {
+            onDrop?(urls)
+            return true
+        }
+        // No file URLs: a Mail attachment, a Photos item or a Safari download, which is only a
+        // *promise* to write the file. Ask the source app to write it into a staging folder.
+        let receivers = (pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil)
+            as? [NSFilePromiseReceiver]) ?? []
+        guard !receivers.isEmpty else { return false }
+        receivePromises(receivers)
         return true
+    }
+
+    /// Receives each promised file into one staging folder and, once every one has answered (or the
+    /// source app has been silent for two minutes), hands the staged URLs over as one drop.
+    private func receivePromises(_ receivers: [NSFilePromiseReceiver]) {
+        guard let folder = try? DropStaging.makeFolder() else {
+            Self.reportUnreadable(receivers.count)
+            return
+        }
+        // A receiver can promise several files; each one reports back separately.
+        let expected = receivers.reduce(0) { $0 + max(1, $1.fileNames.count) }
+        let collector = PromiseCollector(expected: expected) { [weak self] urls, failed in
+            if !urls.isEmpty { self?.onDrop?(urls) }
+            if failed > 0 { Self.reportUnreadable(failed) }
+        }
+        for receiver in receivers {
+            receiver.receivePromisedFiles(atDestination: folder, options: [:], operationQueue: .main) { url, error in
+                collector.received(error == nil ? url : nil)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { collector.finish() }
+    }
+
+    private static func reportUnreadable(_ count: Int) {
+        let what = count == 1 ? "1 item" : "\(count) items"
+        Task { await MacNotifier.post(title: "Couldn't read \(what)", body: "Drop files from Finder instead.") }
     }
 
     override func mouseDown(with event: NSEvent) {
         (superview as? NSButton)?.performClick(nil)
+    }
+}
+
+/// Gathers the answers of several file-promise receivers (they arrive on the main queue, one per
+/// promised file) and reports once: when all have answered, or when `finish()` is called because the
+/// source app never will. Reports at most once.
+private final class PromiseCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: Int
+    private var urls: [URL] = []
+    private var failed = 0
+    private var finished = false
+    private let done: @MainActor @Sendable ([URL], Int) -> Void
+
+    init(expected: Int, done: @escaping @MainActor @Sendable ([URL], Int) -> Void) {
+        remaining = expected
+        self.done = done
+    }
+
+    /// A promised file arrived (`url`) or couldn't be delivered (`nil`).
+    func received(_ url: URL?) {
+        lock.lock()
+        if let url { urls.append(url) } else { failed += 1 }
+        remaining -= 1
+        let all = remaining <= 0
+        lock.unlock()
+        if all { finish() }
+    }
+
+    /// Reports what has arrived so far, once. Anything still outstanding counts as unreadable.
+    func finish() {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
+        let result = (urls, failed + max(0, remaining))
+        lock.unlock()
+        let done = self.done
+        Task { @MainActor in done(result.0, result.1) }
     }
 }
 

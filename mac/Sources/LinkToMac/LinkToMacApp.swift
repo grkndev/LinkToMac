@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Files staged from dragged promises last run can no longer be a retry source (the transfer
+        // history lives in memory), so they are just clutter.
+        DropStaging.purgeAll()
         client.connect()
         // A local copy fans out to whichever LAN server is live (re-read at call time).
         client.onLocalClip = { [weak self] text in self?.lan?.sendClip(text) }

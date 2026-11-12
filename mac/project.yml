@@ -81,6 +81,7 @@ targets:
       - path: Sources/LinkToMac/FileDrop.swift
       - path: Sources/LinkToMac/FileHistory.swift
       - path: Sources/LinkToMac/ShareHandoff.swift
+      - path: Sources/LinkToMac/DropStaging.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
