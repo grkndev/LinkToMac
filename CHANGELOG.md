@@ -1,8 +1,17 @@
 # Changelog
 
+## Unreleased (Android)
+
+### Features
+- **Mirror media** (Settings ▸ Mirroring, off by default) — sends what the phone is playing (title, artist, cover, position, the app) to the Mac and accepts play/pause, skip, seek and volume from it. It needs only the Notification access the app already asks for: no Wireless Debugging, no daemon, so it works on Mobile Hotspot too. State goes out when it changes (the Mac advances the progress itself), and titles never reach the logs.
+
+### Internal
+- The media fields ride inside the existing `stat` frame (`media`, `mediaArt`, `mediaCmd`; TECHNICAL.md §5.5), so the relay is unchanged. `MediaState.kt` / `NowPlaying.swift` are tested against the shared `protocol-vectors/stat-media.json`.
+
 ## Unreleased (Mac)
 
 ### Features
+- **Media card on the Overview page and a row in the menu-bar panel.** Shows what your phone is playing (cover, title, artist, app, progress that advances on its own) and controls it: play/pause, previous/next, seek by clicking the bar, and the phone's media volume. Replaces the "Soon" placeholder. Needs "Mirror media" turned on in the Android app.
 - **Finder ▸ Share ▸ Send to Phone now works for several files and folders at once.** It used to be offered only when exactly one item was selected; it is now offered for up to 500 and everything goes as one batch with one summary.
 - **Dragging from Mail, Photos and Safari's download list can be sent** (they hand over a *file promise* rather than a file, which was reported as "Couldn't read N items"). Promised files are written to a temporary staging folder and sent from there; the folder is swept after a day and cleared at launch. *Implemented but not yet verified with a real drag.*
 
