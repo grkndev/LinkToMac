@@ -122,7 +122,7 @@ class NotificationListener : NotificationListenerService() {
       if (svc != null) {
         svc.sendNote(json.toString())
       } else {
-        ClipBus.log("note dropped (service down): $pkg")
+        ClipBus.log("note dropped (service down)")
       }
     }
   }

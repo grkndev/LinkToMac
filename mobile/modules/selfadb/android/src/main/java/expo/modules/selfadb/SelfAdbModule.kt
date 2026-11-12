@@ -164,7 +164,7 @@ class SelfAdbModule : Module() {
     }
 
     AsyncFunction("pair") { host: String, port: Int, code: String ->
-      log("pairing $host:$port")
+      log("pairing (adb)")
       val ok = adb.pair(host, port, code)
       if (!ok) throw Exception("pair failed (wrong code / port / not in pairing mode)")
       "paired"
@@ -172,7 +172,7 @@ class SelfAdbModule : Module() {
 
     AsyncFunction("connect") { host: String, port: Int ->
       status("connecting", "idle")
-      log("connecting $host:$port")
+      log("connecting (adb)")
       // connect() returns false ONLY when a session is already live (libadb's
       // isConnected() guard) — that's success, not failure. A real failure throws
       // (AdbPairingRequiredException / IOException).
@@ -276,7 +276,7 @@ class SelfAdbModule : Module() {
           log("dropping stale adb session before reconnect")
           adb.disconnect()
         }
-        log("connecting $host:${endpoint.second} (mDNS)")
+        log("connecting (mDNS)")
         if (!adb.connect(host, endpoint.second)) {
           status("failed", "idle")
           throw Exception("connect failed despite mDNS endpoint $host:${endpoint.second}")
@@ -323,7 +323,7 @@ class SelfAdbModule : Module() {
       val pairEp = adb.discover(AdbMdns.SERVICE_TYPE_TLS_PAIRING, 30000L)
         ?: throw Exception("pairing service not found (open 'Pair device with pairing code')")
       val pairHost = pairEp.first.hostAddress ?: "127.0.0.1"
-      log("pairing $pairHost:${pairEp.second}")
+      log("pairing (mDNS)")
       if (!adb.pair(pairHost, pairEp.second, code)) {
         throw Exception("pair failed (wrong code / dialog closed)")
       }
@@ -331,7 +331,7 @@ class SelfAdbModule : Module() {
       val connEp = adb.discover(AdbMdns.SERVICE_TYPE_TLS_CONNECT, 8000)
         ?: throw Exception("connect service not found after pairing")
       val connHost = connEp.first.hostAddress ?: "127.0.0.1"
-      log("connecting $connHost:${connEp.second} (mDNS)")
+      log("connecting (mDNS)")
       // false = a session is already live (libadb's isConnected() guard), not a
       // failure; real failures throw. Don't mistake the reused link for an error.
       if (!adb.connect(connHost, connEp.second)) {
@@ -674,7 +674,7 @@ class SelfAdbModule : Module() {
         )
         true
       } catch (e: Exception) {
-        ClipBus.log("openFile failed: ${e.message}")
+        ClipBus.log("openFile failed (${e.javaClass.simpleName})")
         false
       }
     }

@@ -55,7 +55,7 @@ class PickActivity : Activity() {
           } catch (e: Exception) {
             // Some providers don't offer a persistable grant: the send still works now, it just
             // can't be retried after the process restarts.
-            ClipBus.log("pick: no persistable grant for $uri: ${e.message}")
+            ClipBus.log("pick: no persistable grant (${e.javaClass.simpleName})")
           }
         }
         if (uris.isNotEmpty()) {

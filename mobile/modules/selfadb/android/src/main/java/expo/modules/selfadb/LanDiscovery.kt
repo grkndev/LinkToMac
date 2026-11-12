@@ -127,7 +127,7 @@ class LanDiscovery(
       if (rid != expectedRid) return // a different Mac on the LAN
       val host = serviceInfo.host?.hostAddress ?: return
       if (running) {
-        log("mdns: found Mac at $host:${serviceInfo.port}")
+        log("mdns: found Mac (port ${serviceInfo.port})")
         onFound(host, serviceInfo.port)
       }
     }

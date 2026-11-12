@@ -165,7 +165,7 @@ abstract class ShareActivity : Activity() {
           }
         }
     } catch (e: Exception) {
-      ClipBus.log("share: metadata query failed: ${e.message}")
+      ClipBus.log("share: metadata query failed (${e.javaClass.simpleName})")
     }
     return Meta(name ?: uri.lastPathSegment ?: "shared", size)
   }
