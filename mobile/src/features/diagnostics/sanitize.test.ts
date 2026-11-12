@@ -111,6 +111,20 @@ describe('rules', () => {
     expect(sanitizeLine('addr 02:00:5e:10:00:ff')).toBe('addr <redacted>');
   });
 
+  test('loopback is kept (the daemon bridge), other addresses still go', () => {
+    // Real line from a phone whose daemon is down.
+    const real =
+      'bridge retry x20 (failed to connect to /127.0.0.1 (port 53125) from /127.0.0.1 (port 40358) after 2000ms: ECONNREFUSED)';
+    expect(sanitizeLine(real)).toBe(real);
+    expect(sanitizeLine('bridge on 127.0.0.1:53125 ok')).toBe('bridge on 127.0.0.1:53125 ok');
+    expect(sanitizeLine('peer ::1 up')).toBe('peer ::1 up');
+    // …but a LAN or public address in the same shape is still scrubbed.
+    expect(sanitizeLine('failed to connect to /10.0.0.5 (port 53125) from /192.168.8.153 (port 4)')).toBe(
+      'failed to connect to /<host> (port 53125) from /<host> (port 4)',
+    );
+    expect(sanitizeLine('x 127.0.0.1:53125 and 192.168.1.42:53124 y')).toBe('x 127.0.0.1:53125 and <host> y');
+  });
+
   test('package names become <app>, our own and the platform classes stay', () => {
     expect(run(FIXTURES[12])).toBe('12:03:22  note dropped (service down): <app>');
     expect(run(FIXTURES[13])).toBe('12:03:23  image skipped: source <app> lacks read access to <app>');

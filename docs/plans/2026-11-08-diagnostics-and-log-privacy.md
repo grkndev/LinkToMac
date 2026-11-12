@@ -286,8 +286,12 @@ Dal `feat/diagnostics`, hepsi tek sürümde (0.13.0). Plandan farklar ve yan bul
   olarak giden `secret` ve yalnızca `!= null` kontrolü). `launchDaemon` dönüşü komutun stdout'u (`LAUNCHED`), gizli
   anahtar log'a girmiyor. `!= null` kontrolü genel olarak güvenli sayıldı, kalan dördü `// log-privacy: ok — <neden>`
   ile işaretlendi. Testleri düzeltmeden önceki gerçek sızıntı satırlarını çalıştırır.
-- **Issue Form önceden doldurma** `body=` ile değil alan id'siyle (`summary`) yapılır; `issueUrl` URL ~7,5 KB'ı
-  aşarsa özeti kısaltır.
+- **Issue Form önceden doldurma** alan id'siyle (`summary`) **ve** `body=` ile yapılır. Telefonda denendi: GitHub
+  Android uygulaması `template=` ve form alanlarını yok sayıp kendi düz "Create Issue" ekranını açıyor, yalnızca başlığı
+  ve `body=`'yi dolduruyor; yalnızca `summary=` gönderince özet sessizce kayboluyordu. Tarayıcı Issue Form'unun
+  `body=`'yi yok sayıp saymadığı doğrulanmadı. Özet iki kez sayıldığı için `issueUrl` URL ~7,5 KB'ı aşarsa kısaltır.
+- **Loopback** (`127.0.0.1`, `::1`) temizlenmez: köprünün daemon'a ulaşamadığı raporlarda tam bu adres gerekiyor ve
+  kimsenin adresi değil. Gerçek cihaz raporunda bu satırlar önce `/<host>` oluyordu.
 - **TS 6 + `bun:test`.** TS 6 `@types/*` paketlerini otomatik yüklemiyor; `tsconfig`'e `types` eklemek RN'in global
   tiplerini bozabileceğinden `@types/bun` yalnızca test dosyalarında `/// <reference types="bun" />` ile alınır.
 - `.github/ISSUE_TEMPLATE/config.yml` iletişim bağlantısı `mailto:` kullanır; GitHub'ın bunu bağlantı olarak

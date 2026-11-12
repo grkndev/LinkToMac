@@ -140,6 +140,12 @@ const DOT_LOCAL = /(?<![\w.-])(?:[a-z0-9-]+\.)*[a-z0-9-]+\.local\b(?::\d{1,5})?/
 const HOST_PORT = /(?<![\w.-])(?:[a-z0-9-]+\.)+[a-z0-9-]+:\d{2,5}(?!\w)/gi;
 /** `ClipBus.kt:84` looks like host:port but is a source location. */
 const SOURCE_LOCATION = /\.(?:kt|java|ts|tsx|js|jsx|mjs|swift):\d+$/i;
+/**
+ * Loopback is this phone talking to itself (the clipboard daemon's bridge on 127.0.0.1:53125), not
+ * anyone's address — and it is exactly what a "bridge can't reach the daemon" report needs to show.
+ */
+const LOOPBACK = /^(?:127\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d{1,5})?|::1)$/;
+const hideAddress = (m: string): string => (LOOPBACK.test(m) ? m : '<host>');
 
 // 4. content URIs and file-system paths
 const CONTENT_URI = new RegExp(`\\b(?:content|file):\\/\\/${NOT_END}`, 'gi');
@@ -187,11 +193,11 @@ function sanitizeWith(line: string, known: ((text: string) => string) | null): s
     .replace(RESOLVE_HOST, '$1"<host>"')
     .replace(UNKNOWN_HOST, '$1<host>')
     .replace(HW_ADDRESS, '<redacted>')
-    .replace(IPV4, '<host>')
+    .replace(IPV4, hideAddress)
     .replace(IPV6_FULL, '<host>')
-    .replace(IPV6_COMPRESSED, '<host>')
+    .replace(IPV6_COMPRESSED, hideAddress)
     .replace(DOT_LOCAL, '<host>')
-    .replace(HOST_PORT, (m) => (SOURCE_LOCATION.test(m) ? m : '<host>'));
+    .replace(HOST_PORT, (m) => (SOURCE_LOCATION.test(m) || LOOPBACK.test(m) ? m : '<host>'));
 
   s = s.replace(CONTENT_URI, '<path>').replace(FS_PATH, '<path>');
 

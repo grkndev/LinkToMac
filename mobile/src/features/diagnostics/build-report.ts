@@ -36,6 +36,8 @@ export interface ReportData {
     updateId?: string | null;
     /** true = running the JS that shipped in the APK, false = an OTA update, null = unknown. */
     embedded?: boolean | null;
+    /** A debug build loading its JS from Metro: neither "embedded" nor an OTA update. */
+    devBundle?: boolean;
     updatesEnabled?: boolean | null;
   };
   device: {
@@ -101,7 +103,15 @@ export function buildReport(data: ReportData, known?: KnownValues): Report {
     `Package: ${orDash(app.packageName)}`,
     `Channel: ${orDash(app.channel)}`,
     `Runtime: ${orDash(app.runtimeVersion)}`,
-    `JS bundle: ${app.embedded == null ? 'unknown' : app.embedded ? 'embedded in the APK' : `OTA update ${orDash(app.updateId)}`}`,
+    `JS bundle: ${
+      app.devBundle
+        ? 'dev server (debug build)'
+        : app.embedded == null
+          ? 'unknown'
+          : app.embedded
+            ? 'embedded in the APK'
+            : `OTA update ${orDash(app.updateId)}`
+    }`,
     `OTA updates: ${app.updatesEnabled == null ? 'unknown' : app.updatesEnabled ? 'enabled' : 'disabled'}`,
   ];
 
@@ -190,7 +200,13 @@ export function buildIssueSummary(data: ReportData): string {
       : null;
   const rows = [
     `App: ${app.version} (build ${orDash(app.versionCode)}), channel ${orDash(app.channel)}, ${
-      app.embedded == null ? 'bundle unknown' : app.embedded ? 'embedded bundle' : 'OTA bundle'
+      app.devBundle
+        ? 'dev-server bundle'
+        : app.embedded == null
+          ? 'bundle unknown'
+          : app.embedded
+            ? 'embedded bundle'
+            : 'OTA bundle'
     }`,
     `Device: ${[device.manufacturer, device.model].filter(Boolean).join(' ') || '—'}, Android ${orDash(device.osVersion)} (API ${orDash(device.apiLevel)})`,
     `Link: ${relay ? `${relay.status}${relay.transport ? ` via ${relay.transport}` : ''}, Mac ${relay.peerOnline ? 'online' : 'offline'}` : 'unknown'}`,
@@ -203,16 +219,23 @@ export function buildIssueSummary(data: ReportData): string {
 }
 
 /**
- * The prefilled "new issue" URL. Issue Forms are prefilled per field id (`summary` in
- * `.github/ISSUE_TEMPLATE/bug_report.yml`), NOT through a `body` parameter. Shrinks the summary
- * until the URL fits, because GitHub answers an over-long query string with an error page.
+ * The prefilled "new issue" URL, carrying the summary TWICE on purpose:
+ *  - `summary=` fills the Issue Form's field of that id (`.github/ISSUE_TEMPLATE/bug_report.yml`) in
+ *    a browser;
+ *  - `body=` is what the **GitHub Android app** reads. Checked on a device: that app opens its own
+ *    plain "Create Issue" screen, ignores `template=` and every form-field id, and fills only the
+ *    title and `body=` — so without it the summary was silently lost for anyone with the app installed.
+ * (Whether a browser ignores `body=` when a form template is named has not been verified.)
+ * Shrinks the summary until the URL fits, because GitHub answers an over-long query string with an
+ * error page — and it is counted twice here.
  */
 export function issueUrl(summary: string, title = '[Bug] '): string {
   let s = summary;
   for (;;) {
+    const enc = encodeURIComponent(s);
     const url =
       `${NEW_ISSUE_URL}?template=bug_report.yml` +
-      `&title=${encodeURIComponent(title)}&summary=${encodeURIComponent(s)}`;
+      `&title=${encodeURIComponent(title)}&summary=${enc}&body=${enc}`;
     if (url.length <= MAX_ISSUE_URL || s.length === 0) return url;
     s = s.slice(0, Math.max(0, s.length - 200));
   }

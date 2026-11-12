@@ -143,6 +143,15 @@ describe('issue summary and URL', () => {
     expect(s).not.toContain('Failed to connect');
   });
 
+  test('a debug build says its JS comes from the dev server, not "OTA update"', () => {
+    const dev = data({ app: { ...data().app, devBundle: true, embedded: false, updateId: null } });
+    expect(buildReport(dev, KNOWN).text).toContain('JS bundle: dev server (debug build)');
+    expect(buildReport(dev, KNOWN).text).not.toContain('JS bundle: OTA update');
+    expect(buildIssueSummary(dev)).toContain('dev-server bundle');
+    // a real OTA build is unchanged
+    expect(buildReport(data(), KNOWN).text).toContain('JS bundle: OTA update 5b7d3c1e');
+  });
+
   test('summary is hard-capped', () => {
     const long = data({ app: { ...data().app, channel: 'x'.repeat(5000) } });
     expect(buildIssueSummary(long).length).toBeLessThanOrEqual(MAX_SUMMARY);
@@ -152,9 +161,16 @@ describe('issue summary and URL', () => {
     const url = issueUrl(buildIssueSummary(data()));
     expect(url.startsWith('https://github.com/grkndev/LinkToMac/issues/new?template=bug_report.yml')).toBe(true);
     expect(url).toContain('&summary=');
-    expect(url).not.toContain('&body=');
     expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
-    expect(decodeURIComponent(url.split('&summary=')[1])).toContain('App: 0.13.0');
+    expect(decodeURIComponent(url.split('&summary=')[1].split('&')[0])).toContain('App: 0.13.0');
+  });
+
+  test('the summary is also sent as body=, because the GitHub Android app ignores form fields', () => {
+    const summary = buildIssueSummary(data());
+    const q = new URL(issueUrl(summary)).searchParams;
+    expect(q.get('summary')).toBe(summary);
+    expect(q.get('body')).toBe(summary);
+    expect(q.get('template')).toBe('bug_report.yml');
   });
 
   test('an over-long summary is shrunk until the URL fits', () => {

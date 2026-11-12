@@ -1176,7 +1176,7 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   also carries `ApplicationExitInfo` (`getExitReasons`) — the OS's own record of why it ended the app's
   process, the one direct evidence of the silent One UI / lmkd kills (issues #29–#31). There is no
   telemetry and no automatic upload; the report goes nowhere until the person taps Share or opens the
-  pre-filled GitHub issue (summary only, by Issue Form field id).
+  pre-filled GitHub issue (summary only, sent as the form's `summary` field id *and* as `body=`: the GitHub Android app ignores form fields and reads only `body=`).
 - **Updates are signed.** The Mac's Sparkle appcast entries carry an EdDSA signature
   (`SUPublicEDKey` in `Info.plist`; the private half lives in the release machine's login Keychain), and
   the Mac app itself is Developer-ID signed and notarized. The Android app downloads a newer APK from the

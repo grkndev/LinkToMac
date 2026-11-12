@@ -100,6 +100,7 @@ export function useDiagnostics(): Diagnostics {
         runtimeVersion: Updates.runtimeVersion ?? null,
         updateId: Updates.updateId ?? null,
         embedded: Updates.isEnabled ? Updates.isEmbeddedLaunch : null,
+        devBundle: __DEV__,
         updatesEnabled: Updates.isEnabled,
       },
       device: {
