@@ -25,10 +25,12 @@ import UniformTypeIdentifiers
 ///
 /// **How it reaches the app.** An extension is sandboxed even though the host app is not, so it
 /// can't do the sending itself — the relay/LAN connection and the pairing key live in the app.
-/// It hands the path over with `linktomac://send?path=…` through `NSExtensionContext.open`, and
-/// the app (unsandboxed, so no bookmark needed) reads the file directly. A shared app-group
-/// container would be the usual channel, but app groups need a real team identity and this app is
-/// ad-hoc signed with no Apple Developer account.
+/// It records the path in a small file inside *its own* container (`ShareHandoff`, compiled into
+/// both targets) and opens `linktomac://send?id=<uuid>`; the app (unsandboxed, so it can read the
+/// container and the file, no bookmark needed) looks the id up. The URL itself names no file:
+/// anything can open a URL, and a `path=` in it would have let any process or web page make this
+/// Mac send any readable file to the phone. A shared app-group container would be the usual
+/// channel, but it needs a team-provisioned entitlement and would break ad-hoc local builds.
 /// `@objc(ShareViewController)` is load-bearing: `NSExtensionPrincipalClass` in Info.plist is
 /// looked up through the Objective-C runtime, and a plain Swift class registers under its
 /// *module-qualified* name (`SendToPhone.ShareViewController`), which that lookup would miss.
@@ -63,7 +65,9 @@ final class ShareViewController: NSViewController {
                 NSLog("[SendToPhone] loadItem failed: %@", error.localizedDescription)
             }
             guard let url, let handoff = Self.handoffURL(for: url) else {
-                NSLog("[SendToPhone] no usable file URL (got %@)", String(describing: coded))
+                // The type only: `coded` is the shared file's URL, i.e. its path.
+                NSLog("[SendToPhone] no usable file URL, or the hand-off couldn't be recorded (got %@)",
+                      String(describing: type(of: coded)))
                 DispatchQueue.main.async { self?.complete() }
                 return
             }
@@ -96,12 +100,23 @@ final class ShareViewController: NSViewController {
         }
     }
 
-    /// `linktomac://send?path=<percent-encoded absolute path>`.
+    /// `linktomac://send?id=<uuid>`. The path is recorded in this extension's container, not in the
+    /// URL (see `ShareHandoff`). `NSHomeDirectory()` inside the sandbox is the container's `Data`
+    /// folder — the same place the app resolves with `ShareHandoff.extensionHome()`.
     private static func handoffURL(for file: URL) -> URL? {
+        let id: String
+        do {
+            id = try ShareHandoff.write(path: file.path, home: NSHomeDirectory())
+        } catch {
+            // Domain and code only: a Cocoa error's description can quote the file's path.
+            let e = error as NSError
+            log.error("couldn't record the hand-off: \(e.domain, privacy: .public) \(e.code, privacy: .public)")
+            return nil
+        }
         var components = URLComponents()
         components.scheme = "linktomac"
         components.host = "send"
-        components.queryItems = [URLQueryItem(name: "path", value: file.path)]
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
         return components.url
     }
 
