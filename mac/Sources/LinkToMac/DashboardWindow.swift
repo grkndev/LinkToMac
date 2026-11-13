@@ -3,13 +3,14 @@ import SwiftUI
 /// The pages in the sidebar. Calls and Photos are shown dimmed as "Soon" (no data source yet), so
 /// they are not cases here.
 enum DashPage: Hashable, CaseIterable {
-    case overview, notifications, messages, clipboard, files
+    case overview, notifications, messages, nowPlaying, clipboard, files
 
     var title: String {
         switch self {
         case .overview: return "Overview"
         case .notifications: return "Notifications"
         case .messages: return "Messages"
+        case .nowPlaying: return "Now Playing"
         case .clipboard: return "Clipboard"
         case .files: return "Files"
         }
@@ -19,6 +20,7 @@ enum DashPage: Hashable, CaseIterable {
         case .overview: return "square.grid.2x2"
         case .notifications: return "bell"
         case .messages: return "bubble.left"
+        case .nowPlaying: return "play.circle"
         case .clipboard: return "doc.on.clipboard"
         case .files: return "folder"
         }
@@ -28,9 +30,17 @@ enum DashPage: Hashable, CaseIterable {
         case .overview: return "square.grid.2x2.fill"
         case .notifications: return "bell.fill"
         case .messages: return "bubble.left.fill"
+        case .nowPlaying: return "play.circle.fill"
         case .clipboard: return "doc.on.clipboard.fill"
         case .files: return "folder.fill"
         }
+    }
+}
+
+extension DashPage {
+    /// The pages the sidebar lists: Now Playing only while "Show what's playing" is on.
+    static func visible(media: Bool) -> [DashPage] {
+        allCases.filter { $0 != .nowPlaying || media }
     }
 }
 
@@ -43,18 +53,20 @@ final class DashboardNav {
 /// Root view of the dashboard window: a floating sidebar on the left and, beside it, a toolbar over
 /// the selected page. Resizable (min 900 × 600); light and dark follow the system.
 ///
-/// All four pages stay mounted and are shown by opacity, so an open conversation or a scroll
+/// All pages stay mounted and are shown by opacity, so an open conversation or a scroll
 /// position survives switching pages. Settings lives in its own window (⌘,).
 struct DashboardView: View {
     let client: RelayClient
     let proximity: ProximityMonitor
     let nav: DashboardNav
+    /// Read for `showMedia`: with media off the Now Playing page leaves the sidebar and the page list.
+    let appearance: AppearanceStore
     @State private var dropTargeted = false
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack(spacing: 0) {
-            DashboardSidebar(client: client, nav: nav)
+            DashboardSidebar(client: client, nav: nav, appearance: appearance)
                 .frame(width: 232)
                 .padding(.leading, 8).padding(.vertical, 8)
             VStack(spacing: 0) {
@@ -72,6 +84,8 @@ struct DashboardView: View {
         .onAppear { SettingsOpener.shared.open = { openSettings() } }
         // A drop starts a transfer; show it where it is tracked.
         .onChange(of: client.outgoingBatch != nil) { _, sending in if sending { nav.page = .files } }
+        // Turning media off while its page is open would leave an empty page behind.
+        .onChange(of: appearance.showMedia) { _, on in if !on && nav.page == .nowPlaying { nav.page = .overview } }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The titlebar is transparent and the content runs under it (the traffic lights float over
         // the sidebar), so the design's coordinates start at the window's very top edge.
@@ -142,6 +156,8 @@ struct DashboardView: View {
             DSToolbarButton(icon: "square.and.arrow.up", title: "Send Files…", style: .primary) {
                 DashFilePicker.pickAndSend(client: client)
             }
+        case .nowPlaying:
+            EmptyView() // the design's "Open on Phone" needs a phone command that doesn't exist yet
         }
     }
 
@@ -149,7 +165,7 @@ struct DashboardView: View {
 
     private var pages: some View {
         ZStack {
-            ForEach(DashPage.allCases, id: \.self) { page in
+            ForEach(DashPage.visible(media: appearance.showMedia), id: \.self) { page in
                 pageView(page)
                     .opacity(nav.page == page ? 1 : 0)
                     .allowsHitTesting(nav.page == page)
@@ -162,11 +178,13 @@ struct DashboardView: View {
     private func pageView(_ page: DashPage) -> some View {
         switch page {
         case .overview:
-            OverviewPage(client: client, proximity: proximity, onOpen: { nav.page = $0 })
+            OverviewPage(client: client, proximity: proximity, appearance: appearance, onOpen: { nav.page = $0 })
         case .notifications:
             NotificationsPage(client: client)
         case .messages:
             MessagesPage(client: client)
+        case .nowPlaying:
+            NowPlayingPage(client: client, active: nav.page == .nowPlaying)
         case .clipboard:
             ClipHistoryScreen(client: client)
         case .files:
@@ -182,12 +200,13 @@ struct DashboardView: View {
 struct DashboardSidebar: View {
     let client: RelayClient
     let nav: DashboardNav
+    let appearance: AppearanceStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(height: 44) // room for the traffic lights
             VStack(spacing: 2) {
-                ForEach(DashPage.allCases, id: \.self) { page in item(page) }
+                ForEach(DashPage.visible(media: appearance.showMedia), id: \.self) { page in item(page) }
             }
             .padding(.horizontal, 8).padding(.top, 4)
 
@@ -239,6 +258,11 @@ struct DashboardSidebar: View {
                 Spacer(minLength: 0)
                 if n > 0 {
                     Text("\(n)").font(.system(size: 12)).foregroundStyle(M3.outline).monospacedDigit()
+                }
+                // A waveform while the phone is actually playing, like the design's Now Playing row.
+                if page == .nowPlaying, client.isLinked, client.nowPlaying?.state == .playing {
+                    Image(systemName: "waveform").font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(selected ? M3.onPrimaryContainer : M3.primary)
                 }
             }
             .padding(.horizontal, 10)

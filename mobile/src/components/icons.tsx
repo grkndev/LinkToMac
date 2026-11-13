@@ -65,6 +65,7 @@ const MODULES = {
   pasteGo: require('../../assets/icons/content_paste_go.xml'),
   lockClock: require('../../assets/icons/lock_clock.xml'),
   sms: require('../../assets/icons/sms.xml'),
+  musicNote: require('../../assets/icons/music_note.xml'),
   gppMaybe: require('../../assets/icons/gpp_maybe.xml'),
   key: require('../../assets/icons/key.xml'),
   screenShare: require('../../assets/icons/screen_share.xml'),

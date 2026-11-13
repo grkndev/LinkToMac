@@ -8,6 +8,7 @@ import AppKit
 struct MenuPanel: View {
     let client: RelayClient
     let proximity: ProximityMonitor
+    let appearance: AppearanceStore
     let onOpenWindow: () -> Void
     let onOpenSettings: () -> Void
     let onQuit: () -> Void
@@ -34,6 +35,7 @@ struct MenuPanel: View {
             identity
             if client.isLinked {
                 chips
+                if appearance.showMedia { MediaPanelRow(client: client) }
                 if let clip = client.lastClip, !clip.isEmpty { lastCopy(clip) }
                 if let incoming = client.incomingFile { incomingCard(incoming) }
                 dropHint

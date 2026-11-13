@@ -1,34 +1,36 @@
 # Changelog
 
-## Unreleased (Mac)
+## v0.13.0 (2026-11-13)
 
-### Features
-- **Finder ▸ Share ▸ Send to Phone now works for several files and folders at once.** It used to be offered only when exactly one item was selected; it is now offered for up to 500 and everything goes as one batch with one summary.
-- **Dragging from Mail, Photos and Safari's download list can be sent** (they hand over a *file promise* rather than a file, which was reported as "Couldn't read N items"). Promised files are written to a temporary staging folder and sent from there; the folder is swept after a day and cleared at launch. *Implemented but not yet verified with a real drag.*
+Full notes: [`release-notes/v0.13.0.md`](release-notes/v0.13.0.md). **Both apps:** Android 0.12.1 → 0.13.0, Mac 0.12.1 → 0.13.0.
 
-### Fixes
-- **A resumed transfer could splice a different file onto an old partial.** The transfer id (name, size, modification time, folder) was computed with a modification time that was never filled in, so a different file of the same name and size looked like the half-sent one. It now includes the real modification time.
-
-### Changes
-- **The Finder "Send to Phone" hand-off no longer puts a file path in a URL.** `linktomac://send?path=…` could be opened by any local app or web page, making the Mac send any readable file to your phone. The URL now carries only a one-time id; the path is recorded by the share extension in its own sandbox container and used once (it expires after two minutes). Opening `linktomac://send?path=…` by hand now does nothing.
-
-## v0.13.0 (2026-11-12)
-
-Full notes: [`release-notes/v0.13.0.md`](release-notes/v0.13.0.md). **Android only** (0.12.1 → 0.13.0); the Mac app stays at 0.12.1.
-
-### Features
+### Android — Features
+- **Mirror media** (Settings ▸ Mirroring, off by default) — sends what the phone is playing (title, artist, cover, position, the app) to the Mac and accepts play/pause, skip, seek and volume from it. It needs only the Notification access the app already asks for: no Wireless Debugging, no daemon, so it works on Mobile Hotspot too. State goes out when it changes (the Mac advances the progress itself), and titles never reach the logs.
 - **Send diagnostics** (Settings ▸ Support) — builds a bug report on the phone (versions, device model, link and permission state, why Android last ended the app, sanitized log tails), shows exactly what it contains, and lets you share it or open a pre-filled GitHub issue. Nothing is sent automatically and nothing goes through the clipboard sync.
 - **Why the app was killed** — the report includes Android's own record of why it ended the app's process (`ApplicationExitInfo`: low memory, user-requested, crash, ANR, …), the one direct evidence of the silent One UI / lmkd kills.
 - **GitHub bug report form** (`.github/ISSUE_TEMPLATE`) with a "this page is public" warning and a `summary` field the app pre-fills.
 
-### Changes
+### Android — Changes
 - **Logs no longer expose your data.** Logs and Daemon Log (on screen and on Share) have clipboard text, file names, addresses, your Mac's and phone's names, package names, URIs and the pairing room/key removed. Debug builds still draw the raw log on screen; Share is always sanitized.
 - The app and daemon no longer write clipboard text, file names, addresses or package names into their log lines; they log lengths, counts and states. The daemon dex is rebuilt.
 
-### Internal
+### Android — Internal
+- The media fields ride inside the existing `stat` frame (`media`, `mediaArt`, `mediaCmd`; TECHNICAL.md §5.5), so the relay is unchanged. `MediaState.kt` / `NowPlaying.swift` are tested against the shared `protocol-vectors/stat-media.json`.
 - `sanitize.ts` (pure, idempotent) + `build-report.ts`, tested with `bun test` (`bun run test`); `scripts/check-log-privacy.mjs` fails `bun run lint` on a log call that interpolates user data.
 - `getExitReasons(limit)` on the `selfadb` module (+ `ExitReasonsTest`); the JS feature-detects it.
 - Native code changed, so this ships as a new APK (new `runtimeVersion`), not an OTA update.
+
+### Mac — Features
+- **Now Playing page, redesigned mini players and an optional song title in the menu bar** (macOS design "08 Media player"). A new **Now Playing** sidebar page shows the phone's track at full size — cover, title, artist · album, a seek bar with a knob (the right-hand time counts down), previous / play-pause / next and the phone's volume — with an empty state when nothing plays. The Overview's media tile and the menu panel's media row are redrawn (cover, "Spotify · Playing", progress; the panel's one also has a seek bar and volume), and tapping the Overview tile opens the page. **Settings ▸ Media** adds "Show what's playing on my phone" (hides the page and both mini players) and "Show song title next to the icon" (the status item grows to "♪ Title · Artist", a pause glyph while paused; off by default). Not in yet, because the phone doesn't send it: shuffle/repeat, the "Other players on your phone" list, the output-device chip, "Open on Phone", and media keys / Control Center.
+- **Media card on the Overview page and a row in the menu-bar panel.** Shows what your phone is playing (cover, title, artist, app, progress that advances on its own) and controls it: play/pause, previous/next, seek by clicking the bar, and the phone's media volume. Replaces the "Soon" placeholder. Needs "Mirror media" turned on in the Android app.
+- **Finder ▸ Share ▸ Send to Phone now works for several files and folders at once.** It used to be offered only when exactly one item was selected; it is now offered for up to 500 and everything goes as one batch with one summary.
+- **Dragging from Mail, Photos and Safari's download list can be sent** (they hand over a *file promise* rather than a file, which was reported as "Couldn't read N items"). Promised files are written to a temporary staging folder and sent from there; the folder is swept after a day and cleared at launch. *Implemented but not yet verified with a real drag.*
+
+### Mac — Fixes
+- **A resumed transfer could splice a different file onto an old partial.** The transfer id (name, size, modification time, folder) was computed with a modification time that was never filled in, so a different file of the same name and size looked like the half-sent one. It now includes the real modification time.
+
+### Mac — Changes
+- **The Finder "Send to Phone" hand-off no longer puts a file path in a URL.** `linktomac://send?path=…` could be opened by any local app or web page, making the Mac send any readable file to your phone. The URL now carries only a one-time id; the path is recorded by the share extension in its own sandbox container and used once (it expires after two minutes). Opening `linktomac://send?path=…` by hand now does nothing.
 
 ## v0.12.1 (2026-11-07)
 

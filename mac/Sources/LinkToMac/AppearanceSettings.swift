@@ -6,6 +6,8 @@ import AppKit
 enum AppearanceKeys {
     static let dock = "showInDock"
     static let menuBar = "showInMenuBar"
+    static let media = "showMedia"
+    static let menuBarTitle = "showMediaTitleInMenuBar"
 }
 
 /// Persisted **Mac appearance** preferences: whether the app shows a Dock icon (`.regular` vs
@@ -33,11 +35,25 @@ final class AppearanceStore {
         }
     }
 
+    /// "Show what's playing on my phone" (Settings ▸ Media): the Now Playing sidebar page, the
+    /// Overview's mini player and the menu panel's. Off hides all three; the phone keeps sending.
+    var showMedia: Bool {
+        didSet { UserDefaults.standard.set(showMedia, forKey: AppearanceKeys.media) }
+    }
+
+    /// "Show song title next to the icon": the status item grows to "♪ Title · Artist" while a
+    /// track plays or is paused, and shrinks back to the bare icon otherwise. Off by default.
+    var showMediaTitleInMenuBar: Bool {
+        didSet { UserDefaults.standard.set(showMediaTitleInMenuBar, forKey: AppearanceKeys.menuBarTitle) }
+    }
+
     init() {
         let d = UserDefaults.standard
         // Default both visible — the historical behaviour (regular Dock app + menu-bar extra).
         showInDock = d.object(forKey: AppearanceKeys.dock) as? Bool ?? true
         showInMenuBar = d.object(forKey: AppearanceKeys.menuBar) as? Bool ?? true
+        showMedia = d.object(forKey: AppearanceKeys.media) as? Bool ?? true
+        showMediaTitleInMenuBar = d.object(forKey: AppearanceKeys.menuBarTitle) as? Bool ?? false
     }
 
     /// Apply the Dock-icon preference: `.regular` shows it, `.accessory` hides it (menu-bar-only).

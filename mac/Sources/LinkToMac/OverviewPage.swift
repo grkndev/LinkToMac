@@ -9,6 +9,8 @@ struct OverviewPage: View {
     /// BLE proximity to the phone, measured by this Mac. Only has a value while auto-lock is on and
     /// the phone is in range.
     let proximity: ProximityMonitor
+    /// Read for `showMedia`: with media off the Overview has no mini player.
+    let appearance: AppearanceStore
     let onOpen: (DashPage) -> Void
 
     var body: some View {
@@ -21,7 +23,7 @@ struct OverviewPage: View {
                     recentNotifications
                     VStack(alignment: .leading, spacing: 12) {
                         recentCopies
-                        mediaCard
+                        if appearance.showMedia { mediaCard }
                     }
                 }
             }
@@ -243,19 +245,10 @@ struct OverviewPage: View {
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(M3.surfaceContainer))
     }
 
-    // MARK: - Media (roadmap)
+    // MARK: - Media
 
     private var mediaCard: some View {
-        HStack(spacing: 12) {
-            DSCircleIcon(icon: "music.note")
-            Text("Media controls").font(.system(size: 13, weight: .semibold)).foregroundStyle(M3.onSurface)
-            Spacer(minLength: 0)
-            SoonPill()
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 58)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(M3.surfaceContainer))
-        .opacity(0.6)
+        MediaCard(client: client, onOpen: { onOpen(.nowPlaying) })
     }
 }
 

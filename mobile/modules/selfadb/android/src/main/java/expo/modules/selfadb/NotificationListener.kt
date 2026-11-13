@@ -56,6 +56,9 @@ class NotificationListener : NotificationListenerService() {
 
   override fun onListenerConnected() {
     ClipBus.log("notif listener connected")
+    // Media sessions are readable only while this listener is bound, so a media mirror that was
+    // told "no access" can look again now (the grant, or a rebind after an OEM kill).
+    ClipForegroundService.instance?.refreshMedia()
   }
 
   override fun onListenerDisconnected() {

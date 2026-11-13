@@ -40,6 +40,7 @@ fourth is a stock-Android system service the Android app talks to through a tric
 | **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Message (SMS) mirroring + replies** | WebSocket `sms` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac (mirror); Mac → phone (reply request), phone → Mac (ack) |
 | **App updates** | Sparkle appcast (Mac) / GitHub "latest release" API (Android: the app downloads the APK itself, §3.9) | No — GitHub | GitHub → app |
+| **Media (now playing + controls)** | WebSocket `stat` frames (`media`, `mediaArt` / `mediaCmd`, §5.5) | Yes — *or* LAN-direct (§5.1) | Phone → Mac (state); Mac → phone (controls) |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
 | **Proximity distance** | BLE measure → `stat` frame | Yes — *or* LAN-direct (§5.1) | Mac measures → Phone shows |
 
@@ -89,7 +90,9 @@ between them. It never stores anything and never inspects clipboard content.
 - `stat` carries **opaque telemetry**, E2E-encrypted into `nonce`/`ct` just like `clip`, and is
   now **bidirectional**: the Mac sends `{level, charging}` (its own battery) and the phone sends
   `{level, charging, name}` (its battery + device name); each side ignores fields it doesn't use.
-  The relay forwards it opaquely either direction.
+  The relay forwards it opaquely either direction. `stat` also carries the **media** fields
+  (`media`, `mediaArt`, `mediaCmd`, §5.5) — it is telemetry *and* media now; every field is optional and a
+  receiver updates only the fields present, so none of them clobbers another.
 - `note` carries an **opaque mirrored notification** (phone → Mac), E2E-encrypted the same way;
   the relay forwards it verbatim. Like `stat`, the message type was an additive,
   backward-compatible protocol change (the relay just learned a new type to fan out).
@@ -993,6 +996,44 @@ startup.
 **Notifications.** A burst of received files raises **one** updating notification on each side (the first is
 named, later ones turn it into "N files" / "N files in Photos"), not one per file; sends raise one progress
 notification / bar for the whole batch and one summary.
+
+### 5.5 Media: now playing and controls (`stat`, both directions)
+
+The Mac shows what the phone is playing and drives it. **No new frame type** — the fields ride inside the
+existing `stat` plaintext, so the relay is untouched. Pinned by `protocol-vectors/stat-media.json`, which
+`MediaStateTest` (Kotlin) and `NowPlayingTests` (Swift) both run.
+
+| Direction | Field | Shape |
+|---|---|---|
+| phone → Mac | `media` | `{on:true, pkg, app, id, title, artist?, album?, state: playing\|paused\|buffering\|stopped, pos, dur?, speed, can:{prev,next,seek}, vol, volMax}` |
+| phone → Mac | `media: null` | nothing is playing any more |
+| phone → Mac | `media: {on:false, reason}` | the card can't be shown: `"off"` (the switch) or `"no-access"` (notification access missing) |
+| phone → Mac | `mediaArt` | `{id, jpeg}` — cover, base64 JPEG ≤ 256 px, once per track `id` and again on every reconnect |
+| Mac → phone | `mediaCmd` | `{a: toggle\|play\|pause\|next\|prev\|seek\|vol, v?}` — `v` = ms for `seek`, a stream level for `vol` |
+
+- **State is sent on change, never as a tick.** `pos` is the position *at the moment of sending*; the Mac
+  stamps its arrival and advances `pos + elapsed × speed` itself (`NowPlaying.positionMs`), freezing while
+  not `playing` and clamping to `dur`. The phone sends again only when something the Mac shows changed
+  (`MediaState.changedMeaningfully`: a seek is a position more than 1.5 s from where playback should be,
+  not an ordinary advance), with callbacks coalesced over 250 ms — the relay drops a peer past 120 frames
+  per 10 s. `id` = a short hash of package, title, artist and duration, so the Mac knows when its cover is stale.
+- **Opt-in.** "Mirror media" (Settings ▸ Mirroring) is **off by default** — what you listen to is personal.
+  When it is off the phone still answers the Mac's connect with `media:{on:false,reason:"off"}`, otherwise
+  the Mac could not tell "off" from "nothing playing".
+- **Needs notification access, never ADB.** `MediaSessionManager.getActiveSessions` only answers a caller
+  that names an enabled `NotificationListenerService`, so `MediaMirror` uses the one the app already has
+  (`NotificationListener`; `onListenerConnected` pokes the mirror to look again after a grant). Controls
+  go through the session's `transportControls` and `AudioManager.setStreamVolume(STREAM_MUSIC)` — plain app
+  APIs, no daemon, no Wireless Debugging, so it works on Mobile Hotspot (issue #29). A `SecurityException`
+  becomes `no-access`. Which session is shown: the first one that is playing and has a title, else the
+  first with a title (`MediaState.pickCurrent`; the platform's list is most-recently-active first).
+- The phone refuses a `mediaCmd` it cannot read (unknown action, `seek` without a value, a negative value);
+  an app that doesn't offer an action (`PlaybackState.actions`) shows as `can:{…:false}` and the Mac
+  disables the button. The Mac sends `seek`/`vol` once, on release (not while dragging).
+- Logs carry no title, artist or app name (`check-log-privacy.mjs` forbids `title`/`artist`/`album`).
+- Out of scope for now (a possible phase 2, not built): streaming the phone's *audio* to the Mac. It would
+  need `MediaProjection` + `AudioPlaybackCapture` (per-session consent, apps may opt out) and a LAN-direct
+  binary stream — the relay's 1 MiB frame and 120 frames/10 s limits don't fit continuous audio.
 
 ---
 

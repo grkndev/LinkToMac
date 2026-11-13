@@ -58,6 +58,9 @@ export default function SettingsScreen() {
   const [confirmingUnpair, setConfirmingUnpair] = useState(false);
   const capture = useClipBootContext();
   const {
+    mediaMirrorOn,
+    toggleMediaMirror,
+    notifAccess,
     smsMirrorOn,
     toggleSmsMirror,
     smsAccess,
@@ -152,6 +155,29 @@ export default function SettingsScreen() {
             onValueChange={toggleSmsMirror}
             footer={smsNotice}
           />
+          {mediaMirrorOn !== null ? (
+            <SwitchRow
+              colors={colors}
+              icon={icons.musicNote}
+              tone="primary"
+              label="Mirror media"
+              hint="Show what's playing on your Mac, with play, skip and volume controls"
+              value={mediaMirrorOn}
+              onValueChange={toggleMediaMirror}
+              footer={
+                mediaMirrorOn && notifAccess === false ? (
+                  <InlineNotice
+                    colors={colors}
+                    icon={icons.gppMaybe}
+                    title="Allow notification access"
+                    message="Android only shows playing media to apps with notification access. Allow Link to macOS there to use this."
+                    actionLabel="Open settings"
+                    onClick={() => SelfAdb.openNotificationAccessSettings().catch(() => {})}
+                  />
+                ) : undefined
+              }
+            />
+          ) : null}
           <ActionRow
             colors={colors}
             icon={icons.pasteGo}
