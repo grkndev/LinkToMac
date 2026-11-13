@@ -47,6 +47,9 @@ final class StatusItemController {
         applyVisibility()
         track(\.showInMenuBar) { [weak self] in self?.applyVisibility() }
         track(\.isLinked) { [weak self] in self?.applyLinkState() }
+        // The optional "song title next to the icon": re-read whenever the track, the link or either
+        // switch changes.
+        track({ $0.mediaTitleKey }) { [weak self] in self?.applyMediaTitle() }
     }
 
     // MARK: - Item lifecycle
@@ -76,6 +79,7 @@ final class StatusItemController {
             }
             statusItem = item
             applyLinkState()
+            applyMediaTitle()
         } else {
             guard let item = statusItem else { return }
             closePanel()
@@ -88,6 +92,54 @@ final class StatusItemController {
     /// (the behaviour the `MenuBarExtra` label had).
     private func applyLinkState() {
         statusItem?.button?.alphaValue = client.isLinked ? 1 : 0.45
+    }
+
+    /// What the status item shows next to its icon, or nil for the bare icon: "♪ Title · Artist"
+    /// (a pause glyph while paused). Only with media + the title switch on, a live link and a track
+    /// that isn't stopped. Also the value `track` watches, so any change to it re-runs `applyMediaTitle`.
+    private var mediaTitleKey: MediaTitle? {
+        guard appearance.showMedia, appearance.showMediaTitleInMenuBar, client.isLinked,
+              let track = client.nowPlaying, track.state != .stopped, !track.title.isEmpty
+        else { return nil }
+        let text = track.artist.isEmpty ? track.title : "\(track.title) · \(track.artist)"
+        return MediaTitle(text: text, playing: track.isPlaying)
+    }
+
+    private struct MediaTitle: Equatable {
+        let text: String
+        let playing: Bool
+    }
+
+    /// Longest title the menu bar gets: it is shared with every other app's icon, and the notch
+    /// eats the middle of it on recent MacBooks.
+    private static let maxTitleLength = 34
+
+    private func applyMediaTitle() {
+        guard let button = statusItem?.button else { return }
+        guard let title = mediaTitleKey else {
+            button.attributedTitle = NSAttributedString(string: "")
+            button.title = ""
+            button.imagePosition = .imageOnly
+            return
+        }
+        let font = NSFont.menuBarFont(ofSize: 0)
+        let shown = title.text.count > Self.maxTitleLength
+            ? String(title.text.prefix(Self.maxTitleLength - 1)) + "…" : title.text
+        let line = NSMutableAttributedString()
+        // A template SF Symbol would be tinted by the button; as text attachments they take the
+        // text colour, which the menu bar keeps readable on light, dark and tinted bars.
+        let config = NSImage.SymbolConfiguration(pointSize: font.pointSize - 1, weight: .medium)
+        if let glyph = NSImage(systemSymbolName: title.playing ? "waveform" : "pause.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) {
+            glyph.isTemplate = true
+            let attachment = NSTextAttachment()
+            attachment.image = glyph
+            line.append(NSAttributedString(attachment: attachment))
+            line.append(NSAttributedString(string: " "))
+        }
+        line.append(NSAttributedString(string: shown, attributes: [.font: font]))
+        button.attributedTitle = line
+        button.imagePosition = .imageLeading
     }
 
     // MARK: - Panel
@@ -115,6 +167,7 @@ final class StatusItemController {
         let root = MenuPanel(
             client: client,
             proximity: proximity,
+            appearance: appearance,
             onOpenWindow: { [weak self] in self?.closePanel(); self?.onOpenWindow() },
             onOpenSettings: { [weak self] in self?.closePanel(); self?.onOpenSettings() },
             onQuit: { NSApp.terminate(nil) }

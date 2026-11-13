@@ -178,7 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let root = DashboardView(
                 client: client,
                 proximity: proximity,
-                nav: dashboardNav
+                nav: dashboardNav,
+                appearance: appearance
             )
             let hosting = NSHostingController(rootView: root)
             // The window is resizable; stop the hosting controller from imposing its own

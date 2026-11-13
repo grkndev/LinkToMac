@@ -20,6 +20,8 @@ struct SettingsRoot: View {
                 .tabItem { Label("Clipboard", systemImage: "doc.on.clipboard") }
             NotificationSettingsTab(client: client)
                 .tabItem { Label("Notifications", systemImage: "bell") }
+            MediaSettingsTab(appearance: appearance)
+                .tabItem { Label("Media", systemImage: "music.note") }
             SecuritySettingsTab(client: client, proximity: proximity)
                 .tabItem { Label("Security", systemImage: "lock") }
             ConnectionSettingsTab(client: client, onApplyLan: onApplyLan)
@@ -196,6 +198,35 @@ private struct NotificationSettingsTab: View {
     }
 
     private func refresh() async { denied = await MacNotifier.currentStatus() == .denied }
+}
+
+// MARK: - Media
+
+/// Settings ▸ Media. What the design also has here — media keys / Control Center, a volume-source
+/// popup, artwork quality and hidden players — needs the Mac to publish Now Playing to macOS or the
+/// phone to send more, and isn't built yet.
+private struct MediaSettingsTab: View {
+    let appearance: AppearanceStore
+
+    var body: some View {
+        SettingsPage(height: 260) {
+            DSSection(title: "Media controls") {
+                DSRow(label: "Show what's playing on my phone",
+                      note: "Adds Now Playing to the sidebar, the Overview and the menu bar panel.", divider: false) {
+                    DSSwitch(isOn: Binding(get: { appearance.showMedia }, set: { appearance.showMedia = $0 }))
+                }
+            }
+            DSSection(title: "Menu bar") {
+                DSRow(label: "Show song title next to the icon",
+                      note: "Only while something is playing.", divider: false) {
+                    DSSwitch(isOn: Binding(get: { appearance.showMediaTitleInMenuBar },
+                                           set: { appearance.showMediaTitleInMenuBar = $0 }))
+                }
+                .opacity(appearance.showMedia ? 1 : 0.45)
+                .allowsHitTesting(appearance.showMedia)
+            }
+        }
+    }
 }
 
 // MARK: - Security
