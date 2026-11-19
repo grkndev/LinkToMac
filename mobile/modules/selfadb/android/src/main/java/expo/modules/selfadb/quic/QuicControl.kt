@@ -45,6 +45,12 @@ sealed class QuicParse {
 }
 
 object QuicControl {
+  /**
+   * The TLS ALPN protocol id of the data plane (a version change bumps the suffix). The Rust client (`quic-core` `ALPN`) and the Mac's
+   * Swift constant must match it byte for byte: pinned by `protocol-vectors/quic-control.json` (section `constants`).
+   */
+  const val ALPN = "ltm/1"
+
   /** An action is at most this many UTF-8 bytes; checked before parsing, so a hostile frame cannot cost real work. */
   const val MAX_ACTION_BYTES = 4096
 
@@ -170,8 +176,13 @@ class QuicHandshake(
   val iRequested: Boolean,
   sid: String,
   nowMs: Long,
-  acceptTimeoutMs: Long = 60_000,
+  acceptTimeoutMs: Long = DEFAULT_ACCEPT_TIMEOUT_MS,
 ) {
+  companion object {
+    /** How long the side that asked waits for the other side's accept (and how long the phone waits for its user). */
+    const val DEFAULT_ACCEPT_TIMEOUT_MS = 60_000L
+  }
+
   sealed class Phase {
     data class AwaitingAccept(val deadlineMs: Long) : Phase() // Mac asked, waits for the phone's accept
     data class AwaitingUser(val deadlineMs: Long) : Phase() // phone was asked, waits for its user
@@ -269,6 +280,44 @@ class QuicHandshake(
   private fun apply(next: Phase): Verdict {
     phase = next
     return Verdict.Applied(next)
+  }
+}
+
+// ---- stream channels (stage 1.5) -------------------------------------------------------------------------------------------
+
+/**
+ * What a data stream carries. Its first bytes are a QUIC variable-length integer (RFC 9000 §16) naming the channel: 1 file (a
+ * bidirectional stream), 2 screen and 3 camera (unidirectional). The Swift twin is `QuicChannel` in `Quic/QuicControl.swift`; both run the
+ * `channels` section of `protocol-vectors/quic-control.json`.
+ */
+enum class QuicChannel(val typeId: Long, val bidirectional: Boolean) {
+  FILE(1, true), SCREEN(2, false), CAMERA(3, false);
+
+  /** What a sender writes first: the shortest varint (all three ids fit one byte). */
+  fun header(): ByteArray = byteArrayOf(typeId.toByte())
+
+  companion object {
+    /** Reads the FIRST varint of [bytes]. A longer-than-necessary form is accepted (RFC 9000 allows it); anything after it is left alone. */
+    fun parse(bytes: ByteArray): ChannelParse {
+      if (bytes.isEmpty()) return ChannelParse.NeedMoreBytes
+      val first = bytes[0].toInt() and 0xff
+      val length = 1 shl (first ushr 6) // the top two bits give 1, 2, 4 or 8 bytes
+      if (bytes.size < length) return ChannelParse.NeedMoreBytes
+      var value = (first and 0x3f).toLong()
+      for (i in 1 until length) value = (value shl 8) or (bytes[i].toLong() and 0xff)
+      val known = entries.firstOrNull { it.typeId == value }
+      return if (known != null) ChannelParse.Known(known, length) else ChannelParse.Unknown(value, length)
+    }
+  }
+}
+
+sealed class ChannelParse {
+  data class Known(val channel: QuicChannel, val consumed: Int) : ChannelParse()
+
+  /** A well-formed varint that names no channel we know (the caller decides: reset the stream, ignore it). */
+  data class Unknown(val value: Long, val consumed: Int) : ChannelParse()
+  object NeedMoreBytes : ChannelParse() {
+    override fun toString() = "NeedMoreBytes"
   }
 }
 

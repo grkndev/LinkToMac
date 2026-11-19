@@ -34,6 +34,9 @@ android {
       all {
         // The wire vectors shared with the Mac codec live at the repo root (4 levels up from here).
         systemProperty "vectors.dir", project.file("../../../../protocol-vectors").canonicalPath
+        // The tests read those files at run time, so they are inputs of the task: without this, editing a vector leaves the task
+        // UP-TO-DATE and Gradle quietly skips the very tests the edit was meant to run (found in stage 1.5).
+        inputs.dir(project.file("../../../../protocol-vectors")).withPropertyName("protocolVectors")
       }
     }
   }
