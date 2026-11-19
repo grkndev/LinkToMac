@@ -269,6 +269,11 @@ final class RelayClient {
     /// Carries the plaintext `{"op":"send",…}` payload; each transport seals it.
     var onLocalSms: ((String) -> Void)?
 
+    /// Hook for a command (`cmd`) bound for the phone over the LAN-direct server. Unlike the fan-out hooks above it is
+    /// NOT called alongside the relay: `sendCommand` picks exactly one link, so a command is never delivered twice.
+    /// Carries the plaintext action; the LAN server seals it.
+    var onLocalCommand: ((String) -> Void)?
+
     /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
     /// re-advertise under the new pairing id and invalidate any stale authenticated socket.
     var onPairingChanged: (() -> Void)?
@@ -372,6 +377,36 @@ final class RelayClient {
             return
         }
         Task { [weak self] in try? await self?.send(.stat(nonce: nonce, ct: ct)) }
+    }
+
+    /// Send a command (`cmd`) to the phone over exactly ONE link: the LAN when the phone is connected to it, otherwise the
+    /// relay when the phone is online there (`CommandRoute`). Both links are never written, so a command cannot arrive
+    /// twice. With no link it returns false and queues nothing: the QUIC `q.req` this carries must be fresh on arrival.
+    /// `true` means a socket took the frame, not that the phone received it. Fail closed: an empty action or a malformed
+    /// pairing key sends nothing.
+    @discardableResult
+    func sendCommand(_ action: String) -> Bool {
+        guard !action.isEmpty else { return false }
+        guard let route = CommandRoute.choose(lanConnected: lanPeerConnected, relayOnline: peerOnline) else {
+            log("cmd not sent: no link to the phone")
+            return false
+        }
+        switch route {
+        case .lan:
+            guard let hook = onLocalCommand else {
+                log("cmd not sent: LAN transport is not wired")
+                return false
+            }
+            hook(action)
+            return true
+        case .relay:
+            guard let (nonce, ct) = CommandFrame.seal(action: action, keyBase64: pairing.key) else {
+                log("encrypt failed (bad pairing key); not sending cmd")
+                return false
+            }
+            Task { [weak self] in try? await self?.send(.cmd(nonce: nonce, ct: ct)) }
+            return true
+        }
     }
 
     /// Ask the phone to play / pause / skip / seek / set its volume. Travels as a small `stat`

@@ -70,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.onLocalFile = { [weak self] payload in self?.lan?.sendFile(payload) }
         // An SMS reply request fans out to the LAN server too, mirroring stat/file.
         client.onLocalSms = { [weak self] payload in self?.lan?.sendSms(payload) }
+        // A command for the phone goes to the LAN server only when `sendCommand` chose the LAN link (never both links).
+        client.onLocalCommand = { [weak self] action in self?.lan?.sendCommand(action) }
         // Forward the BLE proximity this Mac measures to the phone (over whichever transport is up),
         // so the phone can show the Mac's distance — it can't measure that itself, it only advertises.
         proximity.onReading = { [weak self] reading in self?.client.updateProximity(reading) }

@@ -21,6 +21,10 @@ enum ClientMessage: Encodable {
     /// `{"op":"send","corr":"…","addr":"…","body":"…"}`, AAD "sms" — same envelope inbound
     /// `sms` batches/deltas use. The relay forwards it opaquely.
     case sms(nonce: String, ct: String)
+    /// Encrypted command (Mac → phone): plaintext is the action string (`lock`, or a `q.*` JSON object for the QUIC
+    /// data plane), AAD "cmd" — the same envelope the phone's own `cmd` uses in the other direction. The relay
+    /// forwards it opaquely to the other peer.
+    case cmd(nonce: String, ct: String)
 
     private enum CodingKeys: String, CodingKey {
         case t, room, device, nonce, ct
@@ -53,7 +57,42 @@ enum ClientMessage: Encodable {
             try c.encode("sms", forKey: .t)
             try c.encode(nonce, forKey: .nonce)
             try c.encode(ct, forKey: .ct)
+        case let .cmd(nonce, ct):
+            try c.encode("cmd", forKey: .t)
+            try c.encode(nonce, forKey: .nonce)
+            try c.encode(ct, forKey: .ct)
         }
+    }
+}
+
+/// Builds the `cmd` frame the Mac sends to the phone (QUIC plan stage 1.1). `cmd` used to travel phone → Mac only;
+/// the Mac now writes it too, in exactly the shape the phone writes (`{"t":"cmd","nonce":…,"ct":…}`, v2 envelope,
+/// AAD "cmd"). Fails closed: a malformed pairing key or an empty action yields nil, never a plaintext frame.
+enum CommandFrame {
+    /// The sealed envelope for the relay path, which wraps it in `ClientMessage.cmd`.
+    static func seal(action: String, keyBase64: String) -> (nonce: String, ct: String)? {
+        guard !action.isEmpty else { return nil }
+        return ClipCodec.encode(action, keyBase64: keyBase64, type: "cmd")
+    }
+
+    /// The whole frame for the LAN path, which writes the dictionary straight to the WebSocket.
+    static func make(action: String, keyBase64: String) -> [String: Any]? {
+        guard let (nonce, ct) = seal(action: action, keyBase64: keyBase64) else { return nil }
+        return ["t": "cmd", "nonce": nonce, "ct": ct]
+    }
+}
+
+/// Which link carries a `cmd`: exactly one, never both, so a command cannot be delivered twice. The LAN wins when both
+/// are up (the same preference file transfers use); with no link there is no route and nothing is queued, because a
+/// `q.req` must be fresh when it arrives.
+enum CommandRoute: Equatable {
+    case lan
+    case relay
+
+    static func choose(lanConnected: Bool, relayOnline: Bool) -> CommandRoute? {
+        if lanConnected { return .lan }
+        if relayOnline { return .relay }
+        return nil
     }
 }
 

@@ -337,6 +337,19 @@ final class LanServer: @unchecked Sendable {
         }
     }
 
+    /// Encrypt + send a command (`cmd`) to the authenticated phone: the Mac → phone direction of a frame type that
+    /// used to travel phone → Mac only. Mirrors `sendStat`; no-op if no peer / bad key / empty action. It returns
+    /// nothing on purpose: the answer to "is the phone reachable" is `RelayClient.lanPeerConnected`, and a synchronous
+    /// result from this serial queue would need `queue.sync`.
+    func sendCommand(_ action: String) {
+        queue.async { [self] in
+            guard let conn = connection,
+                  let key = pairingProvider()?.key,
+                  let frame = CommandFrame.make(action: action, keyBase64: key) else { return }
+            send(frame, on: conn)
+        }
+    }
+
     /// Encrypt + send an SMS reply request (`{"op":"send",…}`) to the authenticated phone.
     /// Mirrors `sendStat`; no-op if no peer / bad key.
     func sendSms(_ payload: String) {
