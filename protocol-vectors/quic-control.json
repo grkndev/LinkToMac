@@ -1,0 +1,50 @@
+{
+  "description": "The QUIC control plane's shared vectors (plan docs/plans/2026-11-14-quic-data-plane.md). Only the `stat` section exists so far (stage 1.4): the optional `caps` field of the `stat` plaintext, by which each side learns whether the other speaks the QUIC session protocol (`q1`). The Mac (`mac/Tests/QuicCapsVectorTests.swift`) and the phone (`QuicCapsVectorTest.kt`) run the same cases against their own `QuicCaps` / `PeerCaps`.",
+  "stat": {
+    "description": "`caps` is an array of capability names. Absent (or not an array) means 'no information': the receiver keeps what it has, so a battery or proximity stat never clobbers it. An array SETS the known capabilities (unknown names and non-string items are ignored; an empty array means 'supports none'). Today the only known name is `q1`; names are exact (case-sensitive). When the peer goes offline the set is cleared; until a stat with `caps` arrives, the peer is treated as not supporting QUIC. `kind: parse` — a decoded stat object and the update `QuicCaps.parse` must give (`absent` or `set` with `caps`). `kind: sequence` — steps applied in order to a fresh PeerCaps (`stat` with a stat object, `offline`), and the set expected after each step. `kind: available` — `quicAvailable` is true only on the LAN-direct link AND with `q1` known. `kind: advertise` — what a side writes into its own stat: [`q1`] when it supports QUIC, nothing otherwise.",
+    "cases": [
+      { "name": "caps_q1", "kind": "parse", "stat": { "level": 80, "charging": false, "name": "Pixel", "caps": ["q1"] }, "expect": { "update": "set", "caps": ["q1"] } },
+      { "name": "caps_missing", "kind": "parse", "stat": { "level": 80 }, "expect": { "update": "absent" } },
+      { "name": "caps_missing_empty_stat", "kind": "parse", "stat": {}, "expect": { "update": "absent" } },
+      { "name": "caps_empty_array", "kind": "parse", "stat": { "caps": [] }, "expect": { "update": "set", "caps": [] } },
+      { "name": "caps_unknown_names_ignored", "kind": "parse", "stat": { "caps": ["q1", "zz", "q2"] }, "expect": { "update": "set", "caps": ["q1"] } },
+      { "name": "caps_only_unknown_names", "kind": "parse", "stat": { "caps": ["zz"] }, "expect": { "update": "set", "caps": [] } },
+      { "name": "caps_non_string_items_ignored", "kind": "parse", "stat": { "caps": ["q1", 5, null, true, { "a": 1 }, ["q1"]] }, "expect": { "update": "set", "caps": ["q1"] } },
+      { "name": "caps_duplicates", "kind": "parse", "stat": { "caps": ["q1", "q1"] }, "expect": { "update": "set", "caps": ["q1"] } },
+      { "name": "caps_names_are_case_sensitive", "kind": "parse", "stat": { "caps": ["Q1"] }, "expect": { "update": "set", "caps": [] } },
+      { "name": "caps_is_a_string", "kind": "parse", "stat": { "caps": "q1" }, "expect": { "update": "absent" } },
+      { "name": "caps_is_a_number", "kind": "parse", "stat": { "caps": 5 }, "expect": { "update": "absent" } },
+      { "name": "caps_is_an_object", "kind": "parse", "stat": { "caps": { "q1": true } }, "expect": { "update": "absent" } },
+      { "name": "caps_is_null", "kind": "parse", "stat": { "caps": null }, "expect": { "update": "absent" } },
+      { "name": "caps_next_to_media", "kind": "parse", "stat": { "media": null, "caps": ["q1"] }, "expect": { "update": "set", "caps": ["q1"] } },
+      {
+        "name": "caps_lifecycle",
+        "kind": "sequence",
+        "steps": [
+          { "op": "stat", "stat": { "caps": ["q1"] } },
+          { "op": "stat", "stat": { "level": 5 } },
+          { "op": "stat", "stat": { "caps": [] } },
+          { "op": "stat", "stat": { "caps": ["q1"] } },
+          { "op": "offline" },
+          { "op": "stat", "stat": { "level": 5 } },
+          { "op": "stat", "stat": { "caps": ["q1"] } },
+          { "op": "stat", "stat": { "caps": "bad" } },
+          { "op": "stat", "stat": { "caps": ["zz"] } }
+        ],
+        "after": [["q1"], ["q1"], [], ["q1"], [], [], ["q1"], ["q1"], []]
+      },
+      {
+        "name": "offline_before_any_stat",
+        "kind": "sequence",
+        "steps": [{ "op": "offline" }, { "op": "stat", "stat": { "name": "Pixel" } }],
+        "after": [[], []]
+      },
+      { "name": "available_lan_with_q1", "kind": "available", "onLan": true, "caps": ["q1"], "expect": true },
+      { "name": "unavailable_relay_with_q1", "kind": "available", "onLan": false, "caps": ["q1"], "expect": false },
+      { "name": "unavailable_lan_without_caps", "kind": "available", "onLan": true, "caps": [], "expect": false },
+      { "name": "unavailable_relay_without_caps", "kind": "available", "onLan": false, "caps": [], "expect": false },
+      { "name": "advertise_when_supported", "kind": "advertise", "supportsQuic": true, "expect": ["q1"] },
+      { "name": "advertise_nothing_when_not", "kind": "advertise", "supportsQuic": false, "expect": [] }
+    ]
+  }
+}

@@ -44,7 +44,9 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import expo.modules.selfadb.quic.PeerCaps
 import expo.modules.selfadb.quic.QuicAction
+import expo.modules.selfadb.quic.QuicCaps
 import expo.modules.selfadb.quic.QuicControl
 import expo.modules.selfadb.quic.QuicParse
 
@@ -378,6 +380,7 @@ class ClipForegroundService : Service() {
       onStatReceived = { json ->
         ClipBus.macStat(json)
         rememberMacName(json)
+        rememberMacCaps(json)
         handleMediaCommand(json)
       },
       onFileReceived = { bytes -> applyFile(bytes) },
@@ -394,6 +397,7 @@ class ClipForegroundService : Service() {
           sms?.backfill()
           pushMediaSnapshot()
         }
+        if (!peerOnline) macCaps.peerWentOffline()
         lastPeerOnline = peerOnline
       },
       log = { ClipBus.log(it) },
@@ -1235,6 +1239,18 @@ class ClipForegroundService : Service() {
   /** Note the Mac's name off its `stat` frame, so the Direct Share entries can say whose Mac this
    *  is instead of a generic "your Mac". Persisted (the shortcuts outlive the process) and only
    *  re-pushed when it actually changed — a `stat` arrives on every battery tick. */
+  /** What the Mac told us it can do (`stat.caps`, stage 1.4). Empty until a stat with `caps` arrives, so an old Mac is "not supported". */
+  private val macCaps = PeerCaps()
+
+  /** The one gate for anything that needs QUIC: connected over the LAN-direct link AND the Mac speaks `q1`. (The UI uses it from stage 1.8.) */
+  fun quicAvailable(): Boolean = macCaps.quicAvailable(ClipBus.onLan())
+
+  /** The `caps` of a Mac `stat`. A stat without a usable `caps` leaves what is known alone. */
+  private fun rememberMacCaps(json: String) {
+    val stat = try { JSONObject(json) } catch (e: Exception) { return }
+    macCaps.applyStat(stat)
+  }
+
   private fun rememberMacName(json: String) {
     val name = try {
       JSONObject(json).optString("name").takeIf { it.isNotBlank() }
@@ -1268,11 +1284,14 @@ class ClipForegroundService : Service() {
     val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
     val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
       status == BatteryManager.BATTERY_STATUS_FULL
-    return JSONObject()
+    val stat = JSONObject()
       .put("level", pct)
       .put("charging", charging)
       .put("name", deviceName())
-      .toString()
+    // Stage 1.4: tell the Mac this phone speaks `q1` once it really does (the client of stage 1.7). Nothing is added until then.
+    val caps = QuicCaps.advertised(PHONE_SUPPORTS_QUIC)
+    if (caps.isNotEmpty()) stat.put("caps", org.json.JSONArray(caps))
+    return stat.toString()
   }
 
   /** User-set device name (Settings.Global "device_name") when available, else the hardware model. */
@@ -1786,6 +1805,12 @@ class ClipForegroundService : Service() {
     private const val KEY_PROXIMITY_ADVERTISE = "proximityAdvertise"
     /** The Mac's device name, learned from its `stat` frames — see [rememberMacName]. */
     private const val KEY_MAC_NAME = "macName"
+
+    /**
+     * Whether this phone can run the QUIC session protocol. Stays false until the client of stage 1.7 exists (then `QuicCore.isAvailable()`):
+     * advertising `q1` earlier would make the Mac offer sessions nothing answers. Flip it together with that stage.
+     */
+    private const val PHONE_SUPPORTS_QUIC = false
     private const val KEY_DAEMON_SECRET = "daemonSecret"
     private const val KEY_CLIP_PORT = "clipPort"
     /** How long a write stamp lives before it can no longer suppress an echo. */

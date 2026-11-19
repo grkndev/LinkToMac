@@ -271,3 +271,69 @@ class QuicHandshake(
     return Verdict.Applied(next)
   }
 }
+
+// ---- stat.caps (stage 1.4) --------------------------------------------------------------------------------------------------
+
+/**
+ * `stat.caps`: how each side learns whether the other speaks the QUIC session protocol (`q1`). The field is optional and the `stat` frame
+ * is additive, so a receiver only updates what is present: a stat WITHOUT `caps` (battery, proximity, media) never clobbers it. The
+ * Swift twin is `QuicCaps` in `Quic/QuicControl.swift`; both run `protocol-vectors/quic-control.json` (section `stat`).
+ */
+object QuicCaps {
+  /** The QUIC session protocol, version 1. */
+  const val Q1 = "q1"
+
+  /** The names this build understands; any other name in a peer's `caps` is ignored. */
+  val KNOWN: Set<String> = setOf(Q1)
+
+  sealed class Update {
+    /** No usable `caps` in the stat: the receiver keeps what it has. */
+    object Absent : Update() {
+      override fun toString() = "Absent"
+    }
+
+    /** The peer's capabilities (the known ones), possibly empty: it says it supports none. */
+    data class Known(val caps: Set<String>) : Update()
+  }
+
+  /**
+   * What this side writes into its own `stat`: `["q1"]` once it can actually serve the protocol, nothing before. (Advertising a
+   * capability that does not exist yet would make the peer offer sessions this side cannot answer.)
+   */
+  fun advertised(supportsQuic: Boolean): List<String> = if (supportsQuic) listOf(Q1) else emptyList()
+
+  /**
+   * Reads `caps` from a decoded stat object. Anything that is not an array (missing, a string, a number, an object, null) is [Update.Absent],
+   * so a malformed field cannot wipe what is known. In an array, unknown names and non-string items are ignored.
+   */
+  fun parse(stat: JSONObject): Update {
+    val raw = stat.opt("caps") as? org.json.JSONArray ?: return Update.Absent
+    val names = (0 until raw.length()).mapNotNull { raw.opt(it) as? String }.filter { it in KNOWN }.toSet()
+    return Update.Known(names)
+  }
+
+  /** QUIC is usable only on the LAN-direct link and only when the peer is known to speak `q1`. The one gate the UI will use (stage 1.8). */
+  fun available(onLan: Boolean, caps: Set<String>): Boolean = onLan && Q1 in caps
+}
+
+/**
+ * What a side knows about the peer's capabilities. Empty until a `stat` carrying `caps` arrives, so an old peer (no `caps` ever) is "not
+ * supported", and emptied again when the peer goes offline so a stale answer cannot outlive the session it came from.
+ */
+class PeerCaps(caps: Set<String> = emptySet()) {
+  @Volatile
+  var caps: Set<String> = caps
+    private set
+
+  fun applyStat(stat: JSONObject) {
+    val update = QuicCaps.parse(stat)
+    if (update is QuicCaps.Update.Known) caps = update.caps
+  }
+
+  /** The peer is gone (the active link says so). */
+  fun peerWentOffline() {
+    caps = emptySet()
+  }
+
+  fun quicAvailable(onLan: Boolean): Boolean = QuicCaps.available(onLan, caps)
+}
