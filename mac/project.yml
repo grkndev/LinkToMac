@@ -83,6 +83,12 @@ targets:
       - path: Sources/LinkToMac/ShareHandoff.swift
       - path: Sources/LinkToMac/DropStaging.swift
       - path: Sources/LinkToMac/NowPlaying.swift
+      # QUIC server identity (stage 0.2 of docs/plans/2026-11-14-quic-data-plane.md): Foundation / Security /
+      # CryptoKit only. The Keychain tests use their own throwaway labels and clean up after themselves.
+      - path: Sources/LinkToMac/Quic/DERWriter.swift
+      - path: Sources/LinkToMac/Quic/QuicIdentity.swift
+      # Delay-driven file-rate controller (stage 0.7 / Faz 6.1): pure Foundation, tested against a simulated bottleneck.
+      - path: Sources/LinkToMac/Quic/DelayRateController.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
