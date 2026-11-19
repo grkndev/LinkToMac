@@ -488,7 +488,7 @@ Eski Mac sürümüyle elle deneme: yeni eylem gönderildiğinde log satırı ç�
 
 **Bitti ölçütü.** Her iki uç da yeni eylemleri ayrıştırıyor; `q.accept` akışı (iki istek yönü) ve zaman aşımı testli. *(Sonuç, 2026-11-19: **geçti.** İki dilde aynı vaka tabloları: Swift 51, Kotlin 52 yeni test (Kotlin'de 1'i manuel kanıt, atlanır); tüm Mac testleri **240**, `selfadb` JVM **146** (2 atlanan manuel kanıt) geçti, log gizliliği 106 dosya temiz, `tsc` 0 hata. Her dilde 5 mutasyon (port alt sınırı, `tok` kanonik denetimi, `echo` kapısı, kabulden önce offer, `sid` küçük harf) ayrı testlerce yakalandı. Eşlik: altın dizge blokları iki test dosyasında bayt-bayt aynı; **Mac'in gerçek `encode` çıktısı Kotlin'de ayrıştı ve birebir yeniden üretildi**, kurcalanmış satırla olumsuz kontrol başarısız oldu. Netleştirmeler: `tok` dolgusuz 43 karakter kanonik base64url, `sid` küçük harfe normalize, `port` JSON tamsayı (53125.0 ve 5.3125e4 geçersiz), sondaki virgül protokolde tanımsız (Foundation ve org.json ikisi de hoş görüyor). **Yapılamayan:** plandaki "eski Mac sürümüyle elle deneme": telefonda JSON `cmd` gönderen bir yer yok, yerine kod okuması (eski Mac `default` dalı "bilinmeyen eylem" olarak yok sayar) ve yeni testler; elle deneme Faz 1 genel testine (1.11) kalır. Oturum/teklif bekleme süreleri 1.6/1.8'e bırakıldı; yalnız 60 sn kabul bekleme `QuicHandshake`'te.)*
 
-### [ ] 1.4 `stat.caps` (iki yönde)
+### [x] 1.4 `stat.caps` (iki yönde)
 
 **Amaç.** Karşı tarafın QUIC desteğini öğrenmek; desteklemiyorsa özellikleri UI'da gizlemek.
 
@@ -502,7 +502,7 @@ Eski Mac sürümüyle elle deneme: yeni eylem gönderildiğinde log satırı ç�
 
 **Testler (beklenen sonuç).** Vektör: `caps` içeren stat ayrışır; `caps` içermeyen stat mevcut `caps`'i değiştirmez; peer çevrimdışı olayı `caps`'i sıfırlar; bilinmeyen kapasite adları yok sayılır. Swift ve Kotlin aynı vektörleri geçer.
 
-**Bitti ölçütü.** İki uç birbirinin QUIC desteğini `stat` ile öğreniyor; eski peer'de özellikler kapalı.
+**Bitti ölçütü.** İki uç birbirinin QUIC desteğini `stat` ile öğreniyor; eski peer'de özellikler kapalı. *(Sonuç, 2026-11-19: **geçti.** `QuicCaps`/`PeerCaps` iki dilde; ortak vektörler `protocol-vectors/quic-control.json` (yalnız `stat` bölümü, 22 vaka: `parse`, `sequence`, `available`, `advertise`), Swift 9 ve Kotlin 8 yeni test; tüm Mac testleri **249**, `selfadb` JVM **154** (3 atlanan manuel kanıt) geçti, log gizliliği 106 dosya temiz, `tsc` 0 hata. Her dilde 5 mutasyon: Swift'te 5/5, Kotlin'de 4/5 yakalandı (5.'si eşdeğer mutant: dizge olmayan bir JSON öğesi `q1`'e dönüşemez). Çapraz kanıt: Mac'in kendi kodunun yazdığı `stat` (`"caps":["q1"]` dahil) Kotlin'de `q1` olarak okundu, `caps`'siz `stat` ile olumsuz kontrol başarısız oldu. **Kullanıcı kararı (zamanlama):** `q1` her tarafta kendi parçası var olunca ilan edilir; `RelayClient.supportsQuic` (1.6) ve `PHONE_SUPPORTS_QUIC` (1.7) şimdilik `false`, bu yüzden canlı `stat` çerçevesi değişmedi (korumalar birim testli, `statFragment(false) == nil` ve `advertised(false)` boş). Netleştirmeler: bozuk (dizi olmayan) `caps` mevcut durumu bozmaz; Mac'te eş, relay VE LAN'dan birden çıkınca çevrimdışı sayılır (`lanPeerChanged`). **Vektör dosyası** plan 1.5'in dosyası: 1.4 onu yalnız `stat` bölümüyle kurdu, 1.5 kapsamını görmedim. **Cihazda doğrulanmadı** (anahtarlar kapalı, canlı `stat` değişmiyor); uçtan uca caps değişimi 1.6/1.7'de anahtarlar açılınca ve 1.11'de.)*
 
 ### [ ] 1.5 Vektörler: `protocol-vectors/quic-control.json`
 
