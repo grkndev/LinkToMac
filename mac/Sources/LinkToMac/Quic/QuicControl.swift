@@ -271,3 +271,66 @@ struct QuicHandshake {
         return .applied(next)
     }
 }
+
+// MARK: - stat.caps (stage 1.4)
+
+/// `stat.caps`: how each side learns whether the other speaks the QUIC session protocol (`q1`). The field is optional and the `stat`
+/// frame is additive, so a receiver only updates what is present: a stat WITHOUT `caps` (battery, proximity, media) never clobbers it.
+/// The Kotlin twin is `QuicCaps` in `quic/QuicControl.kt`; both run `protocol-vectors/quic-control.json` (section `stat`).
+enum QuicCaps {
+    /// The QUIC session protocol, version 1.
+    static let q1 = "q1"
+
+    /// The names this build understands; any other name in a peer's `caps` is ignored.
+    static let known: Set<String> = [q1]
+
+    enum Update: Equatable, Sendable {
+        /// No usable `caps` in the stat: the receiver keeps what it has.
+        case absent
+        /// The peer's capabilities (the known ones), possibly empty: it says it supports none.
+        case set(Set<String>)
+    }
+
+    /// What this side writes into its own `stat`: `["q1"]` once it can actually serve the protocol, nothing before. (Advertising a
+    /// capability that does not exist yet would make the peer offer sessions this side cannot answer.)
+    static func advertised(supportsQuic: Bool) -> [String] { supportsQuic ? [q1] : [] }
+
+    /// The `"caps":["q1"]` piece for a hand-built `stat` JSON object, or nil when nothing is advertised (the frame stays as it was).
+    static func statFragment(supportsQuic: Bool) -> String? {
+        let names = advertised(supportsQuic: supportsQuic)
+        guard !names.isEmpty else { return nil }
+        return #""caps":["# + names.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+    }
+
+    /// Reads `caps` from a decoded stat object. Anything that is not an array (missing, a string, a number, an object, null) is `absent`,
+    /// so a malformed field cannot wipe what is known. In an array, unknown names and non-string items are ignored.
+    static func parse(stat: [String: Any]) -> Update {
+        guard let raw = stat["caps"] as? [Any] else { return .absent }
+        return .set(Set(raw.compactMap { $0 as? String }.filter { known.contains($0) }))
+    }
+
+    /// QUIC is usable only on the LAN-direct link and only when the peer is known to speak `q1`. The one gate the UI will use (stage 1.8).
+    static func available(onLan: Bool, caps: Set<String>) -> Bool { onLan && caps.contains(q1) }
+}
+
+/// What a side knows about the peer's capabilities. Empty until a `stat` carrying `caps` arrives, so an old peer (no `caps` ever) is
+/// "not supported", and emptied again when the peer goes offline so a stale answer cannot outlive the session it came from.
+struct PeerCaps: Equatable, Sendable {
+    private(set) var caps: Set<String>
+
+    init(caps: Set<String> = []) { self.caps = caps }
+
+    mutating func applyStat(_ stat: [String: Any]) {
+        if case let .set(set) = QuicCaps.parse(stat: stat) { caps = set }
+    }
+
+    /// The peer is gone (the only link it had).
+    mutating func peerWentOffline() { caps = [] }
+
+    /// For the Mac, where one phone can be on the relay AND on the LAN: forget the capabilities only when it has left both.
+    mutating func linksChanged(relayOnline: Bool, lanConnected: Bool) {
+        if !relayOnline && !lanConnected { caps = [] }
+    }
+
+    func quicAvailable(onLan: Bool) -> Bool { QuicCaps.available(onLan: onLan, caps: caps) }
+}

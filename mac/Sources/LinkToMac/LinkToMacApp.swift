@@ -149,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applyLanSettings() {
         lan?.stop()
         lan = nil
-        client.lanPeerConnected = false // rebuilding: no LAN peer until one re-authenticates
+        client.lanPeerChanged(false) // rebuilding: no LAN peer until one re-authenticates
         let s = ServerSettingsStore.load()
         guard s.lanEnabled, let port = UInt16(exactly: s.lanPort) else { return }
         let server = LanServer(port: port, pairingProvider: { PairingStore.load() })
@@ -164,7 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // push the current battery immediately so the phone shows it without waiting for the poll.
         server.onPeerChange = { [weak server] connected in
             Task { @MainActor in
-                client.lanPeerConnected = connected
+                client.lanPeerChanged(connected)
                 if connected, let payload = client.currentStatPayload() { server?.sendStat(payload) }
             }
         }

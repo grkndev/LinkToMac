@@ -29,6 +29,13 @@ final class RelayClient {
     /// whichever transport is live, and this is a real connection even when the relay is unset.
     var lanPeerConnected = false
 
+    /// What the phone told us it can do (`stat.caps`, stage 1.4). Empty until a stat carrying `caps` arrives, so an old phone is "not
+    /// supported", and emptied once the phone has left BOTH links (`peerLinksChanged`).
+    private(set) var peerCaps = PeerCaps()
+
+    /// The one gate for anything that needs QUIC: the phone is on the LAN-direct link AND speaks `q1`. (The UI uses it from stage 1.8.)
+    var quicAvailable: Bool { peerCaps.quicAvailable(onLan: lanPeerConnected) }
+
     /// Most recent clipboard text received from the peer (decrypted via `ClipCodec`).
     private(set) var lastClip: String?
 
@@ -336,6 +343,7 @@ final class RelayClient {
         teardown()
         status = .disconnected
         peerOnline = false
+        peerLinksChanged()
         lastError = nil
     }
 
@@ -511,12 +519,18 @@ final class RelayClient {
             parts.append("\"prox\":\"\(state)\"")
             if let r = proxRSSI { parts.append("\"rssi\":\(r)") }
         }
+        // Stage 1.4: tell the phone this Mac speaks `q1` once it really does (the listener of stage 1.6). Nothing is added until then.
+        if let caps = QuicCaps.statFragment(supportsQuic: Self.supportsQuic) { parts.append(caps) }
         guard !parts.isEmpty else { return nil }
         return "{" + parts.joined(separator: ",") + "}"
     }
 
     /// This Mac's user-visible name, as System Settings ▸ General ▸ About shows it. Computed once:
     /// it can only change via a relaunch-worthy system setting.
+    /// Whether this Mac can serve the QUIC session protocol. Stays false until the listener of stage 1.6 exists: advertising `q1` earlier
+    /// would make the phone offer sessions nothing answers. Flip it together with that stage.
+    private static let supportsQuic = false
+
     private static let macName: String? = {
         let name = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
         return name.isEmpty ? nil : name
@@ -905,6 +919,25 @@ final class RelayClient {
         if let charging = stat.charging { phoneCharging = charging }
         if let name = stat.name, !name.isEmpty { phoneName = name }
         applyMedia(json)
+        applyCaps(json)
+    }
+
+    /// The `caps` of a phone `stat`. A stat without a usable `caps` (battery, proximity, media...) leaves what is known alone.
+    private func applyCaps(_ json: String) {
+        guard let raw = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else { return }
+        peerCaps.applyStat(raw)
+    }
+
+    /// The LAN server tells us whether a phone is connected over the LAN-direct link. Set through here (not the bare flag) so the
+    /// capabilities are forgotten once the phone has left both links.
+    func lanPeerChanged(_ connected: Bool) {
+        lanPeerConnected = connected
+        peerLinksChanged()
+    }
+
+    /// One phone can be on the relay AND on the LAN; its capabilities are forgotten only when it is gone from both.
+    private func peerLinksChanged() {
+        peerCaps.linksChanged(relayOnline: peerOnline, lanConnected: lanPeerConnected)
     }
 
     /// The media fields of a phone `stat`. A stat that carries none (battery, name…) leaves the card
@@ -1293,12 +1326,14 @@ final class RelayClient {
             status = .joined
             reconnectAttempt = 0
             peerOnline = peers.contains(Config.peerDevice)
+            peerLinksChanged()
             log("joined; peers=\(peers)")
             if peerOnline { pushStatNow() } // give the phone a fresh value without waiting for the poll
         case let .peer(state, device):
             if device == Config.peerDevice {
                 let cameOnline = (state == "online") && !peerOnline
                 peerOnline = (state == "online")
+                peerLinksChanged()
                 if cameOnline { pushStatNow() }
             }
             log("peer \(device) \(state)")
