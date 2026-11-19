@@ -12,6 +12,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
@@ -43,6 +44,9 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import expo.modules.selfadb.quic.QuicAction
+import expo.modules.selfadb.quic.QuicControl
+import expo.modules.selfadb.quic.QuicParse
 
 /**
  * What caught a clip. The shell daemon is the only source that sees a copy on its own; every
@@ -1385,9 +1389,34 @@ class ClipForegroundService : Service() {
     )
   }
 
-  /** Placeholder for the `q.*` dispatcher of stage 1.3. */
+  /**
+   * Receives a parsed `q.*` action from the Mac (stage 1.3). Nothing consumes it yet: the QUIC client of stage 1.7 and the session
+   * lifecycle of stage 1.8 will set it.
+   */
+  @Volatile
+  private var onQuicAction: ((QuicAction) -> Unit)? = null
+
+  /**
+   * A JSON `cmd` action from the Mac: parse it as one of the `q.*` actions. The `echo` kind exists in a debuggable build only. Only fixed
+   * texts and lengths are logged, never the action: a session id, a port, a fingerprint and a token ride in it.
+   */
   private fun dispatchCmdJson(json: String) {
-    ClipBus.log("cmd: json received (${json.length} chars), no handler yet")
+    val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+    when (val parsed = QuicControl.parse(json, allowEcho = debuggable)) {
+      is QuicParse.Action -> {
+        val what = when (parsed.action) {
+          is QuicAction.Request -> "request"
+          is QuicAction.Accept -> "accept"
+          is QuicAction.Offer -> "offer"
+          is QuicAction.Reject -> "reject"
+          is QuicAction.End -> "end"
+        }
+        ClipBus.log("cmd: quic $what received")
+        onQuicAction?.invoke(parsed.action)
+      }
+      QuicParse.Unknown -> ClipBus.log("cmd: json ignored, unknown action (${json.length} chars)")
+      is QuicParse.Invalid -> ClipBus.log("cmd: json invalid (${parsed.code})")
+    }
   }
 
   /** Public hook for the module after the user grants SMS access from Settings — starts the
