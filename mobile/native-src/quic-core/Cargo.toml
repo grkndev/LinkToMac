@@ -32,3 +32,5 @@ panic = "unwind"
 [dev-dependencies]
 rustls-webpki = { version = "0.103.17", default-features = false, features = ["ring", "std"] }
 x509-parser = { version = "0.18.1", features = ["verify"] }
+# Reads the shared protocol vectors (tests/vectors.rs). Dev only: never part of the Android .so.
+serde_json = "1"

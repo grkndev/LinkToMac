@@ -9,7 +9,7 @@ under 640 KiB then waited out a 30 s timeout).
 |---|---|---|---|
 | `file-frame.json` | the `file` frame plaintext: `u16 BE header-len ‖ header JSON ‖ raw bytes` | `mac/Tests/FileFrameVectorTests.swift` | `mobile/modules/selfadb/android/src/test/…/FileFrameVectorTest.kt` |
 | `dir-sanitize.json` | how a peer-supplied `dir` (folder path) is made safe to write under the download folder | `FileFrameVectorTests.dirSanitizeVectors` (→ `FileDropStore.sanitizeDir`) | `FileFrameVectorTest.dirSanitizeVectors` (→ `FileSink.sanitizeDir`) |
-| `quic-control.json` | the QUIC control plane; so far only `stat.caps` (which side speaks `q1`) | `mac/Tests/QuicCapsVectorTests.swift` | `mobile/modules/selfadb/android/src/test/java/expo/modules/selfadb/QuicCapsVectorTest.kt` |
+| `quic-control.json` | the QUIC control plane: the `q.*` actions, stream channel header, ALPN and shared constants, handshake rules, `stat.caps` | `mac/Tests/QuicControlVectorTests.swift`, `QuicCapsVectorTests.swift` | `…/QuicControlVectorTest.kt`, `QuicCapsVectorTest.kt` (the Rust core also checks the ALPN: `mobile/native-src/quic-core/tests/vectors.rs`) |
 | `stat-media.json` | the media fields inside the `stat` plaintext: `media` / `mediaArt` (phone → Mac) and `mediaCmd` (Mac → phone) | `mac/Tests/NowPlayingTests.swift` (→ `NowPlaying.parse`, `MediaCommand`) | `…/MediaStateTest.kt` (→ `MediaState.toJson`, `parseCommand`) |
 
 Not a vector but a contract in the same spirit: **`FileFrame.maxTransferBytes` (Swift) and
@@ -62,16 +62,36 @@ The `title`/`artist` in these vectors are made up; the log-privacy rule applies 
 
 ## `quic-control.json`
 
-The QUIC control plane (plan `docs/plans/2026-11-14-quic-data-plane.md`). Only the **`stat`** section exists so far (stage 1.4): the optional
-`caps` array of the `stat` plaintext, by which each side learns whether the other speaks the QUIC session protocol (`q1`). Each section is
-`{ description, cases }`, like the other files.
+The QUIC control plane (plan `docs/plans/2026-11-14-quic-data-plane.md`, stages 1.3–1.5). Each section is `{ description, cases }` like the
+other files (`constants` has `values` instead). **This file is the only copy of these rules' expected results** — the Swift and Kotlin tests
+hold no case tables of their own — so a rule changes by changing the file, and then both implementations must follow.
 
-- **`parse`** — a decoded stat object and the update it must give: `absent` (no usable `caps`: the receiver keeps what it has, so a battery or
-  proximity stat never clobbers it; also a `caps` that is not an array) or `set` with the known names (unknown names and non-string items are
-  ignored; `[]` means "supports none"; names are case-sensitive).
-- **`sequence`** — steps (`stat` with an object, `offline`) applied in order to a fresh `PeerCaps`, and the set expected after each step. The
-  peer going offline clears it; until a stat with `caps` arrives the peer counts as not supporting QUIC.
-- **`available`** — `quicAvailable` is true only on the LAN-direct link AND with `q1` known.
-- **`advertise`** — what a side writes into its own stat: `["q1"]` when it can serve the protocol, nothing otherwise. Both sides keep this switched
-  off until their QUIC piece exists (Mac: stage 1.6, phone: stage 1.7), so today's `stat` frames are unchanged.
+- **`constants`** — `alpn` (`ltm/1`: the TLS ALPN id of the data plane, checked by Swift, Kotlin **and Rust**: a mismatch makes no handshake ever
+  complete), `max_action_bytes` (4096) and `accept_timeout_ms` (60000).
+- **`actions`** — the `q.*` JSON that rides inside a `cmd`. `parse`: `text` (a `{PAD}` marker is filled from `pad`: `{char, to_bytes}` makes the
+  whole text exactly that many UTF-8 bytes, `{char, count}` repeats the character), `allow_echo` (default false) and `expect.result`:
+  `action` (+ `encoded`, the canonical form: keys in alphabetical order, no whitespace, session id lower case), `unknown` (a JSON object whose
+  `a` is missing or not one of the five: ignored quietly so a newer peer can't break an older one) or `invalid` (+ the short `code`: `too-large`,
+  `bad-json`, `sid`, `kind`, `reason`, `port`, `fp`, `tok`). `encode`: an action object and the exact string it must encode to — which must
+  also parse back to the same action. The golden strings here are what makes the two encoders byte-identical.
+- **`channels`** — the first varint of every data stream names its channel: 1 file (bidi), 2 screen (uni), 3 camera (uni). `header`: the bytes a
+  sender writes (the shortest varint) and the stream direction. `parse`: the first varint of `hex` as a receiver reads it — `channel` + `consumed`
+  bytes, `unknown` (+ `value`: a well-formed varint naming no known channel) or `needMoreBytes`. All four QUIC varint lengths are read, a
+  longer-than-necessary form is accepted (RFC 9000 allows it), and only the first varint is consumed.
+- **`stat`** (stage 1.4) — the optional `caps` array of the `stat` plaintext, by which each side learns whether the other speaks the QUIC session
+  protocol (`q1`). `parse`: a decoded stat object and the update it must give: `absent` (no usable `caps`: the receiver keeps what it has, so a
+  battery or proximity stat never clobbers it; also a `caps` that is not an array) or `set` with the known names (unknown names and non-string
+  items are ignored; `[]` means "supports none"; names are case-sensitive). `sequence`: steps (`stat`, `offline`) applied in order to a fresh
+  `PeerCaps` and the set expected after each. `available`: `quicAvailable` is true only on the LAN-direct link AND with `q1` known.
+  `advertise`: what a side writes into its own stat — `["q1"]` when it can serve the protocol, nothing otherwise (both sides keep this off until
+  their QUIC piece exists: Mac stage 1.6, phone stage 1.7).
+- **`handshake`** — who may send what, when, per session. A scenario is `side` (`mac`/`phone`), `asker` (this side sent the `q.req`),
+  `start_ms`, optional `timeout_ms`, the `initial` phase and `steps`: `send` (this side wants to send `action`), `receive` (the peer's `action`
+  arrives) or `tick` (the clock reaches `at_ms`). `expect` is `{applied: phase}` or `{ignored: code}` for send/receive and `{phase}` for tick; an
+  optional `then` is the phase the session must be in afterwards. A phase is `{name, deadline_ms?}` (`awaitingAccept`, `awaitingUser`,
+  `awaitingOffer`, `mayOffer`, `offered`) or `{name: "closed", close: "ended"|"timedOut"|"rejected", reason?}`. The offer is always the Mac's;
+  with the phone as the asker there is no accept step; an offer before the accept is ignored; after `closed` everything is ignored. Actions in
+  steps are built by running their JSON through `parse`, so a session-id case difference is `parse`'s job, not the handshake's.
 
+Run them: Swift and Kotlin as above; Rust with `cd mobile/native-src/quic-core && cargo test --test vectors`. (Kotlin's `build.gradle` declares this
+folder as an input of the test task — without that, editing a vector left Gradle's test task UP-TO-DATE and the Kotlin run silently skipped.)
