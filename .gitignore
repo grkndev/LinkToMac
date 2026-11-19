@@ -10,6 +10,9 @@ workflow.md
 # Gradle / native build output (regenerated; only the asset dex is kept)
 /mobile/modules/**/android/build/
 /mobile/native-src/**/build/
+# quic-core (Rust): cargo output, and the cargo-ndk product. libquic_core.so is NOT committed: build-so.sh makes it.
+/mobile/native-src/**/target/
+/mobile/modules/**/android/src/main/jniLibs/
 /mobile/.vscode/
 /mobile/.expo/
 /mobile/.claude/

@@ -39,6 +39,21 @@ android {
   }
 }
 
+// QUIC core (Rust, mobile/native-src/quic-core). libquic_core.so is NOT committed: build-so.sh produces it
+// into src/main/jniLibs/arm64-v8a. A build without it must still work (a dev client without Rust installed,
+// an x86_64 emulator): QuicCore.kt then reports "unavailable". So this only WARNS, it never fails the build,
+// but a release must be cut after running build-so.sh or QUIC is silently absent from that APK.
+def quicCoreSo = file("src/main/jniLibs/arm64-v8a/libquic_core.so")
+tasks.register("checkQuicCoreSo") {
+  doLast {
+    if (!quicCoreSo.exists()) {
+      logger.warn("[quic-core] libquic_core.so is missing: this build ships WITHOUT QUIC. " +
+                  "Run mobile/native-src/quic-core/build-so.sh before cutting a release.")
+    }
+  }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn("checkQuicCoreSo") }
+
 dependencies {
   // ===================================================================
   // libadb-android — pure-Java adb client with Android 11+ TLS + spake2
