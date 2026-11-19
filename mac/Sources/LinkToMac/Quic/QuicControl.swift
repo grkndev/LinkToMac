@@ -44,6 +44,10 @@ enum QuicParse: Equatable, Sendable {
 }
 
 enum QuicControl {
+    /// The TLS ALPN protocol id of the data plane (a version change bumps the suffix). The Rust client (`quic-core` `ALPN`) and the phone's
+    /// Kotlin constant must match it byte for byte — pinned by `protocol-vectors/quic-control.json` (section `constants`).
+    static let alpn = "ltm/1"
+
     /// An action is at most this many UTF-8 bytes; checked before parsing, so a hostile frame cannot cost real work.
     static let maxActionBytes = 4096
 
@@ -185,12 +189,15 @@ struct QuicHandshake {
         case ignored(String)
     }
 
+    /// How long the side that asked waits for the other side's accept (and how long the phone waits for its user).
+    static let defaultAcceptTimeoutMs: Int64 = 60_000
+
     let side: QuicSide
     let iRequested: Bool
     let sid: String
     private(set) var phase: Phase
 
-    init(side: QuicSide, iRequested: Bool, sid: String, nowMs: Int64, acceptTimeoutMs: Int64 = 60_000) {
+    init(side: QuicSide, iRequested: Bool, sid: String, nowMs: Int64, acceptTimeoutMs: Int64 = QuicHandshake.defaultAcceptTimeoutMs) {
         self.side = side
         self.iRequested = iRequested
         self.sid = sid.lowercased()
@@ -269,6 +276,50 @@ struct QuicHandshake {
     private mutating func apply(_ next: Phase) -> Verdict {
         phase = next
         return .applied(next)
+    }
+}
+
+// MARK: - Stream channels (stage 1.5)
+
+/// What a data stream carries. Its first bytes are a QUIC variable-length integer (RFC 9000 §16) naming the channel: 1 file (a bidirectional
+/// stream), 2 screen and 3 camera (unidirectional). The Kotlin twin is `QuicChannel` in `quic/QuicControl.kt`; both run the `channels`
+/// section of `protocol-vectors/quic-control.json`.
+enum QuicChannel: Equatable, Sendable {
+    case file, screen, camera
+
+    var typeId: UInt64 {
+        switch self {
+        case .file: return 1
+        case .screen: return 2
+        case .camera: return 3
+        }
+    }
+
+    var isBidirectional: Bool { self == .file }
+
+    /// What a sender writes first: the shortest varint (all three ids fit one byte).
+    var header: [UInt8] { [UInt8(typeId)] }
+
+    enum Parse: Equatable, Sendable {
+        case channel(QuicChannel, consumed: Int)
+        /// A well-formed varint that names no channel we know (the caller decides: reset the stream, ignore it).
+        case unknown(value: UInt64, consumed: Int)
+        case needMoreBytes
+    }
+
+    /// Reads the FIRST varint of `bytes`. A longer-than-necessary form is accepted (RFC 9000 allows it); anything after the varint is left alone.
+    static func parse(_ bytes: [UInt8]) -> Parse {
+        guard let first = bytes.first else { return .needMoreBytes }
+        let length = 1 << Int(first >> 6)  // the top two bits give 1, 2, 4 or 8 bytes
+        guard bytes.count >= length else { return .needMoreBytes }
+        var value = UInt64(first & 0x3f)
+        for byte in bytes[1..<length] { value = (value << 8) | UInt64(byte) }
+        switch value {
+        case 1: return .channel(.file, consumed: length)
+        case 2: return .channel(.screen, consumed: length)
+        case 3: return .channel(.camera, consumed: length)
+        default: return .unknown(value: value, consumed: length)
+        }
     }
 }
 
