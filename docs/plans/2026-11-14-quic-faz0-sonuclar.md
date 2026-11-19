@@ -687,5 +687,5 @@ Sessizlik tabanı −120 dBFS (dijital sessizlik), eşik −100 dBFS.
 - Hâlâ sizde: Apple portalındaki `dev.grkn.LinkToMac.CameraSpike` App ID'si ve profil, `~/Downloads/Link_To_Mac_Camera_Spike_DevID.provisionprofile`, `files.tsx` düzeltmesinin cihazda doğrulanması, spike uzantısının yeniden başlatmaya kadar süren kaldırma kaydı.
 - Doğrulanmayanlar Faz 0 boyunca ilgili bölümlerde yazılı (bulgu 90, 99; DATAGRAM'ın yük altında kaybı; HEVC çözme; 10 GB'ta WS).
 
-**Onay kaydı.** Kapı kararları ve plan düzenlemeleri 2026-11-19'da 0.12'de kullanıcı onayıyla uygulandı (kapı tablosu, 15 düzenleme, 4.6'nın yeniden hedeflenmesi, commit kapsamı). 0.13 kapsam kararları (kullanıcı onaylı): kalıcı küme = üretim kalitesindeki her şey, ana dala iniş = yalnız yerel dal, `files.tsx` = ayrı dal. Faz 1'e geçiş onayı: 0.13 özetinde istenir.
+**Onay kaydı.** Kapı kararları ve plan düzenlemeleri 2026-11-19'da 0.12'de kullanıcı onayıyla uygulandı (kapı tablosu, 15 düzenleme, 4.6'nın yeniden hedeflenmesi, commit kapsamı). 0.13 kapsam kararları (kullanıcı onaylı): kalıcı küme = üretim kalitesindeki her şey, ana dala iniş = yalnız yerel dal, `files.tsx` = ayrı dal. Faz 1'e geçiş: kullanıcı onayladı (2026-11-19), çalışma `feat/quic-foundation` dalından sürer.
 
