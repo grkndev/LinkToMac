@@ -43,6 +43,8 @@ class ConnectionManager(
   /** Decrypted `sms` JSON from the Mac (an `{"op":"send",…}` reply request), from whichever link
    *  is active. */
   private val onSmsReceived: (String) -> Unit,
+  /** Decrypted `cmd` action from the Mac (plain string or `q.*` JSON), from whichever link is active. */
+  private val onCmdReceived: (String) -> Unit,
   /** transport is "lan" or "relay"; status/peerOnline/error/attempt mirror the child client. */
   private val onStatus: (transport: String, status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
   private val log: (String) -> Unit,
@@ -280,6 +282,7 @@ class ConnectionManager(
       onStatReceived = onStatReceived,
       onFileReceived = onFileReceived,
       onSmsReceived = onSmsReceived,
+      onCmdReceived = onCmdReceived,
       onStatus = { status, peerOnline, error, attempt -> post { onLanStatus(status, peerOnline, error, attempt) } },
       log = log,
     ).also { it.start() }
@@ -327,6 +330,7 @@ class ConnectionManager(
       onStatReceived = onStatReceived,
       onFileReceived = onFileReceived,
       onSmsReceived = onSmsReceived,
+      onCmdReceived = onCmdReceived,
       onStatus = { status, peerOnline, error, attempt -> post { onRelayStatus(status, peerOnline, error, attempt) } },
       log = log,
     ).also { it.start() }

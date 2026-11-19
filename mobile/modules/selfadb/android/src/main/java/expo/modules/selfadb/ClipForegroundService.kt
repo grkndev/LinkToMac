@@ -378,6 +378,7 @@ class ClipForegroundService : Service() {
       },
       onFileReceived = { bytes -> applyFile(bytes) },
       onSmsReceived = { json -> handleInboundSms(json) },
+      onCmdReceived = { action -> handleInboundCmd(action) },
       onStatus = { transport, status, peerOnline, error, attempt ->
         ClipBus.relay(status, peerOnline, error, transport, attempt)
         updateNotification(peerOnline)
@@ -1366,6 +1367,27 @@ class ClipForegroundService : Service() {
     val body = o.optString("body")
     if (corr.isEmpty() || addr.isEmpty() || body.isEmpty()) return
     receiveSmsReply(addr, body, corr)
+  }
+
+  /**
+   * A decrypted `cmd` from the Mac (QUIC plan stage 1.2), from whichever link is active. A JSON object goes to the QUIC control
+   * dispatcher (stage 1.3 wires it in; until then it is only logged); a plain string is an unknown action and is ignored. It never
+   * answers and never acts on an unknown action. Only lengths are logged: an action can carry a session id, a port or a token.
+   */
+  private fun handleInboundCmd(action: String) {
+    InboundCmd.route(
+      action,
+      onJson = { dispatchCmdJson(it) },
+      onIgnored = { kind, length ->
+        val what = if (kind == InboundCmd.Kind.EMPTY) "empty" else "unknown"
+        ClipBus.log("cmd: ignored $what action ($length chars)")
+      },
+    )
+  }
+
+  /** Placeholder for the `q.*` dispatcher of stage 1.3. */
+  private fun dispatchCmdJson(json: String) {
+    ClipBus.log("cmd: json received (${json.length} chars), no handler yet")
   }
 
   /** Public hook for the module after the user grants SMS access from Settings — starts the
