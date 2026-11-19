@@ -447,7 +447,7 @@ yanlış anahtar → nil; `type:"clip"` ile çözme → nil (tip bağlama); eski
 
 **Bitti ölçütü.** Mac her iki linke `cmd` yazabiliyor; saf yardımcı testli. *(Sonuç, 2026-11-19: **geçti.** `CommandFrameTests` 15 test (taze çerçeve ve yeniden oynatma, yanlış anahtar, tip bağlama, eski ve ileri zaman damgası + olumlu kontrol, geçersiz anahtar/boş eylem, `ClientMessage.cmd` JSON biçimi, `CommandRoute` dört durum); üç mutasyon ayrı testler tarafından yakalandı (AAD tipi 4 test, rota önceliği 1, boş eylem koruması 1); tüm Mac testleri **189** geçti (174 + 15), uygulama hedefi uyarısız derleniyor. Mac → telefon teslimi cihazda **doğrulanmadı**: telefon henüz `cmd` çözmüyor, uçtan uca doğrulama 1.2'nin testi.)*
 
-### [ ] 1.2 Android `cmd` alıcısı
+### [x] 1.2 Android `cmd` alıcısı
 
 **Amaç.** `RelayClient.kt` ve `LanClient.kt` bugün gelen `cmd`'yi dağıtmıyor (yalnız `stat`, `sms`, `file` vb.). Alıcı eklemek.
 
@@ -457,12 +457,12 @@ yanlış anahtar → nil; `type:"clip"` ile çözme → nil (tip bağlama); eski
 3. `ClipForegroundService.kt`: `handleInboundCmd(action)` — `{` ile başlıyorsa JSON dağıtıcıya (1.3) gider; diğer düz string'ler bilinmeyen eylem olarak loglanıp yok sayılır.
 4. Log kuralı: yalnız uzunluk ve durum loglanır; eylem metni, sid, port, fp, tok asla (`check-log-privacy.mjs`).
 
-**Dosyalar.** `RelayClient.kt`, `LanClient.kt`, `ConnectionManager.kt`, `ClipForegroundService.kt`, `src/test/.../CmdReceiveTest.kt`.
+**Dosyalar.** `InboundCmd.kt` (yeni, saf Kotlin: `open`/`classify`/`route`), `RelayClient.kt`, `LanClient.kt`, `ConnectionManager.kt`, `ClipForegroundService.kt`, `src/test/.../CmdReceiveTest.kt`, `src/test/java/android/util/Base64.kt` (yalnız test kılıfı, Kotlin çünkü repo `*.java`'yı bilerek yok sayıyor: `ClipCodec` Android'in `Base64`'ünü kullanıyor, JVM'de stub `null` döner).
 
 **Testler (beklenen sonuç).** JVM: ClipCodec ile mühürlenmiş JSON string'in alıcıdan doğru çıktığı; bozuk/yanlış anahtarlı/eski zaman damgalı frame'in istisnasız yok sayıldığı; bilinmeyen düz string'in dağıtıcıya gitmediği.
 `./gradlew :selfadb:testDebugUnitTest` ve `bun run lint` (log gizliliği) geçer.
 
-**Bitti ölçütü.** Telefon Mac'ten gelen `cmd`'yi alıp tek noktada dağıtıyor; relay ve LAN'da aynı yol.
+**Bitti ölçütü.** Telefon Mac'ten gelen `cmd`'yi alıp tek noktada dağıtıyor; relay ve LAN'da aynı yol. *(Sonuç, 2026-11-19: **geçti.** `CmdReceiveTest` 15 test (14 koşar + 1 elle çapraz-dil kanıtı): taze çerçeve, yanlış anahtar/biçimsiz anahtar, tip bağlama, yeniden oynatma, eski ve ileri zaman damgası + olumlu kontrol, bozuk girdi istisnasız `null`, `classify`, `route`; üç mutasyon ayrı testlerce yakalandı (AAD türü 6 test, JSON tanıma 2, bilinmeyeni dağıtıcıya gönderme 1); tam `selfadb` JVM paketi **94 test / 11 süit, 0 hata** (79 + 15, 1 atlanan = elle kanıt); `bun run lint` log gizliliği 105 dosya temiz, `tsc` 0 hata. **Çapraz dil kanıtı geçti:** Mac'in gerçek `ClipCodec.swift` + `CommandFrame`'iyle mühürlenen taze çerçeve (Türkçe karakter ve emoji dahil JSON eylem) Kotlin `ClipCodec`'inde aynen çözüldü; yanlış beklenen eylem ve yanlış anahtarla olumsuz kontroller başarısız oldu. **Cihazda doğrulanmadı:** Mac'te `sendCommand`'ın tetikleyicisi henüz yok, uçtan uca cihaz testi 1.11'de ve Mac tetikleyicisi geldiğinde (1.6/1.8). JSON eylem şimdilik yalnız loglanıyor (`dispatchCmdJson` yer tutucusu), gerçek dağıtıcı 1.3'te.)*
 
 ### [ ] 1.3 JSON eylemler: `q.req`, `q.accept`, `q.offer`, `q.reject`, `q.end`
 
