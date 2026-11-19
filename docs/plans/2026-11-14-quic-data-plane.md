@@ -464,7 +464,7 @@ yanlış anahtar → nil; `type:"clip"` ile çözme → nil (tip bağlama); eski
 
 **Bitti ölçütü.** Telefon Mac'ten gelen `cmd`'yi alıp tek noktada dağıtıyor; relay ve LAN'da aynı yol. *(Sonuç, 2026-11-19: **geçti.** `CmdReceiveTest` 15 test (14 koşar + 1 elle çapraz-dil kanıtı): taze çerçeve, yanlış anahtar/biçimsiz anahtar, tip bağlama, yeniden oynatma, eski ve ileri zaman damgası + olumlu kontrol, bozuk girdi istisnasız `null`, `classify`, `route`; üç mutasyon ayrı testlerce yakalandı (AAD türü 6 test, JSON tanıma 2, bilinmeyeni dağıtıcıya gönderme 1); tam `selfadb` JVM paketi **94 test / 11 süit, 0 hata** (79 + 15, 1 atlanan = elle kanıt); `bun run lint` log gizliliği 105 dosya temiz, `tsc` 0 hata. **Çapraz dil kanıtı geçti:** Mac'in gerçek `ClipCodec.swift` + `CommandFrame`'iyle mühürlenen taze çerçeve (Türkçe karakter ve emoji dahil JSON eylem) Kotlin `ClipCodec`'inde aynen çözüldü; yanlış beklenen eylem ve yanlış anahtarla olumsuz kontroller başarısız oldu. **Cihazda doğrulanmadı:** Mac'te `sendCommand`'ın tetikleyicisi henüz yok, uçtan uca cihaz testi 1.11'de ve Mac tetikleyicisi geldiğinde (1.6/1.8). JSON eylem şimdilik yalnız loglanıyor (`dispatchCmdJson` yer tutucusu), gerçek dağıtıcı 1.3'te.)*
 
-### [ ] 1.3 JSON eylemler: `q.req`, `q.accept`, `q.offer`, `q.reject`, `q.end`
+### [x] 1.3 JSON eylemler: `q.req`, `q.accept`, `q.offer`, `q.reject`, `q.end`
 
 **Amaç.** `cmd` eylemi bugün düz string (`"lock"`). Yeni eylemler JSON string olarak gider; eski Mac bunları yok sayar, kırılmaz.
 
@@ -481,12 +481,12 @@ yanlış anahtar → nil; `type:"clip"` ile çözme → nil (tip bağlama); eski
 5. Sınırlar: eylem string'i ≤ 4 KiB; `sid` yalnız UUID; `kind` yalnız dört değer (debug derlemede ek `echo`); bilinmeyen alanlar yok sayılır (ileri uyum).
 6. Eski sürüm uyumu: eski Mac JSON eylemi "bilinmeyen eylem" olarak yok sayar, kilitlemez, çökmez.
 
-**Dosyalar.** `mac/Sources/LinkToMac/Quic/QuicControl.swift`, `RelayClient.swift`, `.../quic/QuicControl.kt`, `ClipForegroundService.kt`.
+**Dosyalar.** `mac/Sources/LinkToMac/Quic/QuicControl.swift` (modeller, `parse`, `encode`, `QuicHandshake`), `RelayClient.swift` (`handleCommand` dalı, `onQuicControl` kancası), `mac/project.yml`, `.../quic/QuicControl.kt` (Kotlin aynası), `ClipForegroundService.kt` (`dispatchCmdJson` gerçek ayrıştırma, `onQuicAction` kancası), testler: `QuicControlTests`/`QuicHandshakeTests` (Swift), `QuicControlTest`/`QuicHandshakeTest` (Kotlin).
 
 **Testler (beklenen sonuç).** Swift ve Kotlin aynı girdilerle: her eylem doğru ayrışır; geçersiz `sid`/`kind`/`port`/`fp`/`tok` reddedilir; 4 KiB üstü reddedilir; `"lock"` hâlâ kilit eylemi olarak sınıflanır; bilinmeyen JSON eylemi yok sayılır; bozuk JSON istisna fırlatmaz.
 Eski Mac sürümüyle elle deneme: yeni eylem gönderildiğinde log satırı çıkar, davranış değişmez.
 
-**Bitti ölçütü.** Her iki uç da yeni eylemleri ayrıştırıyor; `q.accept` akışı (iki istek yönü) ve zaman aşımı testli.
+**Bitti ölçütü.** Her iki uç da yeni eylemleri ayrıştırıyor; `q.accept` akışı (iki istek yönü) ve zaman aşımı testli. *(Sonuç, 2026-11-19: **geçti.** İki dilde aynı vaka tabloları: Swift 51, Kotlin 52 yeni test (Kotlin'de 1'i manuel kanıt, atlanır); tüm Mac testleri **240**, `selfadb` JVM **146** (2 atlanan manuel kanıt) geçti, log gizliliği 106 dosya temiz, `tsc` 0 hata. Her dilde 5 mutasyon (port alt sınırı, `tok` kanonik denetimi, `echo` kapısı, kabulden önce offer, `sid` küçük harf) ayrı testlerce yakalandı. Eşlik: altın dizge blokları iki test dosyasında bayt-bayt aynı; **Mac'in gerçek `encode` çıktısı Kotlin'de ayrıştı ve birebir yeniden üretildi**, kurcalanmış satırla olumsuz kontrol başarısız oldu. Netleştirmeler: `tok` dolgusuz 43 karakter kanonik base64url, `sid` küçük harfe normalize, `port` JSON tamsayı (53125.0 ve 5.3125e4 geçersiz), sondaki virgül protokolde tanımsız (Foundation ve org.json ikisi de hoş görüyor). **Yapılamayan:** plandaki "eski Mac sürümüyle elle deneme": telefonda JSON `cmd` gönderen bir yer yok, yerine kod okuması (eski Mac `default` dalı "bilinmeyen eylem" olarak yok sayar) ve yeni testler; elle deneme Faz 1 genel testine (1.11) kalır. Oturum/teklif bekleme süreleri 1.6/1.8'e bırakıldı; yalnız 60 sn kabul bekleme `QuicHandshake`'te.)*
 
 ### [ ] 1.4 `stat.caps` (iki yönde)
 
