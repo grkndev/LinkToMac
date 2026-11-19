@@ -425,7 +425,7 @@ Faz 1 sonunda iki uygulama birbirine `cmd` gönderebilir ve bu kanal üzerinden 
 özellik QUIC kullanmaz.** Büyüklük: **M**. Kontrol düzlemine (`clip`, `note`, `sms`, `file`, `stat`, BLE, LAN HMAC el
 sıkışması) dokunulmaz; sunucu (`server/`) değişmez.
 
-### [ ] 1.1 Mac `cmd` göndericisi
+### [x] 1.1 Mac `cmd` göndericisi
 
 **Amaç.** Bugün `cmd` yalnız telefon → Mac yönünde çalışıyor (Mac yalnız çözüyor: `RelayClient.swift:1294`, `LanServer.swift:263`).
 Mac → telefon yönünü eklemek.
@@ -435,17 +435,17 @@ Mac → telefon yönünü eklemek.
    `static func make(action: String, keyBase64: String) -> [String: Any]?` → `ClipCodec.encode(action, key, type: "cmd")` ile mühürler,
    `{"t":"cmd","nonce":…,"ct":…}` döner. Test hedefinin derleyebilmesi için dosya `project.yml`'de `LinkToMacTests` kaynaklarına eklenir.
 2. `RelayClient.swift`: `func sendCommand(_ action: String) -> Bool` — relay joined ise WS'ye yazar.
-3. `LanServer.swift`: `func sendCommand(_ action: String) -> Bool` — auth'lu tek peer'e aynı frame şekliyle yazar.
-4. Yönlendirme: tek link üzerinden gider (`lanPeerConnected` ise LAN, değilse relay; dosyadaki "tek taşıma" mantığıyla aynı). İki linke birden
+3. `LanServer.swift`: `func sendCommand(_ action: String)` — auth'lu tek peer'e aynı frame şekliyle yazar. *(1.1'de düzeltildi, kullanıcı onaylı 2026-11-19: `Void` döner, kardeş göndericiler gibi kendi kuyruğunda şifreler; "peer erişilebilir mi" bilgisi `lanPeerConnected` bayrağından gelir, seri kuyruktan eşzamanlı `Bool` `queue.sync` gerektirirdi.)*
+4. Yönlendirme *(saf fonksiyon `CommandRoute.choose(lanConnected:relayOnline:)`, `RelayProtocol.swift`'te, testli)*: tek link üzerinden gider (`lanPeerConnected` ise LAN, değilse relay; dosyadaki "tek taşıma" mantığıyla aynı). İki linke birden
    gönderilmez (çift teslimi önlemek için). Link yoksa `false` döner; kuyruğa alınmaz (`q.req` taze olmalı).
 5. Saat farkı: ClipCodec ±120 sn tazelik penceresi geçerli; saat farkı büyükse cmd reddedilir (mevcut davranış, değişmez).
 
-**Dosyalar.** `RelayProtocol.swift` veya `Quic/QuicControl.swift`, `RelayClient.swift`, `LanServer.swift`, `mac/project.yml`, `mac/Tests/CommandFrameTests.swift`.
+**Dosyalar.** `RelayProtocol.swift` (`CommandFrame`, `CommandRoute`, `ClientMessage.cmd`), `RelayClient.swift` (`onLocalCommand`, `sendCommand`), `LanServer.swift`, `LinkToMacApp.swift` (kanca), `mac/project.yml` (`ClipCodec.swift` test hedefine), `mac/Tests/CommandFrameTests.swift`.
 
 **Testler (beklenen sonuç).** swift-testing: sabit anahtarla üretilen frame'i telefonun kullandığı `ClipCodec.decode(type:"cmd")` karşılığı çözer ve eylem eşittir;
 yanlış anahtar → nil; `type:"clip"` ile çözme → nil (tip bağlama); eski zaman damgası → nil. `xcodebuild … test` geçer, uygulama derlenir.
 
-**Bitti ölçütü.** Mac her iki linke `cmd` yazabiliyor; saf yardımcı testli.
+**Bitti ölçütü.** Mac her iki linke `cmd` yazabiliyor; saf yardımcı testli. *(Sonuç, 2026-11-19: **geçti.** `CommandFrameTests` 15 test (taze çerçeve ve yeniden oynatma, yanlış anahtar, tip bağlama, eski ve ileri zaman damgası + olumlu kontrol, geçersiz anahtar/boş eylem, `ClientMessage.cmd` JSON biçimi, `CommandRoute` dört durum); üç mutasyon ayrı testler tarafından yakalandı (AAD tipi 4 test, rota önceliği 1, boş eylem koruması 1); tüm Mac testleri **189** geçti (174 + 15), uygulama hedefi uyarısız derleniyor. Mac → telefon teslimi cihazda **doğrulanmadı**: telefon henüz `cmd` çözmüyor, uçtan uca doğrulama 1.2'nin testi.)*
 
 ### [ ] 1.2 Android `cmd` alıcısı
 
