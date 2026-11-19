@@ -641,3 +641,51 @@ Sessizlik tabanı −120 dBFS (dijital sessizlik), eşik −100 dBFS.
 | Popüler uygulama ses yakalama | **GEÇTİ (3/4)** | YouTube, Chrome, Samsung Müzik yakalandı; **Spotify yakalanamıyor** (çalıyor ama −120 dBFS); YouTube Music test edilemedi (oturum yok); yakalama ses seviyesinden bağımsız (0,0 dB); yalnız `mediaProjection` FGS türü yeterli; 0.9 bulgular 77–83 |
 | MediaStore doğrudan yazma | **GEÇTİ** (6 saatlik saklama ayarlanamıyor; ölçüt kullanıcı onayıyla "7 gün sabit + uygulama kendi temizliği" oldu) | A/B = 0,93 (2095 / 2249 MB/s, eşik 0,80); bugünkü kopya 10 GiB'ta +25,3 sn ve +10,7 GB; resume 3 GiB, 2 öldürme, SHA-256 eşit; `DATE_EXPIRES` her zaman +7 gün, ayarlanamaz/yenilenemez; 0.10 bulgular 84–90 |
 | Camera Extension | **GEÇTİ** | Developer ID profili alındı (System Extension), `notarytool` Accepted, uzantı etkinleşti, "Link To Mac Kamera" listelendi; 188 frame / 6 sn (30,5 fps), %100 renk eşleşmesi, sapma 0,0; FaceTime'da renkler doğru sırada; kaldırma çalıştı (kayıt yeniden başlatmaya kadar kalır); 0.11 bulgular 91–99 |
+
+---
+
+## Faz 0 kapanışı (0.13)
+
+**Tarih:** 2026-11-19. Faz 0 tamamlandı: ölçümler (0.1–0.11), kapı kararları (0.12), spike kodunun arşivlenmesi ve kalıcı parçaların ayrılması ile regresyon (0.13).
+
+**Arşiv ve dallar (hepsi yerel; hiçbiri push edilmedi, `origin/main` = `381e06e`).**
+
+| Ad | Ne | Commit |
+|---|---|---|
+| `archive/quic-faz0` (açıklamalı etiket) | Spike kodunun tam kopyası: `spikes/` (Android encoder, ses yakalama, MediaStore uygulamaları, Mac kamera uzantısı, `spikes/quic/` betikleri), `interop_client` örnek istemcisi, `quicPing` ve Settings'teki geçici satır, `files.tsx` düzeltmesi, ayrıca kalıcı parçaların ilk hâli | `04b309b` |
+| `spike/quic-faz0` (dal) | Etiketin üzerindeki çalışma dalı | `04b309b` |
+| `feat/quic-foundation` (dal) | **Ana dala gidecek temiz küme:** belgeler + yalnız kalıcı kod; `main`'e birleştirilmedi | `d9812fc` (belgeler), `dab3d39` (Rust crate + Android build zinciri), `2adbe73` (Mac kimliği + hız denetleyicisi), bu belgeyi içeren kapanış commit'i |
+| `fix/files-too-many-renders` (dal) | `main`'den, yalnız `files.tsx` ("Too many re-renders"); **cihazda doğrulanmadı** | `955ef9e` |
+
+**Ana dala giren / arşivde kalan.**
+
+| Parça | `feat/quic-foundation` | Yalnız arşivde |
+|---|---|---|
+| Belgeler: plan, sonuç dosyası, ham veri (`docs/plans/data/`) | evet | – |
+| Rust `quic-core`: `lib.rs`, `pin.rs`, `build.rs`, `build-so.sh`, `Cargo.*`, testler, sertifika fixture'ı | evet | `examples/interop_client.rs` |
+| Android: `QuicCore.kt`, `QuicCoreFallbackTest.kt`, `build.gradle` uyarısı (`checkQuicCoreSo`), `.gitignore` satırları | evet | `quicPing` (`SelfAdbModule.kt`, `SelfAdb.ts`), Settings'teki "QUIC core ping" satırı |
+| Mac: `QuicIdentity`, `DERWriter`, `DelayRateController`, 3 test dosyası, `gen-quic-cert-fixture`, `project.yml` test kaynakları | evet | `spikes/quic/mac-server` |
+| Spike uygulamaları ve betikleri (`spikes/**`) | – | evet |
+| `files.tsx` düzeltmesi | – (ayrı dal) | evet |
+
+**Regresyon (yalnız kalıcı parçaları içeren temiz dalda, `2adbe73` üzerinde).** Ana dalın aynısı + kalıcı parçalar; çalışma ağacında başka bir şey yoktu.
+
+| Bileşen | Sonuç |
+|---|---|
+| Mac (`xcodebuild test`) | **174 test / 18 süit geçti** |
+| Rust (`cargo test`, `cargo clippy --all-targets -- -D warnings`) | **20 test geçti** (3 + 7 + 10), clippy temiz. Spike dalındaki 46, örnek istemcinin 26 testini de sayıyordu; o istemci arşivde |
+| Android JVM (`:selfadb:testDebugUnitTest`) | **79 test / 10 süit, 0 hata** (`QuicCoreFallbackTest` 4); görevler yeniden çalıştı (UP-TO-DATE değil). Faz 0 boyunca koşulan 19 + 15 + 17 test spike uygulamalarına aitti ve arşivde |
+| Mobil JS | `bun run lint` + log-gizliliği denetimi (104 dosya) temiz, `npx tsc --noEmit` 0 hata (çıkış kodu 0), `bun run test` 59 test geçti |
+| `fix/files-too-many-renders` | `tsc` 0 hata, lint temiz (103 dosya) |
+| Kapsam denetimi | `main`'e göre fark yalnız belgeler + kalıcı yollar; `SelfAdbModule.kt`, `SelfAdb.ts`, `mobile/src` değişmedi; kodda `quicPing`/`interop_client` yok; `spikes/` izlenmiyor. Kodda kalan tek `spikes/` anışı, `DelayRateController` yorumundaki arşiv etiketi notu |
+
+**Bilinenler ve yapılmayanlar.**
+- **Eksik `libquic_core.so` uyarısı bu turda tetiklenmedi** (`.so` makinede mevcut); mantığı 0.1'de denendi ve bu dalda değişmedi.
+- **Hiçbir şey push edilmedi, PR açılmadı, `main`'e birleştirilmedi** (kullanıcı kararı). Commit'lerde Developer ID adı, ağ adı ve yerel IP'ler geçtiği için herkese açık bir repo'ya gitmeden önce gözden geçirilmeli; ham veri PR'dan önce dışarıda bırakılabilir.
+- **`CLAUDE.md` dosyaları repoda izlenmiyor** (`.gitignore` 27. satır): `mac/CLAUDE.md` vb. içindeki QUIC notları yalnız bu makinede.
+- Üçüncü taraf not dosyaları (`docs/plans/cevap1–3.md`) ve `2026-11-17-quic-qos-sorun-ozeti.md` hiçbir commit'e girmedi, diskte duruyor.
+- Hâlâ sizde: Apple portalındaki `dev.grkn.LinkToMac.CameraSpike` App ID'si ve profil, `~/Downloads/Link_To_Mac_Camera_Spike_DevID.provisionprofile`, `files.tsx` düzeltmesinin cihazda doğrulanması, spike uzantısının yeniden başlatmaya kadar süren kaldırma kaydı.
+- Doğrulanmayanlar Faz 0 boyunca ilgili bölümlerde yazılı (bulgu 90, 99; DATAGRAM'ın yük altında kaybı; HEVC çözme; 10 GB'ta WS).
+
+**Onay kaydı.** Kapı kararları ve plan düzenlemeleri 2026-11-19'da 0.12'de kullanıcı onayıyla uygulandı (kapı tablosu, 15 düzenleme, 4.6'nın yeniden hedeflenmesi, commit kapsamı). 0.13 kapsam kararları (kullanıcı onaylı): kalıcı küme = üretim kalitesindeki her şey, ana dala iniş = yalnız yerel dal, `files.tsx` = ayrı dal. Faz 1'e geçiş onayı: 0.13 özetinde istenir.
+

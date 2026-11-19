@@ -1,6 +1,6 @@
 # QUIC veri düzlemi: aşama aşama uygulama planı
 
-> **Durum (2026-11-19):** Faz 0 ölçümleri bitti ve karar kapıları değerlendirildi (0.12; sonuç: `2026-11-14-quic-faz0-sonuclar.md`); Faz 1'e başlanabilir. Plan netleştirmeleri onaylandı (sondaki "Onaylanan plan kararları"). Kaynak: Claude Docs "Link To Mac — QUIC geçiş ve uygulama planı"
+> **Durum (2026-11-19):** **Faz 0 tamamlandı** (ölçümler 0.1–0.11, kapı kararları 0.12, spike arşivi ve regresyon 0.13; sonuç: `2026-11-14-quic-faz0-sonuclar.md`); kalıcı parçalar `feat/quic-foundation` dalında, spike kodu `archive/quic-faz0` etiketinde; Faz 1'e başlanabilir. Plan netleştirmeleri onaylandı (sondaki "Onaylanan plan kararları"). Kaynak: Claude Docs "Link To Mac — QUIC geçiş ve uygulama planı"
 > (rev 140). Bu dosya o planın uygulanabilir, aşamalara bölünmüş hâli. Çalışma kuralları kökteki
 > [`CLAUDE.md`](../../CLAUDE.md) ▸ "QUIC veri düzlemi: plan tabanlı çalışma" bölümünde; **her aşamada uygulanır.**
 
@@ -69,11 +69,11 @@ MediaProjection oturumunu kullanır. 5a Faz 3'e, 5b Faz 4'e dayanır. Faz 7 yaln
 
 ---
 
-## [ ] Faz 0 — Spike'lar ve karar kapıları
+## [x] Faz 0 — Spike'lar ve karar kapıları
 
 En riskli varsayımlar, mimarinin üzerine inşa edilmeden önce çalışan kodla doğrulanır. Büyüklük: **S–M**. Spike kodu
-atılabilir (`spike/quic-faz0` dalı, ana dala girmez); **kalıcı olan ölçüm sonuçları** (sonuç dosyası) ve 0.2'nin DER
-yazıcısıdır (Faz 1.6'ya taşınır). Her aşamanın sonucu `docs/plans/2026-11-14-quic-faz0-sonuclar.md` dosyasına tarih,
+atılabilirdi ve **`archive/quic-faz0` etiketinde** arşivlendi; ana dala giden (`feat/quic-foundation`, 0.13) **ölçüm sonuçları** (sonuç dosyası ve ham veri) ile üretim
+kalitesindeki parçalardır: `quic-core` crate'i, `QuicCore.kt`, 0.2'nin kimliği ve DER yazıcısı (Faz 1.6'ya taşınır), `DelayRateController`. Her aşamanın sonucu `docs/plans/2026-11-14-quic-faz0-sonuclar.md` dosyasına tarih,
 cihaz/macOS/Android sürümü ve ham sayılarla yazılır.
 
 ### [x] 0.1 Android: quinn build zinciri (cargo-ndk + JNI "ping")
@@ -409,12 +409,13 @@ Her sonuç hem Mac host hem telefon koşusunda ölçülür; kısa (20 sn) düzen
 
 **Bitti ölçütü.** Faz 1'e başlanabilir: Mac QUIC yolu (Network.framework mı quinn mi) ve ses/video taşıma kararları kesin. *(Karar: Mac yolu Network.framework (quinn + uniffi gerekmedi); ses DATAGRAM ile; video kare başına uni stream ile. Faz 1'e başlanabilir.)*
 
-### [ ] 0.13 Faz 0 genel testi
+### [x] 0.13 Faz 0 genel testi
 
 **Yapılacaklar ve beklenen sonuç.**
 - Sonuç dosyasındaki 0.1–0.11 sonuçları eksiksiz ve tarihli; spike dalı `spike/quic-faz0` etiketlenip arşivlendi, ana dala yalnız kalıcı parçalar girecek: 0.1'in çıktısı (crate iskeleti, `build-so.sh`, `QuicCore.kt`, Gradle uyarısı, `.gitignore` satırları), DER yazıcı ve olası DATAGRAM sarmalayıcı; `quicPing` ve Settings'teki geçici satır atılır.
 - Regresyon: ana dalda Mac testleri, Android JVM testleri, `bun run lint && npx tsc --noEmit && bun run test` geçer (Faz 0 ana dalı bozmamış).
 - Kapı kararları kullanıcı tarafından onaylı.
+- **Sonuç (2026-11-19, kullanıcı onaylı kapsam):** spike kodu tek commit olarak arşivlendi (`04b309b`, etiket `archive/quic-faz0`); kalıcı dal `feat/quic-foundation` (`d9812fc` belgeler, `dab3d39` Rust crate + Android build zinciri, `2adbe73` Mac kimliği + hız denetleyicisi) `main`'e birleştirilmedi ve push edilmedi (yerel dal kararı); `files.tsx` düzeltmesi ayrı dalda (`fix/files-too-many-renders`, `955ef9e`, cihazda doğrulanmadı). Regresyon temiz dalda: Mac **174**, Rust **20** + clippy temiz, `:selfadb:testDebugUnitTest` **79 test / 0 hata**, lint + log-gizliliği + `tsc` + bun **59** yeşil. `quicPing`, Settings satırı, `interop_client` ve `spikes/` kalıcı dala girmedi. Ayrıntı: `2026-11-14-quic-faz0-sonuclar.md` "Faz 0 kapanışı".
 
 ---
 
