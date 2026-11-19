@@ -1,0 +1,8 @@
+name: Link To Mac Camera Spike DevID
+team: ['<TEAMID>']
+platform: ['OSX']
+ProvisionsAllDevices: True
+created: 2026-11-19 12:59:10
+expires: 2044-11-14 12:59:10
+application-identifier: <TEAMID>.dev.grkn.LinkToMac.CameraSpike
+entitlements: ['com.apple.application-identifier', 'com.apple.developer.system-extension.install', 'com.apple.developer.team-identifier', 'keychain-access-groups']

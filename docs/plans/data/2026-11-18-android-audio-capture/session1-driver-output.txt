@@ -1,0 +1,44 @@
+
+== preflight
+media volume now 3 (range 0..15): 100 % = 15, 20 % = 3; restored at the end. Mac 192.168.1.10, apps: spotify youtube chrome samsung ytmusic
+
+== start the capture session (session)
+>>> ON THE PHONE: tap 'Entire screen' (if asked) and 'Start now'. Waiting up to 3 min ...
+STARTED tag=session micType=false recordingState=3 rate=48000 ch=2 fgsTypes=mediaProjection
+
+== silence floor (10 s)
+
+== positive control: the app plays its own tone (10 s)
+
+== app: spotify (com.spotify.music)
+  spotify did not start playing (state 2 after 90s): not testable
+
+== app: youtube (com.google.android.youtube)
+  playing after 2s
+
+== app: chrome (com.android.chrome)
+  chrome did not start playing (state -1 after 90s): not testable
+
+== app: samsung (com.sec.android.app.music)
+  playing after 2s
+
+== app: ytmusic (com.google.android.apps.youtube.music)
+  ytmusic did not start playing (state 2 after 90s): not testable
+
+== stop
+level lines: 4409
+
+== analysis (/private/tmp/claude-501/-Volumes-ExternalSSD-repo-LinkToMac/82205450-71e6-4425-9ce6-043cfc7e0148/scratchpad/audio/levels-session.csv)
+silence floor: median -120.0 dBFS -> capture threshold -100.0 dBFS
+positive control (own 440 Hz tone, USAGE_MEDIA): windows 82, median -9.0 dBFS, above threshold 100 % -> CAPTURED
+
+app          played                 vol 100%                vol 20%         vol 100% again  captured  delta 20%-100%  level changed
+spotify      NO (not testable)
+youtube      yes        -20.7 dB 100 % n=137   -12.7 dB 100 % n=136   -14.0 dB 100 % n= 86  YES                8.1 dB  yes
+chrome       NO (not testable)
+samsung      yes         -9.1 dB 100 % n=137    -9.1 dB 100 % n=136    -9.1 dB 100 % n= 86  YES                0.0 dB  no
+ytmusic      NO (not testable)
+
+tested apps: 2, captured: 2  ->  gate: FAIL
+./run.sh: line 30: 87087 Terminated: 15          ( cd "$TONE_DIR" && exec python3 -I -m http.server "$TONE_PORT" --bind 0.0.0.0 > /dev/null 2>&1 )
+SCRIPT_EXIT=0

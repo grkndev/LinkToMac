@@ -1,0 +1,12 @@
+Camera:
+
+    MacBook Air Camera:
+
+      Model ID: MacBook Air Camera
+      Unique ID: 6C707041-05AC-0010-000C-000000000001
+
+    OBS Virtual Camera:
+
+      Model ID: OBS Camera Extension
+      Unique ID: 7626645E-4425-469E-9D8B-97E0FA59AC75
+

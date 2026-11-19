@@ -1,0 +1,12 @@
+5 extension(s)
+--- com.apple.system_extension.cmio (Go to 'System Settings > General > Login Items & Extensions > Camera Extensions' to modify these system extension(s))
+enabled	active	teamID	bundleID (version)	name	[state]
+*	*	2MMRE5MTB8	com.obsproject.obs-studio.mac-camera-extension (32.1.0/22826017585)	OBS Virtual Camera	[activated enabled]
+*	*	<TEAMID>	dev.grkn.LinkToMac.CameraSpike.Extension (0.1/1)	dev.grkn.LinkToMac.CameraSpike.Extension	[activated enabled]
+--- com.apple.system_extension.network_extension (Go to 'System Settings > General > Login Items & Extensions > Network Extensions' to modify these system extension(s))
+enabled	active	teamID	bundleID (version)	name	[state]
+*	*	J6S6Q257EK	ch.protonvpn.mac.WireGuard-Extension (6.5.1/3106797.2605011144)	Proton VPN WireGuard	[activated enabled]
+*	*	J6S6Q257EK	ch.protonvpn.mac.Transparent-Proxy (6.2.0/2791919.2512111400)	Proton VPN Split Tunneling (experimental)	[activated enabled]
+--- com.apple.system_extension.driver_extension (Go to 'System Settings > General > Login Items & Extensions > Driver Extensions' to modify these system extension(s))
+enabled	active	teamID	bundleID (version)	name	[state]
+	*	5JZGQTGU4W	cn.wch.CH34xVCPDriver (1.0/1)	cn.wch.CH34xVCPDriver	[activated waiting for user]

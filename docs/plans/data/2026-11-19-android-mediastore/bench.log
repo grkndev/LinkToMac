@@ -1,0 +1,16 @@
+free space: 108 GB | battery temp: 329 (tenths of a degree)
+
+== run a1 (condition A, 10240 MiB)  free: 108 GB  temp: 329
+{"cond":"A","sizeBytes":10737418240,"elapsedMs":5185,"overallMBps":2070.862,"windows":1,"meanWindowMBps":2070.862,"minWindowMBps":2070.862,"maxWindowMBps":2070.862,"windowRates":[2070.862],"finalSize":10737418240,"pendingAfter":false,"hashEqual":true,"before":{"batteryTempC":32.8,"batteryPercent":62,"freeBytes":116981440512},"after":{"batteryTempC":32.8,"batteryPercent":62,"freeBytes":106245898240}}
+
+== run b1 (condition B, 10240 MiB)  free: 108 GB  temp: 338
+{"cond":"B","sizeBytes":10737418240,"elapsedMs":4936,"overallMBps":2175.328,"windows":1,"meanWindowMBps":2175.328,"minWindowMBps":2175.328,"maxWindowMBps":2175.328,"windowRates":[2175.328],"finalSize":10737418240,"before":{"batteryTempC":32.8,"batteryPercent":62,"freeBytes":116993736704},"after":{"batteryTempC":33.8,"batteryPercent":62,"freeBytes":106251567104}}
+
+== run a2 (condition A, 10240 MiB)  free: 108 GB  temp: 341
+{"cond":"A","sizeBytes":10737418240,"elapsedMs":5067,"overallMBps":2119.088,"windows":1,"meanWindowMBps":2119.088,"minWindowMBps":2119.088,"maxWindowMBps":2119.088,"windowRates":[2119.088],"finalSize":10737418240,"pendingAfter":false,"hashEqual":null,"before":{"batteryTempC":34.0,"batteryPercent":63,"freeBytes":116999426048},"after":{"batteryTempC":34.1,"batteryPercent":63,"freeBytes":106252230656}}
+
+== run b2 (condition B, 10240 MiB)  free: 108 GB  temp: 345
+{"cond":"B","sizeBytes":10737418240,"elapsedMs":4623,"overallMBps":2322.608,"windows":1,"meanWindowMBps":2322.608,"minWindowMBps":2322.608,"maxWindowMBps":2322.608,"windowRates":[2322.608],"finalSize":10737418240,"before":{"batteryTempC":34.4,"batteryPercent":63,"freeBytes":117000388608},"after":{"batteryTempC":34.4,"batteryPercent":63,"freeBytes":106252509184}}
+
+== run c1 (condition C, 10240 MiB)  free: 98 GB  temp: 346
+{"cond":"C","sizeBytes":10737418240,"elapsedMs":25319,"overallMBps":424.085,"windows":3,"meanWindowMBps":430.466,"minWindowMBps":386.875,"maxWindowMBps":464.916,"windowRates":[386.875,439.607,464.916],"finalSize":10737418240,"minFreeBytesDuringCopy":95505854464,"before":{"batteryTempC":34.6,"batteryPercent":63,"freeBytes":106252722176},"after":{"batteryTempC":34.6,"batteryPercent":63,"freeBytes":95505854464}}

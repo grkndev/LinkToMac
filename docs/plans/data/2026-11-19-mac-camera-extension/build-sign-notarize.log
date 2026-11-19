@@ -1,0 +1,38 @@
+identity: Developer ID Application: <developer name> (<TEAMID>)
+
+==> check the provisioning profile
+profile: Link To Mac Camera Spike DevID | team ['<TEAMID>'] | expires 2044-11-14 12:59:10
+entitlements: ['com.apple.developer.system-extension.install', 'keychain-access-groups']
+profile ok
+
+==> xcodegen + build (Release, unsigned)
+** BUILD SUCCEEDED **
+
+==> embed the profile (host only: the extension carries none, like OBS Virtual Camera's)
+
+==> codesign, inside-out, never --deep (it would re-sign the extension without its entitlements)
+<repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.app: valid on disk
+<repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.app: satisfies its Designated Requirement
+
+==> verify entitlements and flags
+entitlements and hardened runtime: ok
+
+==> notarize (LinkToMac-notary)
+  id: <submission-id>
+Successfully uploaded file
+  id: <submission-id>
+  path: <repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.zip
+Waiting for processing to complete.
+Current status: In Progress...Current status: In Progress....Current status: Accepted.....Processing complete
+  id: <submission-id>
+  status: Accepted
+Processing: <repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.app
+Processing: <repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.app
+The staple and validate action worked!
+Processing: <repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.app
+The validate action worked!
+<repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.app: accepted
+source=Notarized Developer ID
+origin=Developer ID Application: <developer name> (<TEAMID>)
+
+OK: <repo>/spikes/mac-camera-ext/build/stage/LinkToMacCameraSpike.app (notarized, stapled)

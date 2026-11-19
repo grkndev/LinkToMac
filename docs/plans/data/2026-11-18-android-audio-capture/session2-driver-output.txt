@@ -1,0 +1,33 @@
+
+== preflight
+media volume now 3 (range 0..15): 100 % = 15, 20 % = 3; restored at the end. Mac 192.168.1.10, apps: spotify chrome
+
+== start the capture session (session2)
+>>> ON THE PHONE: tap 'Entire screen' (if asked) and 'Start now'. Waiting up to 3 min ...
+STARTED tag=session2 micType=false recordingState=3 rate=48000 ch=2 fgsTypes=mediaProjection
+
+== silence floor (10 s)
+
+== positive control: the app plays its own tone (10 s)
+
+== app: spotify (com.spotify.music)
+  playing after 2s
+
+== app: chrome (com.android.chrome)
+  playing after 2s
+
+== stop
+level lines: 1540
+
+== analysis (/private/tmp/claude-501/-Volumes-ExternalSSD-repo-LinkToMac/82205450-71e6-4425-9ce6-043cfc7e0148/scratchpad/audio/levels-session2.csv)
+##### /private/tmp/claude-501/-Volumes-ExternalSSD-repo-LinkToMac/82205450-71e6-4425-9ce6-043cfc7e0148/scratchpad/audio/levels-session2.csv
+silence floor: median -120.0 dBFS -> capture threshold -100.0 dBFS
+positive control (own 440 Hz tone, USAGE_MEDIA): windows 82, median -9.0 dBFS, above threshold 100 % -> CAPTURED
+
+app          played                 vol 100%                vol 20%         vol 100% again  captured  delta 20%-100%  level changed
+spotify      yes       -120.0 dB   0 % n=136  -120.0 dB   0 % n=137  -120.0 dB   0 % n= 86  NO                 0.0 dB  no
+chrome       yes         -9.1 dB 100 % n=136    -9.1 dB 100 % n=136    -9.1 dB 100 % n= 86  YES                0.0 dB  no
+
+tested apps: 2, captured: 1  ->  gate: FAIL
+./run.sh: line 55: 91920 Terminated: 15          ( cd "$TONE_DIR" && exec python3 -I -m http.server "$TONE_PORT" --bind 127.0.0.1 > /dev/null 2>&1 )
+SCRIPT_EXIT=0

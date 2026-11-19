@@ -1,0 +1,7 @@
+free space: 108 GB | battery temp: 346 (tenths of a degree)
+kill #1 at progress 1024 MiB
+  killed pid 11762
+kill #2 at progress 2067 MiB
+  killed pid 12380
+11-19 14:35:22.552 12808 12832 I ENCMS   : RESUME tag=rs-3g found pending id=1000060589 fileLength=2214592512 resumeOffset=2214592512
+{"tag":"rs-3g","sizeBytes":3221225472,"startedFrom":2214592512,"resumed":true,"runs":3,"finalSize":3221225472,"pending":false,"bytesRead":3221225472,"hashEqual":true,"pendingEntriesLeft":0,"runLog":["start existing=false from=0","start existing=true from=1127219200","start existing=true from=2214592512"]}

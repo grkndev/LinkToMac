@@ -1,0 +1,1 @@
+{"cond":"B","sizeBytes":10737418240,"elapsedMs":4936,"overallMBps":2175.328,"windows":1,"meanWindowMBps":2175.328,"minWindowMBps":2175.328,"maxWindowMBps":2175.328,"windowRates":[2175.328],"finalSize":10737418240,"before":{"batteryTempC":32.8,"batteryPercent":62,"freeBytes":116993736704},"after":{"batteryTempC":33.8,"batteryPercent":62,"freeBytes":106251567104}}

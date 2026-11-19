@@ -1,0 +1,29 @@
+== host entitlements
+	[Key] com.apple.application-identifier
+		[String] <TEAMID>.dev.grkn.LinkToMac.CameraSpike
+	[Key] com.apple.developer.system-extension.install
+		[Bool] true
+	[Key] com.apple.developer.team-identifier
+		[String] <TEAMID>
+	[Key] com.apple.security.device.camera
+		[Bool] true
+== extension entitlements
+	[Key] com.apple.security.app-sandbox
+		[Bool] true
+	[Key] com.apple.security.application-groups
+		[Array]
+			[String] <TEAMID>.dev.grkn.LinkToMac.CameraSpike
+== signatures
+Executable=/Applications/LinkToMacCameraSpike.app/Contents/MacOS/LinkToMacCameraSpike
+Identifier=dev.grkn.LinkToMac.CameraSpike
+CodeDirectory v=20500 size=650 flags=0x10000(runtime) hashes=9+7 location=embedded
+Timestamp=19 Nov 2026 at 14:59:56
+TeamIdentifier=<TEAMID>
+Executable=/Applications/LinkToMacCameraSpike.app/Contents/Library/SystemExtensions/dev.grkn.LinkToMac.CameraSpike.Extension.systemextension/Contents/MacOS/dev.grkn.LinkToMac.CameraSpike.Extension
+Identifier=dev.grkn.LinkToMac.CameraSpike.Extension
+CodeDirectory v=20500 size=628 flags=0x10000(runtime) hashes=8+7 location=embedded
+Timestamp=19 Nov 2026 at 14:59:55
+TeamIdentifier=<TEAMID>
+== host embedded profile / extension embedded profile
+ls: /Applications/LinkToMacCameraSpike.app/Contents/Library/SystemExtensions/dev.grkn.LinkToMac.CameraSpike.Extension.systemextension/Contents/embedded.provisionprofile: No such file or directory
+/Applications/LinkToMacCameraSpike.app/Contents/embedded.provisionprofile

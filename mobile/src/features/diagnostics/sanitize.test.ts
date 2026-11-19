@@ -129,7 +129,7 @@ describe('rules', () => {
     expect(sanitizeLine('bridge on 127.0.0.1:53125 ok')).toBe('bridge on 127.0.0.1:53125 ok');
     expect(sanitizeLine('peer ::1 up')).toBe('peer ::1 up');
     // …but a LAN or public address in the same shape is still scrubbed.
-    expect(sanitizeLine('failed to connect to /10.0.0.5 (port 53125) from /192.168.8.153 (port 4)')).toBe(
+    expect(sanitizeLine('failed to connect to /10.0.0.5 (port 53125) from /192.168.1.10 (port 4)')).toBe(
       'failed to connect to /<host> (port 53125) from /<host> (port 4)',
     );
     expect(sanitizeLine('x 127.0.0.1:53125 and 192.168.1.42:53124 y')).toBe('x 127.0.0.1:53125 and <host> y');

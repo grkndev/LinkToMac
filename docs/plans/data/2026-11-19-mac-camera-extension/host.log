@@ -1,0 +1,9 @@
+2026-11-19T13:00:33Z SUBMITTED activation request for dev.grkn.LinkToMac.CameraSpike.Extension
+2026-11-19T13:00:33Z NEEDS_USER_APPROVAL: System Settings > General > Login Items & Extensions > Camera Extensions
+2026-11-19T13:02:12Z RESULT completed
+2026-11-19T13:02:40Z CAMERA permission prompt shown: please click Allow
+2026-11-19T13:02:43Z CAMERAS visible to AVFoundation: ["MacBook Air Camera", "OBS Virtual Camera", "Link To Mac Kamera"]
+2026-11-19T13:02:43Z GRAB running for 6.0 s
+2026-11-19T13:02:50Z GRAB_RESULT frames=188 fps=30.5 matched=188 matchedFraction=1.000 tolerance=40 runs=0x28,1x30,2x30,3x30,4x30,5x30,0x10 colourChangesInOrder=true maxDistance=0.0 png=/tmp/camspike-run/grab.png verdict=PASS
+2026-11-19T13:07:37Z SUBMITTED deactivation request for dev.grkn.LinkToMac.CameraSpike.Extension
+2026-11-19T13:07:41Z RESULT completed

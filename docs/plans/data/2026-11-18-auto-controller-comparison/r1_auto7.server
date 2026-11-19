@@ -1,0 +1,150 @@
+1795010977.414 LOG peer 1: new connection group
+1795010977.497 LOG peer 1: group state waiting(POSIXErrorCode(rawValue: 50): Network is down)
+1795010977.524 LOG peer 1: group state ready
+1795010977.525 LOG peer 1: datagram flow state preparing
+1795010977.525 LOG peer 1: datagram flow state ready
+1795010977.525 QUIRK datagram flow ready, usableDatagramFrameSize=1440
+1795010977.525 LOG peer 1: stream #1 ready id=0 initiator=client direction=bidi
+1795010977.525 QUIRK first byte 0x00 on stream #1 (id=0 initiator=client direction=bidi)
+1795010977.525 LOG peer 1: session opened
+1795010979.596 LOG peer 1: stream-cost phase 0 started (60 video/s, 0 audio/s, 1 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 1 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 2 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 3 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 4 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 5 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 6 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 7 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 8 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 9 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 10 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 11 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 12 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 13 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 14 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 15 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 16 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010979.596 LOG peer 1: stream-cost phase 17 started (60 video/s, 0 audio/s, 10 s), baseline live=1
+1795010995.601 AUTO id=720 t=1.0 rate=2.9 MB/s sent=2.6 MB/s q=2.5 ms state=slowStart
+1795010996.601 AUTO id=720 t=2.0 rate=4.0 MB/s sent=3.9 MB/s q=4.0 ms state=hold
+1795010997.601 AUTO id=720 t=3.0 rate=4.1 MB/s sent=3.3 MB/s q=2.4 ms state=increase
+1795010998.600 AUTO id=720 t=4.0 rate=4.6 MB/s sent=3.9 MB/s q=2.4 ms state=increase
+1795010999.602 AUTO id=720 t=5.0 rate=2.8 MB/s sent=2.6 MB/s q=1.2 ms state=hold
+1795011000.602 AUTO id=720 t=6.0 rate=3.1 MB/s sent=2.6 MB/s q=2.1 ms state=increase
+1795011001.601 AUTO id=720 t=7.0 rate=1.8 MB/s sent=1.3 MB/s q=3.6 ms state=hold
+1795011002.601 AUTO id=720 t=8.0 rate=1.9 MB/s sent=2.0 MB/s q=0.9 ms state=increase
+1795011003.601 AUTO id=720 t=9.0 rate=2.3 MB/s sent=2.0 MB/s q=0.9 ms state=increase
+1795011004.600 AUTO id=720 t=10.0 rate=2.4 MB/s sent=2.0 MB/s q=2.1 ms state=increase
+1795011005.602 AUTO id=720 t=11.0 rate=2.5 MB/s sent=2.0 MB/s q=3.2 ms state=hold
+1795011006.600 AUTO id=720 t=12.0 rate=2.7 MB/s sent=2.0 MB/s q=2.9 ms state=increase
+1795011006.618 BULK down id=720 bytes=30867456 ms=12021 rate=2.6 MB/s cpu=1859ms disk=none ioFailed=false
+1795011018.625 AUTO id=721 t=1.0 rate=1.3 MB/s sent=1.3 MB/s q=0.1 ms state=hold
+1795011019.625 AUTO id=721 t=2.0 rate=1.4 MB/s sent=1.3 MB/s q=0.0 ms state=increase
+1795011020.625 AUTO id=721 t=3.0 rate=1.7 MB/s sent=2.0 MB/s q=0.0 ms state=increase
+1795011021.625 AUTO id=721 t=4.0 rate=1.8 MB/s sent=1.3 MB/s q=1.0 ms state=increase
+1795011022.625 AUTO id=721 t=5.0 rate=1.9 MB/s sent=1.3 MB/s q=0.0 ms state=hold
+1795011023.625 AUTO id=721 t=6.0 rate=2.1 MB/s sent=2.0 MB/s q=0.9 ms state=increase
+1795011024.625 AUTO id=721 t=7.0 rate=1.4 MB/s sent=1.3 MB/s q=88.1 ms state=hold
+1795011025.625 AUTO id=721 t=8.0 rate=1.6 MB/s sent=1.3 MB/s q=1.6 ms state=increase
+1795011026.625 AUTO id=721 t=9.0 rate=1.8 MB/s sent=2.0 MB/s q=1.5 ms state=increase
+1795011027.625 AUTO id=721 t=10.0 rate=1.9 MB/s sent=1.3 MB/s q=2.4 ms state=hold
+1795011028.625 AUTO id=721 t=11.0 rate=2.0 MB/s sent=1.3 MB/s q=0.1 ms state=hold
+1795011029.596 BULK down id=721 bytes=19398656 ms=11974 rate=1.6 MB/s cpu=1695ms disk=none ioFailed=false
+1795011041.608 AUTO id=722 t=1.0 rate=2.1 MB/s sent=2.0 MB/s q=5.5 ms state=hold
+1795011042.610 AUTO id=722 t=2.0 rate=2.3 MB/s sent=2.0 MB/s q=2.3 ms state=increase
+1795011043.610 AUTO id=722 t=3.0 rate=2.8 MB/s sent=2.0 MB/s q=1.2 ms state=increase
+1795011044.608 AUTO id=722 t=4.0 rate=3.2 MB/s sent=2.6 MB/s q=3.5 ms state=hold
+1795011045.608 AUTO id=722 t=5.0 rate=3.5 MB/s sent=2.6 MB/s q=1.5 ms state=increase
+1795011046.610 AUTO id=722 t=6.0 rate=3.7 MB/s sent=3.3 MB/s q=5.1 ms state=hold
+1795011047.609 AUTO id=722 t=7.0 rate=3.9 MB/s sent=3.3 MB/s q=1.6 ms state=increase
+1795011048.610 AUTO id=722 t=8.0 rate=4.1 MB/s sent=3.3 MB/s q=4.3 ms state=hold
+1795011049.609 AUTO id=722 t=9.0 rate=4.4 MB/s sent=3.3 MB/s q=3.5 ms state=hold
+1795011050.609 AUTO id=722 t=10.0 rate=4.7 MB/s sent=3.9 MB/s q=2.8 ms state=increase
+1795011051.609 AUTO id=722 t=11.0 rate=4.9 MB/s sent=3.9 MB/s q=4.8 ms state=hold
+1795011052.601 BULK down id=722 bytes=37224448 ms=11993 rate=3.1 MB/s cpu=1958ms disk=none ioFailed=false
+1795011064.602 AUTO id=723 t=1.0 rate=5.4 MB/s sent=4.6 MB/s q=2.1 ms state=increase
+1795011065.602 AUTO id=723 t=2.0 rate=5.9 MB/s sent=5.2 MB/s q=1.2 ms state=increase
+1795011066.598 AUTO id=723 t=3.0 rate=6.3 MB/s sent=5.9 MB/s q=3.1 ms state=hold
+1795011067.600 AUTO id=723 t=4.0 rate=6.7 MB/s sent=6.6 MB/s q=0.7 ms state=increase
+1795011068.600 AUTO id=723 t=5.0 rate=7.2 MB/s sent=6.6 MB/s q=1.7 ms state=increase
+1795011069.601 AUTO id=723 t=6.0 rate=7.7 MB/s sent=6.6 MB/s q=1.2 ms state=increase
+1795011070.603 AUTO id=723 t=7.0 rate=8.2 MB/s sent=7.2 MB/s q=1.4 ms state=increase
+1795011071.603 AUTO id=723 t=8.0 rate=8.7 MB/s sent=7.9 MB/s q=1.6 ms state=increase
+1795011072.601 AUTO id=723 t=9.0 rate=9.1 MB/s sent=7.9 MB/s q=3.8 ms state=hold
+1795011073.603 AUTO id=723 t=10.0 rate=9.4 MB/s sent=8.5 MB/s q=0.9 ms state=increase
+1795011074.600 AUTO id=723 t=11.0 rate=9.6 MB/s sent=7.9 MB/s q=2.3 ms state=increase
+1795011075.603 AUTO id=723 t=12.0 rate=5.8 MB/s sent=5.2 MB/s q=7.6 ms state=hold
+1795011075.609 BULK down id=723 bytes=78839808 ms=12010 rate=6.6 MB/s cpu=2520ms disk=none ioFailed=false
+1795011087.601 AUTO id=724 t=1.0 rate=6.1 MB/s sent=5.2 MB/s q=5.4 ms state=hold
+1795011088.600 AUTO id=724 t=2.0 rate=6.2 MB/s sent=5.2 MB/s q=3.3 ms state=hold
+1795011089.604 AUTO id=724 t=3.0 rate=6.2 MB/s sent=5.9 MB/s q=3.6 ms state=hold
+1795011090.603 AUTO id=724 t=4.0 rate=6.6 MB/s sent=5.2 MB/s q=2.9 ms state=increase
+1795011091.601 AUTO id=724 t=5.0 rate=4.1 MB/s sent=3.9 MB/s q=4.6 ms state=hold
+1795011092.603 AUTO id=724 t=6.0 rate=2.8 MB/s sent=2.0 MB/s q=13.6 ms state=hold
+1795011093.603 AUTO id=724 t=7.0 rate=1.3 MB/s sent=0.7 MB/s q=7.0 ms state=hold
+1795011094.603 AUTO id=724 t=8.0 rate=0.6 MB/s sent=0.0 MB/s q=0.8 ms state=hold
+1795011095.603 AUTO id=724 t=9.0 rate=0.8 MB/s sent=0.7 MB/s q=4.4 ms state=hold
+1795011096.602 AUTO id=724 t=10.0 rate=0.5 MB/s sent=0.0 MB/s q=10.1 ms state=hold
+1795011097.603 AUTO id=724 t=11.0 rate=0.5 MB/s sent=0.0 MB/s q=0.9 ms state=hold
+1795011098.602 AUTO id=724 t=12.0 rate=0.6 MB/s sent=0.7 MB/s q=1.7 ms state=increase
+1795011098.609 BULK down id=724 bytes=34865152 ms=12009 rate=2.9 MB/s cpu=1850ms disk=none ioFailed=false
+1795011110.606 AUTO id=725 t=1.0 rate=0.9 MB/s sent=0.7 MB/s q=1.4 ms state=hold
+1795011111.603 AUTO id=725 t=2.0 rate=0.5 MB/s sent=0.7 MB/s q=18.8 ms state=hold
+1795011112.606 AUTO id=725 t=3.0 rate=0.6 MB/s sent=0.7 MB/s q=1.3 ms state=increase
+1795011113.603 AUTO id=725 t=4.0 rate=0.7 MB/s sent=0.7 MB/s q=0.0 ms state=increase
+1795011114.606 AUTO id=725 t=5.0 rate=0.8 MB/s sent=1.3 MB/s q=2.0 ms state=increase
+1795011115.603 AUTO id=725 t=6.0 rate=1.0 MB/s sent=1.3 MB/s q=0.0 ms state=increase
+1795011116.606 AUTO id=725 t=7.0 rate=1.0 MB/s sent=0.7 MB/s q=4.1 ms state=hold
+1795011117.604 AUTO id=725 t=8.0 rate=1.1 MB/s sent=1.3 MB/s q=0.0 ms state=increase
+1795011118.606 AUTO id=725 t=9.0 rate=1.2 MB/s sent=0.7 MB/s q=0.3 ms state=hold
+1795011119.603 AUTO id=725 t=10.0 rate=1.3 MB/s sent=1.3 MB/s q=2.4 ms state=increase
+1795011120.605 AUTO id=725 t=11.0 rate=1.4 MB/s sent=1.3 MB/s q=2.2 ms state=increase
+1795011121.641 BULK down id=725 bytes=10878976 ms=12039 rate=0.9 MB/s cpu=1683ms disk=none ioFailed=false
+1795011133.603 AUTO id=726 t=1.0 rate=1.1 MB/s sent=1.3 MB/s q=0.3 ms state=increase
+1795011134.603 AUTO id=726 t=2.0 rate=1.5 MB/s sent=1.3 MB/s q=1.2 ms state=increase
+1795011135.604 AUTO id=726 t=3.0 rate=2.0 MB/s sent=2.0 MB/s q=1.8 ms state=increase
+1795011136.601 AUTO id=726 t=4.0 rate=2.3 MB/s sent=2.6 MB/s q=1.5 ms state=increase
+1795011137.603 AUTO id=726 t=5.0 rate=2.7 MB/s sent=2.6 MB/s q=3.7 ms state=hold
+1795011138.603 AUTO id=726 t=6.0 rate=3.0 MB/s sent=2.6 MB/s q=0.3 ms state=increase
+1795011139.603 AUTO id=726 t=7.0 rate=3.5 MB/s sent=3.3 MB/s q=2.2 ms state=increase
+1795011140.603 AUTO id=726 t=8.0 rate=4.0 MB/s sent=3.3 MB/s q=2.0 ms state=increase
+1795011141.604 AUTO id=726 t=9.0 rate=4.5 MB/s sent=3.9 MB/s q=2.7 ms state=increase
+1795011142.601 AUTO id=726 t=10.0 rate=2.7 MB/s sent=2.6 MB/s q=6.3 ms state=hold
+1795011143.604 AUTO id=726 t=11.0 rate=2.8 MB/s sent=2.0 MB/s q=4.2 ms state=hold
+1795011144.604 AUTO id=726 t=12.0 rate=3.1 MB/s sent=2.6 MB/s q=2.1 ms state=increase
+1795011144.619 BULK down id=726 bytes=28770304 ms=12019 rate=2.4 MB/s cpu=1780ms disk=none ioFailed=false
+1795011156.606 AUTO id=727 t=1.0 rate=3.3 MB/s sent=3.3 MB/s q=3.6 ms state=hold
+1795011157.603 AUTO id=727 t=2.0 rate=3.6 MB/s sent=2.6 MB/s q=2.8 ms state=increase
+1795011158.606 AUTO id=727 t=3.0 rate=4.1 MB/s sent=3.3 MB/s q=2.7 ms state=increase
+1795011159.604 AUTO id=727 t=4.0 rate=4.5 MB/s sent=3.9 MB/s q=3.5 ms state=hold
+1795011160.606 AUTO id=727 t=5.0 rate=4.8 MB/s sent=3.9 MB/s q=1.4 ms state=increase
+1795011161.603 AUTO id=727 t=6.0 rate=5.3 MB/s sent=4.6 MB/s q=2.5 ms state=increase
+1795011162.606 AUTO id=727 t=7.0 rate=3.6 MB/s sent=2.6 MB/s q=31.3 ms state=hold
+1795011163.604 AUTO id=727 t=8.0 rate=3.7 MB/s sent=3.3 MB/s q=0.0 ms state=increase
+1795011164.604 AUTO id=727 t=9.0 rate=4.2 MB/s sent=3.9 MB/s q=0.0 ms state=increase
+1795011165.604 AUTO id=727 t=10.0 rate=4.5 MB/s sent=3.9 MB/s q=2.7 ms state=increase
+1795011166.606 AUTO id=727 t=11.0 rate=4.6 MB/s sent=3.9 MB/s q=1.8 ms state=increase
+1795011167.602 BULK down id=727 bytes=44367872 ms=11999 rate=3.7 MB/s cpu=1821ms disk=none ioFailed=false
+1795011183.823 SRESULT phase=1 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5566us p95=24407us p99=45554us max=66613us over20ms=36(6.00%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~49524us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.823 SRESULT phase=2 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=6817us p95=20092us p99=31714us max=54409us over20ms=31(5.17%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~35684us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.823 SRESULT phase=3 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=6450us p95=30787us p99=53260us max=71489us over20ms=65(10.83%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~57230us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.823 SRESULT phase=4 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4864us p95=84833us p99=206981us max=270830us over20ms=68(11.33%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~210950us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.823 SRESULT phase=5 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4925us p95=16667us p99=37464us max=50665us over20ms=23(3.83%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~41433us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.824 SRESULT phase=6 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=6036us p95=15272us p99=30651us max=43476us over20ms=17(2.83%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~34621us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.824 SRESULT phase=7 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=3932us p95=10877us p99=24439us max=58006us over20ms=8(1.33%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~28409us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.824 SRESULT phase=8 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4985us p95=14951us p99=29780us max=44318us over20ms=17(2.83%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~33749us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.824 SRESULT phase=9 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=3795us p95=11987us p99=22686us max=75732us over20ms=8(1.33%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~26655us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.825 SRESULT phase=10 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=7621us p95=40689us p99=77906us max=94679us over20ms=100(16.67%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~81876us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.825 SRESULT phase=11 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4895us p95=19321us p99=40997us max=64258us over20ms=30(5.00%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~44967us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.825 SRESULT phase=12 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4798us p95=34051us p99=114750us max=138000us over20ms=55(9.17%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~118719us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.825 SRESULT phase=13 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=3858us p95=13673us p99=32573us max=93636us over20ms=16(2.67%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~36543us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.826 SRESULT phase=14 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5290us p95=17370us p99=29509us max=81002us over20ms=20(3.33%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~33479us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.826 SRESULT phase=15 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5172us p95=13399us p99=39042us max=80236us over20ms=18(3.00%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~43011us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.826 SRESULT phase=16 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5025us p95=23032us p99=81772us max=106753us over20ms=32(5.33%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~85741us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940 | reasons: video p99 >= 20 ms
+1795011183.826 SRESULT phase=17 PASS lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=3646us p95=9490us p99=16052us max=70232us over20ms=6(1.00%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~20022us (+-4163us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=11941 released=11940
+1795011183.833 LOG peer 1: datagram receive error POSIXErrorCode(rawValue: 57): Socket is not connected
+1795011183.833 LOG peer 1: receive error POSIXErrorCode(rawValue: 57): Socket is not connected
+1795011183.833 LOG peer 1: datagram flow state failed(POSIXErrorCode(rawValue: 57): Socket is not connected)
+1795011183.833 LOG peer 1: stream #1 failed: POSIXErrorCode(rawValue: 57): Socket is not connected
+1795011183.834 LOG peer 1: group state failed(POSIXErrorCode(rawValue: 22): Invalid argument)
+1795011183.834 LOG peer 1: group failed: POSIXErrorCode(rawValue: 22): Invalid argument

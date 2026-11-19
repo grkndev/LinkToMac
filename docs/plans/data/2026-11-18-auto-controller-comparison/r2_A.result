@@ -1,0 +1,1 @@
+RESULT q2 PASS 206305ms label=r2_A | effects=[1.12,-0.43,-1.48,-1.40,-0.81,-1.95,18.74,-0.39] median=-0.62 | p95=[9.94,10.98,9.77,11.07,13.25,10.51,10.74,9.85,11.76,10.32,10.51,8.78,10.95,29.07,9.70,9.51,10.10] | rates=[] | video lost=0 sent=11940/11940 failed=0 | limit none (sham load) | phone cpu 20230 ms | clock drift 1571 us

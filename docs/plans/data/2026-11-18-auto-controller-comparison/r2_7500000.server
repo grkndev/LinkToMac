@@ -1,0 +1,58 @@
+1795012086.077 LOG peer 6: new connection group
+1795012086.149 LOG peer 6: group state waiting(POSIXErrorCode(rawValue: 50): Network is down)
+1795012086.229 LOG peer 6: group state ready
+1795012086.229 LOG peer 6: datagram flow state preparing
+1795012086.229 LOG peer 6: datagram flow state ready
+1795012086.229 QUIRK datagram flow ready, usableDatagramFrameSize=1440
+1795012086.229 LOG peer 6: stream #1 ready id=0 initiator=client direction=bidi
+1795012086.229 QUIRK first byte 0x00 on stream #1 (id=0 initiator=client direction=bidi)
+1795012086.230 LOG peer 6: session opened
+1795012088.315 LOG peer 6: stream-cost phase 0 started (60 video/s, 0 audio/s, 1 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 1 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 2 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 3 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 4 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 5 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 6 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 7 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 8 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 9 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 10 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 11 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 12 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 13 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 14 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 15 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 16 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012088.315 LOG peer 6: stream-cost phase 17 started (60 video/s, 0 audio/s, 10 s), baseline live=6
+1795012115.324 BULK down id=820 bytes=68091904 ms=12007 rate=5.7 MB/s cpu=2029ms disk=none ioFailed=false
+1795012138.317 BULK down id=821 bytes=68681728 ms=11993 rate=5.7 MB/s cpu=2267ms disk=none ioFailed=false
+1795012161.403 BULK down id=822 bytes=67567616 ms=12085 rate=5.6 MB/s cpu=2107ms disk=none ioFailed=false
+1795012184.321 BULK down id=823 bytes=77201408 ms=11973 rate=6.4 MB/s cpu=2182ms disk=none ioFailed=false
+1795012207.322 BULK down id=824 bytes=77725696 ms=12003 rate=6.5 MB/s cpu=2169ms disk=none ioFailed=false
+1795012230.315 BULK down id=825 bytes=78315520 ms=11997 rate=6.5 MB/s cpu=2271ms disk=none ioFailed=false
+1795012253.320 BULK down id=826 bytes=77922304 ms=12003 rate=6.5 MB/s cpu=2330ms disk=none ioFailed=false
+1795012276.353 BULK down id=827 bytes=77529088 ms=12034 rate=6.4 MB/s cpu=2360ms disk=none ioFailed=false
+1795012292.601 SRESULT phase=1 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4571us p95=12137us p99=85661us max=184732us over20ms=13(2.17%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~88839us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.602 SRESULT phase=2 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=17034us p95=124809us p99=244294us max=439435us over20ms=270(45.00%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~247472us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.602 SRESULT phase=3 PASS lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=3393us p95=9071us p99=12596us max=55357us over20ms=4(0.67%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~15774us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640
+1795012292.602 SRESULT phase=4 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5479us p95=14998us p99=26769us max=44689us over20ms=16(2.67%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~29947us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.602 SRESULT phase=5 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=3650us p95=11028us p99=40116us max=153871us over20ms=9(1.50%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~43294us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.603 SRESULT phase=6 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=6822us p95=30320us p99=46438us max=69166us over20ms=71(11.83%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~49616us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.603 SRESULT phase=7 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4830us p95=20760us p99=34081us max=60062us over20ms=34(5.67%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~37259us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.603 SRESULT phase=8 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4521us p95=16634us p99=28426us max=43326us over20ms=22(3.67%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~31604us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.603 SRESULT phase=9 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=3173us p95=11960us p99=33048us max=53919us over20ms=16(2.67%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~36226us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.604 SRESULT phase=10 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5206us p95=18120us p99=91571us max=162208us over20ms=28(4.67%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~94749us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.604 SRESULT phase=11 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4527us p95=11353us p99=28788us max=63305us over20ms=9(1.50%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~31966us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.605 SRESULT phase=12 PASS lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4632us p95=10284us p99=15214us max=33868us over20ms=3(0.50%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~18392us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640
+1795012292.606 SRESULT phase=13 PASS lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5069us p95=12401us p99=19701us max=24004us over20ms=5(0.83%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~22879us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640
+1795012292.606 SRESULT phase=14 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=6225us p95=14978us p99=21810us max=29843us over20ms=9(1.50%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~24988us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.606 SRESULT phase=15 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5158us p95=14133us p99=40055us max=96930us over20ms=15(2.50%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~43233us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.606 SRESULT phase=16 FAIL lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=5435us p95=12575us p99=22901us max=39331us over20ms=11(1.83%) | windows-with->20ms=1/2 (10 s each) | abs-video-p99~26079us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640 | reasons: video p99 >= 20 ms
+1795012292.607 SRESULT phase=17 PASS lost=0 incomplete=0 corrupt=0 dup=0 | video(vs phase 1 floor) n=600 p50=4381us p95=9709us p99=14996us max=42540us over20ms=5(0.83%) | windows-with->20ms=2/2 (10 s each) | abs-video-p99~18174us (+-4368us clock uncertainty) | cpu mean=0.0% p95=0.0% max=0.0% | mem first=0.0MB last=0.0MB growth=n/a (phase under 150 s) | live max=0 end=0 created=71646 released=71640
+1795012292.639 LOG peer 6: datagram receive error POSIXErrorCode(rawValue: 57): Socket is not connected
+1795012292.639 LOG peer 6: receive error POSIXErrorCode(rawValue: 57): Socket is not connected
+1795012292.639 LOG peer 6: datagram flow state failed(POSIXErrorCode(rawValue: 57): Socket is not connected)
+1795012292.640 LOG peer 6: group state failed(POSIXErrorCode(rawValue: 22): Invalid argument)
+1795012292.640 LOG peer 6: group failed: POSIXErrorCode(rawValue: 22): Invalid argument
+1795012292.640 LOG peer 6: stream #1 failed: POSIXErrorCode(rawValue: 57): Socket is not connected
