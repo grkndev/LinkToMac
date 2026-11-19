@@ -274,6 +274,9 @@ final class RelayClient {
     /// Carries the plaintext action; the LAN server seals it.
     var onLocalCommand: ((String) -> Void)?
 
+    /// A parsed `q.*` action from the phone (stage 1.3). The QUIC listener of stage 1.6 will set it; until then it only gets logged.
+    var onQuicControl: ((QuicAction) -> Void)?
+
     /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
     /// re-advertise under the new pairing id and invalidate any stale authenticated socket.
     var onPairingChanged: (() -> Void)?
@@ -1373,7 +1376,38 @@ final class RelayClient {
             log("cmd: lock screen")
             ScreenLock.lock()
         default:
-            log("cmd: ignoring unknown action \(action)")
+            if action.hasPrefix("{") {
+                handleQuicControl(action)
+            } else {
+                log("cmd: ignoring unknown action \(action)")
+            }
+        }
+    }
+
+    /// A JSON action from the phone: one of the `q.*` actions that open and close a QUIC session. The `echo` kind exists in a debug
+    /// build only. Never logs the payload (later stages route secrets through here), only the kind of outcome.
+    private func handleQuicControl(_ action: String) {
+        #if DEBUG
+        let allowEcho = true
+        #else
+        let allowEcho = false
+        #endif
+        switch QuicControl.parse(action, allowEcho: allowEcho) {
+        case let .action(parsed):
+            let what: String
+            switch parsed {
+            case .request: what = "request"
+            case .accept: what = "accept"
+            case .offer: what = "offer"
+            case .reject: what = "reject"
+            case .end: what = "end"
+            }
+            log("cmd: quic \(what) received")
+            onQuicControl?(parsed)
+        case .unknown:
+            log("cmd: ignoring unknown action (json, \(action.utf8.count) bytes)")
+        case let .invalid(code):
+            log("cmd: invalid quic action (\(code))")
         }
     }
 
