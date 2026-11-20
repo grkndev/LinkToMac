@@ -4,6 +4,7 @@ import expo.modules.selfadb.quic.ChannelParse
 import expo.modules.selfadb.quic.QuicAction
 import expo.modules.selfadb.quic.QuicChannel
 import expo.modules.selfadb.quic.QuicControl
+import expo.modules.selfadb.quic.QuicGate
 import expo.modules.selfadb.quic.QuicHandshake
 import expo.modules.selfadb.quic.QuicParse
 import expo.modules.selfadb.quic.QuicSide
@@ -35,7 +36,7 @@ class QuicControlVectorTest {
 
   @Test fun theVectorFileHasTheSectionsThisSuiteRuns() {
     assertTrue(doc.has("constants"))
-    for (section in listOf("actions", "channels", "handshake")) assertTrue(section, cases(section).isNotEmpty())
+    for (section in listOf("actions", "channels", "handshake", "gate")) assertTrue(section, cases(section).isNotEmpty())
   }
 
   // ---- constants ----
@@ -172,5 +173,38 @@ class QuicControlVectorTest {
         if (step.has("then")) assertTrue("$where: afterwards ${hs.phase}", matches(hs.phase, step.getJSONObject("then")))
       }
     }
+  }
+
+  // ---- gate ----
+
+  private fun capsOf(c: JSONObject): Set<String> {
+    val a = c.optJSONArray("caps") ?: return emptySet()
+    return (0 until a.length()).map { a.getString(it) }.toSet()
+  }
+
+  @Test fun gateVectors() {
+    val kinds = mutableSetOf<String>()
+    for (c in cases("gate")) {
+      val kind = c.getString("kind")
+      kinds += kind
+      val active = c.optBoolean("active", false)
+      val onLan = c.optBoolean("on_lan", false)
+      val supported = c.optBoolean("kind_supported", false)
+      when (kind) {
+        "incoming" -> assertEquals(c.label(), c.getString("expect"), QuicGate.refusal(active, onLan, supported)?.wire ?: "proceed")
+        "visible" -> assertEquals(c.label(), c.getBoolean("expect"), QuicGate.visible(onLan, capsOf(c)))
+        "outgoing" -> assertEquals(
+          c.label(),
+          c.getString("expect"),
+          when (val r = QuicGate.outgoing(active, onLan, capsOf(c), supported)) {
+            QuicGate.Outgoing.Hidden -> "hidden"
+            is QuicGate.Outgoing.Refused -> r.reason.wire
+            QuicGate.Outgoing.Proceed -> "proceed"
+          },
+        )
+        else -> fail("${c.label()}: unknown gate case kind")
+      }
+    }
+    assertEquals(setOf("incoming", "visible", "outgoing"), kinds)
   }
 }

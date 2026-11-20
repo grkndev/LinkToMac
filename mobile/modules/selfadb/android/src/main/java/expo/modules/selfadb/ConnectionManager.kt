@@ -47,6 +47,11 @@ class ConnectionManager(
   private val onCmdReceived: (String) -> Unit,
   /** transport is "lan" or "relay"; status/peerOnline/error/attempt mirror the child client. */
   private val onStatus: (transport: String, status: String, peerOnline: Boolean, error: String?, attempt: Int) -> Unit,
+  /**
+   * The LAN-direct link went away (it was up, now it is not): Wi-Fi lost, the LAN client dropped, or the Mac's address changed. A QUIC session
+   * needs that link and ends here (stage 1.8). Called on this manager's thread; do not block.
+   */
+  private val onLanLost: () -> Unit = {},
   private val log: (String) -> Unit,
 ) {
   private val appCtx = context.applicationContext
@@ -257,6 +262,7 @@ class ConnectionManager(
       lanUp = false
       lanHostInUse = null
       log("wifi lost -> relay fallback")
+      onLanLost()
     }
     ensureRelay()
   }
@@ -284,6 +290,11 @@ class ConnectionManager(
     if (lan != null && host == lastLanHost) return // already targeting this Mac
     lan?.shutdown()
     lastLanHost = host
+    if (lanHostInUse != null) {
+      // The Mac's address changed under a live link: the address a QUIC session was opened to is stale (stage 1.8).
+      lanHostInUse = null
+      onLanLost()
+    }
     lan = LanClient(
       host = host,
       port = port,
@@ -319,6 +330,7 @@ class ConnectionManager(
       lanUp = false
       lanHostInUse = null
       log("lan link lost ($status) -> relay fallback")
+      onLanLost()
       // Re-scan to re-find the Mac (e.g. its DHCP lease changed) while we're still on Wi-Fi.
       if (wifiNets.isNotEmpty()) startDiscovery()
       ensureRelay()

@@ -283,6 +283,46 @@ class QuicHandshake(
   }
 }
 
+// ---- the gate (stage 1.8) ---------------------------------------------------------------------------------------------------
+
+/**
+ * Who may open a QUIC session and what the QUIC controls show, in one place. The Swift twin is `QuicGate` in `Quic/QuicControl.swift`; both
+ * run the `gate` section of `protocol-vectors/quic-control.json` (the whole truth table), so the two sides cannot drift apart.
+ */
+object QuicGate {
+  /**
+   * Why a request must NOT be served (or made), or null. The order matters: **busy first**, so a running session is never disturbed by
+   * anything else; then the link (a session needs the LAN-direct one); then whether this side serves that kind at all.
+   */
+  fun refusal(active: Boolean, onLan: Boolean, kindSupported: Boolean): QuicRejectReason? = when {
+    active -> QuicRejectReason.BUSY
+    !onLan -> QuicRejectReason.RELAY
+    !kindSupported -> QuicRejectReason.UNSUPPORTED
+    else -> null
+  }
+
+  /** Whether QUIC controls are shown at all: the LAN-direct link AND the peer announced `q1` ([QuicCaps.available]). */
+  fun visible(onLan: Boolean, caps: Set<String>): Boolean = QuicCaps.available(onLan, caps)
+
+  sealed class Outgoing {
+    /** The peer never announced `q1`: there is nothing to ask. */
+    object Hidden : Outgoing() {
+      override fun toString() = "Hidden"
+    }
+    data class Refused(val reason: QuicRejectReason) : Outgoing()
+    object Proceed : Outgoing() {
+      override fun toString() = "Proceed"
+    }
+  }
+
+  /** This side wants to ask the peer for a session. */
+  fun outgoing(active: Boolean, onLan: Boolean, caps: Set<String>, kindSupported: Boolean): Outgoing {
+    if (QuicCaps.Q1 !in caps) return Outgoing.Hidden
+    val reason = refusal(active, onLan, kindSupported) ?: return Outgoing.Proceed
+    return Outgoing.Refused(reason)
+  }
+}
+
 // ---- stream channels (stage 1.5) -------------------------------------------------------------------------------------------
 
 /**

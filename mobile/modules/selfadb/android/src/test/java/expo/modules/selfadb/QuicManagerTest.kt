@@ -221,6 +221,32 @@ class QuicManagerTest {
     assertEquals(closes, rig.transport.calls.count { it.startsWith("close") })
   }
 
+  // ---- the link goes away (stage 1.8) ----
+
+  @Test fun theLanLinkGoingAwayEndsTheSessionTellsTheMacAndClosesTheClient() {
+    val rig = connected()
+    rig.manager.linkLost()
+    assertEquals(QuicSession.State.Ended(QuicSession.End.LinkChanged), rig.manager.state)
+    assertEquals(QuicAction.End(requestedSid(rig)), rig.sent.last())
+    assertEquals("close:7:0", rig.transport.calls.last())
+    assertFalse(rig.manager.sendSessionLine("late"))
+  }
+
+  @Test fun theLinkGoingAwayWhileWaitingForAnOfferEndsTheRequest() {
+    val rig = Rig()
+    rig.manager.requestEcho()
+    rig.manager.linkLost()
+    assertEquals(QuicSession.State.Ended(QuicSession.End.LinkChanged), rig.manager.state)
+    assertEquals(QuicAction.End(requestedSid(rig)), rig.sent.last())
+    assertEquals(null, rig.ticker.scheduledDelay)
+  }
+
+  @Test fun theLinkGoingAwayWithNoSessionDoesNothing() {
+    val rig = Rig()
+    rig.manager.linkLost()
+    assertTrue(rig.sent.isEmpty() && rig.transport.calls.isEmpty())
+  }
+
   // ---- the clock ----
 
   @Test fun theHostAsksTheTimerForTheNextDeadlineAndTicksTheRules() {

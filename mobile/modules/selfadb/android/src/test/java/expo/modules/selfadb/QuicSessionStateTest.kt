@@ -259,6 +259,44 @@ class QuicSessionStateTest {
     assertEquals(State.AwaitingOffer, s.state)
   }
 
+  // ---- the link goes away (stage 1.8) ----
+
+  @Test fun theLinkGoingAwayWhileWaitingForTheOfferJustTellsTheMac() {
+    val s = asked()
+    assertEquals(listOf<Effect>(Effect.SendAction(QuicAction.End(sid))), s.linkLost(5))
+    assertEquals(State.Ended(End.LinkChanged), s.state)
+    assertNull(s.nextDeadlineMs)
+  }
+
+  @Test fun theLinkGoingAwayWhileConnectingOrConnectedTellsTheMacAndClosesTheClient() {
+    for (build in listOf({ connecting() }, { connected() })) {
+      val s = build()
+      assertEquals(listOf<Effect>(Effect.SendAction(QuicAction.End(sid)), Effect.Close(0)), s.linkLost(5))
+      assertEquals(State.Ended(End.LinkChanged), s.state)
+    }
+  }
+
+  @Test fun theLinkGoingAwayWithNoSessionDoesNothingAndDoesNotRepeat() {
+    val idle = session()
+    assertEquals(emptyList<Effect>(), idle.linkLost(0))
+    assertEquals(State.Idle, idle.state)
+    val s = connected()
+    s.linkLost(1)
+    assertEquals(emptyList<Effect>(), s.linkLost(2))
+    val ended = connected()
+    ended.end(1)
+    assertEquals(emptyList<Effect>(), ended.linkLost(2))
+    assertEquals(State.Ended(End.LocalEnded), ended.state) // the first reason stays
+  }
+
+  @Test fun aLateReportFromTheClientAfterTheLinkWentAwayChangesNothing() {
+    val s = connecting()
+    s.linkLost(5)
+    assertEquals(emptyList<Effect>(), s.connected(6))
+    assertEquals(emptyList<Effect>(), s.failed(QuicError.Timeout, 7))
+    assertEquals(State.Ended(End.LinkChanged), s.state)
+  }
+
   // ---- the Mac asks (a later stage serves it) ----
 
   @Test fun aRequestFromTheMacIsRefusedAsUnsupportedSoItNeverWaitsForUs() {

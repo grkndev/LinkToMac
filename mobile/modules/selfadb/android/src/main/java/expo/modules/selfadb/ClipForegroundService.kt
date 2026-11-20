@@ -406,6 +406,8 @@ class ClipForegroundService : Service() {
         if (!peerOnline) macCaps.peerWentOffline()
         lastPeerOnline = peerOnline
       },
+      // A QUIC session needs the LAN-direct link: when it goes away the session ends (stage 1.8).
+      onLanLost = { quicManager?.linkLost() },
       log = { ClipBus.log(it) },
     ).also { it.start() }
   }

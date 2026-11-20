@@ -74,8 +74,11 @@ class QuicManager(
   /** Debug: ask the Mac for an `echo` session. */
   fun requestEcho() = post { run(session.request(QuicKind.ECHO, UUID.randomUUID().toString(), onLan(), now())) }
 
-  /** The phone ends the session (the user, Unpair, the link going away). */
+  /** The phone ends the session (the user, Unpair). */
   fun end() = post { run(session.end(now())) }
+
+  /** The LAN-direct link went away (Wi-Fi off, the Mac left the LAN): a session needs it. */
+  fun linkLost() = post { run(session.linkLost(now())) }
 
   fun shutdown() {
     end()

@@ -56,6 +56,11 @@ class QuicSession(val config: Config = Config()) {
     object LinkLost : End() {
       override fun toString() = "LinkLost"
     }
+
+    /** The LAN-direct link went away (Wi-Fi off, the Mac left the LAN): a session needs it, so the session ends. */
+    object LinkChanged : End() {
+      override fun toString() = "LinkChanged"
+    }
   }
 
   /** What the host must do. */
@@ -84,12 +89,8 @@ class QuicSession(val config: Config = Config()) {
   // ---- asking ----
 
   /** Why a request of ours cannot be made right now, or null. */
-  fun localRequestRefusal(kind: QuicKind, onLan: Boolean): QuicRejectReason? = when {
-    active -> QuicRejectReason.BUSY
-    !onLan -> QuicRejectReason.RELAY
-    kind !in config.supportedKinds -> QuicRejectReason.UNSUPPORTED
-    else -> null
-  }
+  fun localRequestRefusal(kind: QuicKind, onLan: Boolean): QuicRejectReason? =
+    QuicGate.refusal(active, onLan, kindSupported = kind in config.supportedKinds)
 
   /** The phone asks the Mac for a session. Nothing happens when it cannot be made ([localRequestRefusal]). */
   fun request(kind: QuicKind, sid: String, onLan: Boolean, nowMs: Long): List<Effect> {
@@ -170,6 +171,15 @@ class QuicSession(val config: Config = Config()) {
   fun end(nowMs: Long): List<Effect> {
     if (!active) return emptyList()
     return finish(End.LocalEnded, tellMac = true, close = state == State.Connecting || state == State.Connected)
+  }
+
+  /**
+   * The LAN-direct link is gone. The Mac is still told, best effort, over whatever link is left (`sendCmd` falls back to the relay when
+   * the LAN is down, and queues for a short while when nothing is up); the client is closed.
+   */
+  fun linkLost(nowMs: Long): List<Effect> {
+    if (!active) return emptyList()
+    return finish(End.LinkChanged, tellMac = true, close = state == State.Connecting || state == State.Connected)
   }
 
   // ---- the clock ----
