@@ -436,6 +436,10 @@ final class QuicServer: QuicListenerDelegate, @unchecked Sendable {
     private let send: @Sendable (QuicAction) -> Void
     private let now: @Sendable () -> Int64
     private var timer: DispatchSourceTimer?
+    private var lastReported: QuicSession.State = .idle
+
+    /// Told (on this server's queue) after every change of the session's state, once per change. The debug test session uses it.
+    var onStateChange: (@Sendable (QuicSession.State) -> Void)?
 
     /// `send` delivers a `q.*` action to the phone (it is called on this server's queue).
     init(identity: QuicIdentity,
@@ -469,6 +473,14 @@ final class QuicServer: QuicListenerDelegate, @unchecked Sendable {
         queue.async { [self] in perform(session.receive(action, onLan: onLan, nowMs: now())) }
     }
 
+    /// The Mac asks the phone for a session (the phone answers with `q.accept`, which arrives through `receive`). Nothing happens when it
+    /// cannot be made: another session is active, the phone is not on the LAN, or the kind is not served (`QuicSession.request`).
+    func request(_ kind: QuicKind, onLan: Bool) {
+        queue.async { [self] in
+            perform(session.request(kind, sid: UUID().uuidString.lowercased(), onLan: onLan, nowMs: now()))
+        }
+    }
+
     /// The Mac ends the session (the user, Unpair, the phone's link going away).
     func end() {
         queue.async { [self] in perform(session.end(.localEnded, nowMs: now())) }
@@ -497,6 +509,11 @@ final class QuicServer: QuicListenerDelegate, @unchecked Sendable {
             }
         }
         reschedule()
+        let current = session.state
+        if current != lastReported {
+            lastReported = current
+            onStateChange?(current)
+        }
     }
 
     private func reschedule() {

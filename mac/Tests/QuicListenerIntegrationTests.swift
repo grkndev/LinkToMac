@@ -52,6 +52,7 @@ private final class Harness: @unchecked Sendable {
     let sid = UUID().uuidString.lowercased()
     let identity: QuicIdentity
     let actions = ActionBox()
+    let states = StateLog()
     let server: QuicServer
 
     init(options: QuicListener.Options = QuicListener.Options(preferredPort: 0),
@@ -61,6 +62,8 @@ private final class Harness: @unchecked Sendable {
         config.supportedKinds = [.echo]
         let box = actions
         server = QuicServer(identity: identity, config: config, options: options, send: { box.add($0) })
+        let log = states
+        server.onStateChange = { log.add($0) }
     }
 
     func close() {
@@ -126,6 +129,13 @@ private final class Harness: @unchecked Sendable {
 }
 
 private final class StateBox: @unchecked Sendable { var value: QuicSession.State = .idle }
+
+private final class StateLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [QuicSession.State] = []
+    func add(_ state: QuicSession.State) { lock.lock(); items.append(state); lock.unlock() }
+    var all: [QuicSession.State] { lock.lock(); defer { lock.unlock() }; return items }
+}
 
 @Suite(.serialized, .enabled(if: echoClientURL != nil, "build the Rust client first: mac/scripts/quic-it.sh"), .timeLimit(.minutes(3)))
 struct QuicListenerIntegrationTests {
@@ -395,5 +405,54 @@ struct QuicProductionClientIntegrationTests {
         #expect(waitFor(10) { !process.isRunning })
         let line = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         #expect(process.terminationStatus == 0 && line.contains(" PASS "), "\(line)")
+    }
+
+    @Test func aSessionTheMacAskedForGoesThroughAcceptAndOfferAndTheShippingClientConnects() throws {
+        let h = try Harness()
+        defer { h.close() }
+        h.server.request(.echo, onLan: true)
+        var asked: String?
+        #expect(waitFor(5) {
+            for case let .request(sid, kind) in h.actions.all where kind == .echo { asked = sid }
+            return asked != nil
+        })
+        let sid = try #require(asked)
+        #expect(h.state() == .requested)
+        // The phone's accept, as it would arrive over the control channel.
+        h.server.receive(.accept(sid: sid), onLan: true)
+        var offer: QuicOffer?
+        #expect(waitFor(5) {
+            for case let .offer(o) in h.actions.all { offer = o }
+            return offer != nil
+        })
+        let result = h.run("happy", try #require(offer), production: true)
+        #expect(result.passed, "\(result.line)")
+    }
+
+    @Test func everyStateChangeIsReportedOnceAndInOrder() throws {
+        let h = try Harness()
+        defer { h.close() }
+        let offer = try #require(h.request())
+        // An event that changes nothing (an accept nobody may send to a phone-asked session) must not be reported as a change.
+        h.server.receive(.accept(sid: h.sid), onLan: true)
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(h.run("happy", offer, production: true).passed)
+        #expect(h.waitForState(5, .ended(.connectionLost)))
+        let seen = h.states.all
+        #expect(seen == [.accepted, .offered, .connected, .ended(.connectionLost)], "\(seen)")
+    }
+
+    @Test func askingWhileThePhoneIsNotOnTheLanOrWhileBusyDoesNotStartASecondRequest() throws {
+        let h = try Harness()
+        defer { h.close() }
+        h.server.request(.echo, onLan: false)          // off the LAN: nothing is asked
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(h.actions.all.isEmpty && h.state() == .idle)
+        h.server.request(.echo, onLan: true)
+        #expect(waitFor(5) { h.state() == .requested })
+        let before = h.actions.all.count
+        h.server.request(.echo, onLan: true)           // busy: the first request stays the only one
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(h.actions.all.count == before)
     }
 }

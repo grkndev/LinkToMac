@@ -17,6 +17,7 @@ struct LinkToMacApp: App {
                 client: delegate.client,
                 proximity: delegate.proximity,
                 appearance: delegate.appearance,
+                quic: delegate.quic,
                 onApplyLan: { delegate.applyLanSettings() },
                 onCheckForUpdates: { delegate.checkForUpdates() }
             )
@@ -41,9 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the same network connects straight to us; rebuilt by `applyLanSettings()` when the port or
     /// the enabled toggle changes. Reads the pairing fresh on each handshake.
     private var lan: LanServer?
-    /// Answers the phone's `q.*` actions: opens the QUIC listener and offers a session (stage 1.6). Created at launch; it touches
-    /// neither the network nor the Keychain until the first request.
-    private var quic: QuicService?
+    /// Answers the phone's `q.*` actions: opens the QUIC listener and offers a session (stage 1.6). Built on first use; it touches
+    /// neither the network nor the Keychain until the first request. (The Settings window reaches it for the debug test session.)
+    lazy var quic = QuicService(client: client)
     /// The menu-bar item + its panel. Owns the `NSStatusItem`, so it can be a drop target.
     private lazy var statusItem = StatusItemController(
         client: client,
@@ -76,9 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A command for the phone goes to the LAN server only when `sendCommand` chose the LAN link (never both links).
         client.onLocalCommand = { [weak self] action in self?.lan?.sendCommand(action) }
         // A phone's QUIC session request (`q.req`, `q.end`, …) goes to the QUIC service.
-        let quic = QuicService(client: client)
-        self.quic = quic
-        client.onQuicControl = { [weak quic] action in quic?.handle(action) }
+        client.onQuicControl = { [weak self] action in self?.quic.handle(action) }
         // Forward the BLE proximity this Mac measures to the phone (over whichever transport is up),
         // so the phone can show the Mac's distance — it can't measure that itself, it only advertises.
         proximity.onReading = { [weak self] reading in self?.client.updateProximity(reading) }
@@ -86,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.onPairingChanged = { [weak self] in
             self?.applyLanSettings()
             // The old QUIC identity belongs to the old pairing: end any session and mint a fresh one on next use.
-            self?.quic?.pairingChanged()
+            self?.quic.pairingChanged()
             // A rotated pairing is a phone with nothing to scan: show the code straight away.
             self?.showPairingWindow()
         }
@@ -123,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `path=` form is simply ignored. Each recorded path is still checked for being on disk before
     /// anything is read.
     func application(_ application: NSApplication, open urls: [URL]) {
+        #if DEBUG
+        // Debug builds only: `open -a <Debug app> linktomac://quic-test` starts the same test session as Settings ▸ General ▸ Developer.
+        if urls.contains(where: { $0.scheme == "linktomac" && $0.host == "quic-test" }) { quic.startTestSession() }
+        #endif
         var files: [URL] = []
         for url in urls where url.scheme == "linktomac" && url.host == "send" {
             guard let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?

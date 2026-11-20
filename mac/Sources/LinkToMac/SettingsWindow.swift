@@ -9,12 +9,13 @@ struct SettingsRoot: View {
     let client: RelayClient
     let proximity: ProximityMonitor
     let appearance: AppearanceStore
+    let quic: QuicService
     let onApplyLan: () -> Void
     let onCheckForUpdates: () -> Void
 
     var body: some View {
         TabView {
-            GeneralSettingsTab(client: client, appearance: appearance, onCheckForUpdates: onCheckForUpdates)
+            GeneralSettingsTab(client: client, appearance: appearance, quic: quic, onCheckForUpdates: onCheckForUpdates)
                 .tabItem { Label("General", systemImage: "slider.horizontal.3") }
             ClipboardSettingsTab(client: client)
                 .tabItem { Label("Clipboard", systemImage: "doc.on.clipboard") }
@@ -85,6 +86,7 @@ private struct SettingsPage<Content: View>: View {
 private struct GeneralSettingsTab: View {
     let client: RelayClient
     let appearance: AppearanceStore
+    let quic: QuicService
     let onCheckForUpdates: () -> Void
 
     @State private var openAtLogin = LoginItem.isEnabled
@@ -97,8 +99,17 @@ private struct GeneralSettingsTab: View {
         return "Version \(v) (\(b))"
     }
 
+    /// The debug build has one more section (the QUIC test session), so its tab is taller.
+    private var pageHeight: CGFloat {
+        #if DEBUG
+        return 600
+        #else
+        return 480
+        #endif
+    }
+
     var body: some View {
-        SettingsPage(height: 480) {
+        SettingsPage(height: pageHeight) {
             DSSection(title: "Appearance") {
                 DSRow(label: "Show in Dock", divider: false) {
                     DSSwitch(isOn: Binding(get: { appearance.showInDock }, set: { appearance.showInDock = $0 }))
@@ -129,6 +140,13 @@ private struct GeneralSettingsTab: View {
                 }
                 .buttonStyle(.plain)
             }
+            #if DEBUG
+            DSSection(title: "Developer (debug build only)") {
+                DSRow(label: "QUIC test session", note: quic.testStatus, divider: false) {
+                    DSSmallButton(title: "Run") { quic.startTestSession() }
+                }
+            }
+            #endif
         }
         .onChange(of: openAtLogin) { _, on in
             do { try LoginItem.setEnabled(on) } catch { openAtLogin = LoginItem.isEnabled }
