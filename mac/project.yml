@@ -93,6 +93,10 @@ targets:
       - path: Sources/LinkToMac/Quic/DelayRateController.swift
       # The q.* control actions that open and close a QUIC session (stage 1.3), plus the pure handshake rules. Foundation only.
       - path: Sources/LinkToMac/Quic/QuicControl.swift
+      # The pure session rules of the QUIC server (stage 1.6): injected clock and token source, no sockets. Foundation only.
+      - path: Sources/LinkToMac/Quic/QuicSession.swift
+      # The Network.framework QUIC server (stage 1.6) and its driver; tested against the Rust client over localhost.
+      - path: Sources/LinkToMac/Quic/QuicListener.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests

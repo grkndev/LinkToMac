@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the same network connects straight to us; rebuilt by `applyLanSettings()` when the port or
     /// the enabled toggle changes. Reads the pairing fresh on each handshake.
     private var lan: LanServer?
+    /// Answers the phone's `q.*` actions: opens the QUIC listener and offers a session (stage 1.6). Created at launch; it touches
+    /// neither the network nor the Keychain until the first request.
+    private var quic: QuicService?
     /// The menu-bar item + its panel. Owns the `NSStatusItem`, so it can be a drop target.
     private lazy var statusItem = StatusItemController(
         client: client,
@@ -72,12 +75,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         client.onLocalSms = { [weak self] payload in self?.lan?.sendSms(payload) }
         // A command for the phone goes to the LAN server only when `sendCommand` chose the LAN link (never both links).
         client.onLocalCommand = { [weak self] action in self?.lan?.sendCommand(action) }
+        // A phone's QUIC session request (`q.req`, `q.end`, …) goes to the QUIC service.
+        let quic = QuicService(client: client)
+        self.quic = quic
+        client.onQuicControl = { [weak quic] action in quic?.handle(action) }
         // Forward the BLE proximity this Mac measures to the phone (over whichever transport is up),
         // so the phone can show the Mac's distance — it can't measure that itself, it only advertises.
         proximity.onReading = { [weak self] reading in self?.client.updateProximity(reading) }
         // Re-advertise under the fresh pairing id (and drop stale auth) when the user re-pairs.
         client.onPairingChanged = { [weak self] in
             self?.applyLanSettings()
+            // The old QUIC identity belongs to the old pairing: end any session and mint a fresh one on next use.
+            self?.quic?.pairingChanged()
             // A rotated pairing is a phone with nothing to scan: show the code straight away.
             self?.showPairingWindow()
         }

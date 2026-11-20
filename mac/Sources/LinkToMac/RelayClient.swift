@@ -281,7 +281,7 @@ final class RelayClient {
     /// Carries the plaintext action; the LAN server seals it.
     var onLocalCommand: ((String) -> Void)?
 
-    /// A parsed `q.*` action from the phone (stage 1.3). The QUIC listener of stage 1.6 will set it; until then it only gets logged.
+    /// A parsed `q.*` action from the phone (stage 1.3); `QuicService` (stage 1.6) answers it.
     var onQuicControl: ((QuicAction) -> Void)?
 
     /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
@@ -525,12 +525,12 @@ final class RelayClient {
         return "{" + parts.joined(separator: ",") + "}"
     }
 
+    /// Whether this Mac can serve the QUIC session protocol (`QuicService` + `QuicServer`, stage 1.6): it answers a phone's `q.req` and
+    /// says `q.reject unsupported` for a kind it does not serve yet, so advertising `q1` is honest.
+    private static let supportsQuic = true
+
     /// This Mac's user-visible name, as System Settings ▸ General ▸ About shows it. Computed once:
     /// it can only change via a relaunch-worthy system setting.
-    /// Whether this Mac can serve the QUIC session protocol. Stays false until the listener of stage 1.6 exists: advertising `q1` earlier
-    /// would make the phone offer sessions nothing answers. Flip it together with that stage.
-    private static let supportsQuic = false
-
     private static let macName: String? = {
         let name = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
         return name.isEmpty ? nil : name
