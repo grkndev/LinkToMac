@@ -284,6 +284,9 @@ final class RelayClient {
     /// A parsed `q.*` action from the phone (stage 1.3); `QuicService` (stage 1.6) answers it.
     var onQuicControl: ((QuicAction) -> Void)?
 
+    /// Fired when the phone's LAN-direct link goes away (it was connected, now it is not): a QUIC session needs that link (stage 1.8).
+    var onLanPeerLost: (() -> Void)?
+
     /// Fired when the pairing (room/key) changes — e.g. after `unpair()`. Lets the LAN server
     /// re-advertise under the new pairing id and invalidate any stale authenticated socket.
     var onPairingChanged: (() -> Void)?
@@ -931,8 +934,10 @@ final class RelayClient {
     /// The LAN server tells us whether a phone is connected over the LAN-direct link. Set through here (not the bare flag) so the
     /// capabilities are forgotten once the phone has left both links.
     func lanPeerChanged(_ connected: Bool) {
+        let wasConnected = lanPeerConnected
         lanPeerConnected = connected
         peerLinksChanged()
+        if wasConnected && !connected { onLanPeerLost?() }
     }
 
     /// One phone can be on the relay AND on the LAN; its capabilities are forgotten only when it is gone from both.

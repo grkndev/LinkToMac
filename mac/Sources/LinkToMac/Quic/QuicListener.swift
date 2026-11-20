@@ -474,6 +474,11 @@ final class QuicServer: QuicListenerDelegate, @unchecked Sendable {
         queue.async { [self] in perform(session.end(.localEnded, nowMs: now())) }
     }
 
+    /// The LAN-direct link to the phone went away: the session ends and the listener closes.
+    func linkLost() {
+        queue.async { [self] in perform(session.linkLost(nowMs: now())) }
+    }
+
     func state(_ completion: @escaping @Sendable (QuicSession.State) -> Void) {
         queue.async { [self] in completion(session.state) }
     }

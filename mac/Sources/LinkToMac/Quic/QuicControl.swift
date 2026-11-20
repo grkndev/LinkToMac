@@ -279,6 +279,38 @@ struct QuicHandshake {
     }
 }
 
+// MARK: - The gate (stage 1.8)
+
+/// Who may open a QUIC session and what the QUIC controls show, in one place. The Kotlin twin is `QuicGate` in `quic/QuicControl.kt`; both
+/// run the `gate` section of `protocol-vectors/quic-control.json` (the whole truth table), so the two sides cannot drift apart.
+enum QuicGate {
+    /// Why a request must NOT be served (or made), or nil. The order matters: **busy first**, so a running session is never disturbed by
+    /// anything else; then the link (a session needs the LAN-direct one); then whether this side serves that kind at all.
+    static func refusal(active: Bool, onLan: Bool, kindSupported: Bool) -> QuicRejectReason? {
+        if active { return .busy }
+        if !onLan { return .relay }
+        if !kindSupported { return .unsupported }
+        return nil
+    }
+
+    /// Whether QUIC controls are shown at all: the LAN-direct link AND the peer announced `q1` (`QuicCaps.available`).
+    static func visible(onLan: Bool, caps: Set<String>) -> Bool { QuicCaps.available(onLan: onLan, caps: caps) }
+
+    enum Outgoing: Equatable, Sendable {
+        /// The peer never announced `q1`: there is nothing to ask.
+        case hidden
+        case refused(QuicRejectReason)
+        case proceed
+    }
+
+    /// This side wants to ask the peer for a session.
+    static func outgoing(active: Bool, onLan: Bool, caps: Set<String>, kindSupported: Bool) -> Outgoing {
+        guard caps.contains(QuicCaps.q1) else { return .hidden }
+        if let reason = refusal(active: active, onLan: onLan, kindSupported: kindSupported) { return .refused(reason) }
+        return .proceed
+    }
+}
+
 // MARK: - Stream channels (stage 1.5)
 
 /// What a data stream carries. Its first bytes are a QUIC variable-length integer (RFC 9000 §16) naming the channel: 1 file (a bidirectional

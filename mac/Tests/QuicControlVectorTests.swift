@@ -26,6 +26,7 @@ import Testing
         #expect(!cases("actions").isEmpty)
         #expect(!cases("channels").isEmpty)
         #expect(!cases("handshake").isEmpty)
+        #expect(!cases("gate").isEmpty)
     }
 
     // MARK: constants
@@ -192,5 +193,38 @@ import Testing
                 if let then = step["then"] { #expect(samePhase(hs.phase, then), "\(where_): afterwards \(hs.phase)") }
             }
         }
+    }
+
+    // MARK: gate
+
+    private func reasonText(_ reason: QuicRejectReason?) -> String { reason?.rawValue ?? "proceed" }
+
+    @Test func gateVectors() {
+        var kinds = Set<String>()
+        for c in cases("gate") {
+            let kind = c["kind"] as? String ?? "?"
+            kinds.insert(kind)
+            let caps = Set((c["caps"] as? [String]) ?? [])
+            let active = c["active"] as? Bool ?? false
+            let onLan = c["on_lan"] as? Bool ?? false
+            let supported = c["kind_supported"] as? Bool ?? false
+            switch kind {
+            case "incoming":
+                #expect(reasonText(QuicGate.refusal(active: active, onLan: onLan, kindSupported: supported)) == c["expect"] as? String, "\(name(c))")
+            case "visible":
+                #expect(QuicGate.visible(onLan: onLan, caps: caps) == c["expect"] as? Bool, "\(name(c))")
+            case "outgoing":
+                let text: String
+                switch QuicGate.outgoing(active: active, onLan: onLan, caps: caps, kindSupported: supported) {
+                case .hidden: text = "hidden"
+                case let .refused(reason): text = reason.rawValue
+                case .proceed: text = "proceed"
+                }
+                #expect(text == c["expect"] as? String, "\(name(c))")
+            default:
+                Issue.record("\(name(c)): unknown gate case kind")
+            }
+        }
+        #expect(kinds == ["incoming", "visible", "outgoing"])
     }
 }

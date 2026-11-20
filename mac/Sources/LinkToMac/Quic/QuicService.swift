@@ -22,6 +22,8 @@ final class QuicService {
 
     init(client: RelayClient) {
         self.client = client
+        // A QUIC session needs the LAN-direct link: when it goes away the session ends and the listener closes (stage 1.8).
+        client.onLanPeerLost = { [weak self] in self?.server?.linkLost() }
     }
 
     /// A parsed `q.*` action from the phone (`RelayClient.onQuicControl`).

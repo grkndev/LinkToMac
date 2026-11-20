@@ -337,6 +337,59 @@ import Testing
         #expect(late.state == .ended(.listenerFailed))
     }
 
+    // MARK: the link goes away (stage 1.8)
+
+    @Test func theLinkGoingAwayWhileConnectedEndsLikeALocalEndAndTellsThePeerOnWhatIsLeft() {
+        let s = connected()
+        #expect(s.linkLost(nowMs: 50) == [
+            .sendAction(.end(sid: sid)), .writeSession("END"), .closeConnection(conn: 1, graceMs: 1000), .closeListener,
+        ])
+        #expect(s.state == .ended(.linkLost))
+        #expect(s.nextDeadlineMs == nil)
+    }
+
+    @Test func theLinkGoingAwayWhileOfferedClosesTheListenerAndWaitingConnections() {
+        let s = offered()
+        #expect(s.connectionArrived(7, nowMs: 0))
+        #expect(s.linkLost(nowMs: 5) == [.sendAction(.end(sid: sid)), .closeConnection(conn: 7, graceMs: 0), .closeListener])
+        #expect(s.state == .ended(.linkLost))
+    }
+
+    @Test func theLinkGoingAwayWhileTheListenerIsStillOpeningClosesIt() {
+        let s = make()
+        _ = s.receive(request(), onLan: true, nowMs: 0)
+        #expect(s.linkLost(nowMs: 1) == [.sendAction(.end(sid: sid)), .closeListener])
+        // The listener reports back later: nothing may come of it.
+        #expect(s.listenerReady(port: 53125, nowMs: 2) == [])
+        #expect(s.state == .ended(.linkLost))
+    }
+
+    @Test func theLinkGoingAwayWhileTheMacWaitsForTheAcceptCancelsTheRequest() {
+        let s = make()
+        _ = s.request(.echo, sid: sid, onLan: true, nowMs: 0)
+        #expect(s.linkLost(nowMs: 5) == [.sendAction(.end(sid: sid))])
+        #expect(s.state == .ended(.linkLost))
+    }
+
+    @Test func theLinkGoingAwayWithNoSessionDoesNothingAndDoesNotRepeat() {
+        let s = make()
+        #expect(s.linkLost(nowMs: 0) == [])
+        #expect(s.state == .idle)
+        let done = connected()
+        _ = done.linkLost(nowMs: 1)
+        #expect(done.linkLost(nowMs: 2) == [])
+        let ended = connected()
+        _ = ended.end(.localEnded, nowMs: 1)
+        #expect(ended.linkLost(nowMs: 2) == [])
+        #expect(ended.state == .ended(.localEnded))   // the first reason stays
+    }
+
+    @Test func aNewRequestIsServedAfterTheLinkCameBack() {
+        let s = connected()
+        _ = s.linkLost(nowMs: 5)
+        #expect(s.receive(request(sid: otherSid), onLan: true, nowMs: 10) == [.openListener])
+    }
+
     // MARK: the Mac asks (a later stage uses it; the rules are here)
 
     @Test func theMacAsksAndWaitsForTheAccept() {

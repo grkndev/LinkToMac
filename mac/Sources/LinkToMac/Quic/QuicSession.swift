@@ -62,11 +62,13 @@ final class QuicSession {
         case idleTimeout
         case connectionLost
         case listenerFailed
+        /// The LAN-direct link to the phone went away (stage 1.8): a session needs it, so the session ends.
+        case linkLost
 
         /// Whether the peer still has to be told (it is the side that does not know yet).
         fileprivate var tellsPeer: Bool {
             switch self {
-            case .localEnded, .acceptTimeout, .offerTimeout, .idleTimeout, .listenerFailed: return true
+            case .localEnded, .acceptTimeout, .offerTimeout, .idleTimeout, .listenerFailed, .linkLost: return true
             case .peerEnded, .peerRejected, .connectionLost: return false
             }
         }
@@ -108,12 +110,10 @@ final class QuicSession {
     func receive(_ action: QuicAction, onLan: Bool, nowMs: Int64) -> [QuicEffect] {
         let out = tick(nowMs: nowMs)
         if case let .request(requestSid, kind) = action {
-            if isActive {
-                if requestSid.lowercased() == sid { return out }   // the same request delivered twice
-                return out + [.sendAction(.reject(sid: requestSid, reason: .busy))]
+            if isActive, requestSid.lowercased() == sid { return out }   // the same request delivered twice
+            if let reason = QuicGate.refusal(active: isActive, onLan: onLan, kindSupported: config.supportedKinds.contains(kind)) {
+                return out + [.sendAction(.reject(sid: requestSid, reason: reason))]
             }
-            if !onLan { return out + [.sendAction(.reject(sid: requestSid, reason: .relay))] }
-            if !config.supportedKinds.contains(kind) { return out + [.sendAction(.reject(sid: requestSid, reason: .unsupported))] }
             begin(sid: requestSid, asker: false, nowMs: nowMs)
             state = .accepted
             listenerWanted = true
@@ -137,10 +137,7 @@ final class QuicSession {
 
     /// Why a request of our own could not be made right now, or nil.
     func localRequestRefusal(_ kind: QuicKind, onLan: Bool) -> QuicRejectReason? {
-        if isActive { return .busy }
-        if !onLan { return .relay }
-        if !config.supportedKinds.contains(kind) { return .unsupported }
-        return nil
+        QuicGate.refusal(active: isActive, onLan: onLan, kindSupported: config.supportedKinds.contains(kind))
     }
 
     /// The Mac asks the phone for a session (a later stage uses it). Nothing happens when it cannot be made (`localRequestRefusal`).
@@ -232,6 +229,10 @@ final class QuicSession {
         guard isActive else { return out }
         return out + finish(reason)
     }
+
+    /// The LAN-direct link to the phone is gone. The peer is still told, best effort, over whatever link is left (`q.end` goes out through
+    /// `RelayClient.sendCommand`, which uses the relay when the LAN is down and does nothing when there is no link at all).
+    func linkLost(nowMs: Int64) -> [QuicEffect] { end(.linkLost, nowMs: nowMs) }
 
     // MARK: the clock
 

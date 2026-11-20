@@ -1,5 +1,5 @@
 {
-  "description": "The QUIC control plane's shared vectors (plan docs/plans/2026-11-14-quic-data-plane.md). Swift (`mac/Tests/QuicControlVectorTests.swift`, `QuicCapsVectorTests.swift`) and Kotlin (`QuicControlVectorTest.kt`, `QuicCapsVectorTest.kt`) run the same cases against their own code; the Rust core checks the ALPN constant (`mobile/native-src/quic-core/tests/vectors.rs`). Sections: `constants`, `actions` (the q.* actions inside a `cmd`), `channels` (the stream type header), `stat` (the `caps` field), `handshake` (who may send what, when).",
+  "description": "The QUIC control plane's shared vectors (plan docs/plans/2026-11-14-quic-data-plane.md). Swift (`mac/Tests/QuicControlVectorTests.swift`, `QuicCapsVectorTests.swift`) and Kotlin (`QuicControlVectorTest.kt`, `QuicCapsVectorTest.kt`) run the same cases against their own code; the Rust core checks the ALPN constant (`mobile/native-src/quic-core/tests/vectors.rs`). Sections: `constants`, `actions` (the q.* actions inside a `cmd`), `channels` (the stream type header), `stat` (the `caps` field), `handshake` (who may send what, when), `gate` (who may open a session, what the controls show).",
   "constants": {
     "description": "Values both sides must share byte for byte. `alpn` is the TLS ALPN protocol id of the data plane (a version change bumps the suffix); `max_action_bytes` is the largest action string (UTF-8 bytes) either side parses; `accept_timeout_ms` is how long the side that asked waits for the other side's accept (and how long the phone waits for its user).",
     "values": {"alpn": "ltm/1", "max_action_bytes": 4096, "accept_timeout_ms": 60000}
@@ -202,6 +202,59 @@
       {"name": "an_end_after_the_offer_still_closes_the_session", "side": "mac", "asker": true, "start_ms": 0, "initial": {"name": "awaitingAccept", "deadline_ms": 60000}, "steps": [{"op": "receive", "at_ms": 1, "action": {"a": "q.accept", "sid": "123e4567-e89b-12d3-a456-426614174000"}, "expect": {"applied": {"name": "mayOffer"}}}, {"op": "send", "at_ms": 2, "action": {"a": "q.offer", "sid": "123e4567-e89b-12d3-a456-426614174000", "port": 53125, "fp": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "tok": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"}, "expect": {"applied": {"name": "offered"}}}, {"op": "receive", "at_ms": 3, "action": {"a": "q.end", "sid": "123e4567-e89b-12d3-a456-426614174000"}, "expect": {"applied": {"name": "closed", "close": "ended"}}}]},
       {"name": "a_reject_means_nothing_to_a_phone_that_was_asked", "side": "phone", "asker": false, "start_ms": 0, "initial": {"name": "awaitingUser", "deadline_ms": 60000}, "steps": [{"op": "receive", "at_ms": 1, "action": {"a": "q.reject", "sid": "123e4567-e89b-12d3-a456-426614174000", "reason": "busy"}, "expect": {"ignored": "unexpected-reject"}, "then": {"name": "awaitingUser", "deadline_ms": 60000}}]},
       {"name": "a_reject_means_nothing_to_a_mac_that_was_asked", "side": "mac", "asker": false, "start_ms": 0, "initial": {"name": "mayOffer"}, "steps": [{"op": "receive", "at_ms": 1, "action": {"a": "q.reject", "sid": "123e4567-e89b-12d3-a456-426614174000", "reason": "busy"}, "expect": {"ignored": "unexpected-reject"}, "then": {"name": "mayOffer"}}]}
+    ]
+  },
+  "gate": {
+    "description": "Who may open a QUIC session, and what the controls show. `incoming`: a peer's q.req arrives; the answer is `busy` (a session is already active; checked FIRST so a running session is never disturbed), `relay` (the link is not the LAN-direct one), `unsupported` (this side does not serve that kind) or `proceed`. `visible`: whether QUIC controls are shown at all: only on the LAN-direct link AND when the peer announced `q1` (the same rule as `stat.available`). `outgoing`: this side wants to ask: `hidden` (the peer never announced `q1`: nothing to ask), then the same order busy, relay, unsupported, proceed. Both the Mac (`QuicGate`, Swift) and the phone (`QuicGate`, Kotlin) run every case.",
+    "cases": [
+      {"name": "incoming_active_no_lan_no_supported_no", "kind": "incoming", "active": false, "on_lan": false, "kind_supported": false, "expect": "relay"},
+      {"name": "incoming_active_no_lan_no_supported_yes", "kind": "incoming", "active": false, "on_lan": false, "kind_supported": true, "expect": "relay"},
+      {"name": "incoming_active_no_lan_yes_supported_no", "kind": "incoming", "active": false, "on_lan": true, "kind_supported": false, "expect": "unsupported"},
+      {"name": "incoming_active_no_lan_yes_supported_yes", "kind": "incoming", "active": false, "on_lan": true, "kind_supported": true, "expect": "proceed"},
+      {"name": "incoming_active_yes_lan_no_supported_no", "kind": "incoming", "active": true, "on_lan": false, "kind_supported": false, "expect": "busy"},
+      {"name": "incoming_active_yes_lan_no_supported_yes", "kind": "incoming", "active": true, "on_lan": false, "kind_supported": true, "expect": "busy"},
+      {"name": "incoming_active_yes_lan_yes_supported_no", "kind": "incoming", "active": true, "on_lan": true, "kind_supported": false, "expect": "busy"},
+      {"name": "incoming_active_yes_lan_yes_supported_yes", "kind": "incoming", "active": true, "on_lan": true, "kind_supported": true, "expect": "busy"},
+      {"name": "visible_lan_no_caps_q1", "kind": "visible", "on_lan": false, "caps": ["q1"], "expect": false},
+      {"name": "visible_lan_no_caps_none", "kind": "visible", "on_lan": false, "caps": [], "expect": false},
+      {"name": "visible_lan_no_caps_q2", "kind": "visible", "on_lan": false, "caps": ["q2"], "expect": false},
+      {"name": "visible_lan_no_caps_q1+q2", "kind": "visible", "on_lan": false, "caps": ["q1", "q2"], "expect": false},
+      {"name": "visible_lan_yes_caps_q1", "kind": "visible", "on_lan": true, "caps": ["q1"], "expect": true},
+      {"name": "visible_lan_yes_caps_none", "kind": "visible", "on_lan": true, "caps": [], "expect": false},
+      {"name": "visible_lan_yes_caps_q2", "kind": "visible", "on_lan": true, "caps": ["q2"], "expect": false},
+      {"name": "visible_lan_yes_caps_q1+q2", "kind": "visible", "on_lan": true, "caps": ["q1", "q2"], "expect": true},
+      {"name": "outgoing_caps_q1_active_no_lan_no_supported_no", "kind": "outgoing", "active": false, "on_lan": false, "caps": ["q1"], "kind_supported": false, "expect": "relay"},
+      {"name": "outgoing_caps_q1_active_no_lan_no_supported_yes", "kind": "outgoing", "active": false, "on_lan": false, "caps": ["q1"], "kind_supported": true, "expect": "relay"},
+      {"name": "outgoing_caps_q1_active_no_lan_yes_supported_no", "kind": "outgoing", "active": false, "on_lan": true, "caps": ["q1"], "kind_supported": false, "expect": "unsupported"},
+      {"name": "outgoing_caps_q1_active_no_lan_yes_supported_yes", "kind": "outgoing", "active": false, "on_lan": true, "caps": ["q1"], "kind_supported": true, "expect": "proceed"},
+      {"name": "outgoing_caps_q1_active_yes_lan_no_supported_no", "kind": "outgoing", "active": true, "on_lan": false, "caps": ["q1"], "kind_supported": false, "expect": "busy"},
+      {"name": "outgoing_caps_q1_active_yes_lan_no_supported_yes", "kind": "outgoing", "active": true, "on_lan": false, "caps": ["q1"], "kind_supported": true, "expect": "busy"},
+      {"name": "outgoing_caps_q1_active_yes_lan_yes_supported_no", "kind": "outgoing", "active": true, "on_lan": true, "caps": ["q1"], "kind_supported": false, "expect": "busy"},
+      {"name": "outgoing_caps_q1_active_yes_lan_yes_supported_yes", "kind": "outgoing", "active": true, "on_lan": true, "caps": ["q1"], "kind_supported": true, "expect": "busy"},
+      {"name": "outgoing_caps_none_active_no_lan_no_supported_no", "kind": "outgoing", "active": false, "on_lan": false, "caps": [], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_none_active_no_lan_no_supported_yes", "kind": "outgoing", "active": false, "on_lan": false, "caps": [], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_none_active_no_lan_yes_supported_no", "kind": "outgoing", "active": false, "on_lan": true, "caps": [], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_none_active_no_lan_yes_supported_yes", "kind": "outgoing", "active": false, "on_lan": true, "caps": [], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_none_active_yes_lan_no_supported_no", "kind": "outgoing", "active": true, "on_lan": false, "caps": [], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_none_active_yes_lan_no_supported_yes", "kind": "outgoing", "active": true, "on_lan": false, "caps": [], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_none_active_yes_lan_yes_supported_no", "kind": "outgoing", "active": true, "on_lan": true, "caps": [], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_none_active_yes_lan_yes_supported_yes", "kind": "outgoing", "active": true, "on_lan": true, "caps": [], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_no_lan_no_supported_no", "kind": "outgoing", "active": false, "on_lan": false, "caps": ["q2"], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_no_lan_no_supported_yes", "kind": "outgoing", "active": false, "on_lan": false, "caps": ["q2"], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_no_lan_yes_supported_no", "kind": "outgoing", "active": false, "on_lan": true, "caps": ["q2"], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_no_lan_yes_supported_yes", "kind": "outgoing", "active": false, "on_lan": true, "caps": ["q2"], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_yes_lan_no_supported_no", "kind": "outgoing", "active": true, "on_lan": false, "caps": ["q2"], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_yes_lan_no_supported_yes", "kind": "outgoing", "active": true, "on_lan": false, "caps": ["q2"], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_yes_lan_yes_supported_no", "kind": "outgoing", "active": true, "on_lan": true, "caps": ["q2"], "kind_supported": false, "expect": "hidden"},
+      {"name": "outgoing_caps_q2_active_yes_lan_yes_supported_yes", "kind": "outgoing", "active": true, "on_lan": true, "caps": ["q2"], "kind_supported": true, "expect": "hidden"},
+      {"name": "outgoing_caps_q1+q2_active_no_lan_no_supported_no", "kind": "outgoing", "active": false, "on_lan": false, "caps": ["q1", "q2"], "kind_supported": false, "expect": "relay"},
+      {"name": "outgoing_caps_q1+q2_active_no_lan_no_supported_yes", "kind": "outgoing", "active": false, "on_lan": false, "caps": ["q1", "q2"], "kind_supported": true, "expect": "relay"},
+      {"name": "outgoing_caps_q1+q2_active_no_lan_yes_supported_no", "kind": "outgoing", "active": false, "on_lan": true, "caps": ["q1", "q2"], "kind_supported": false, "expect": "unsupported"},
+      {"name": "outgoing_caps_q1+q2_active_no_lan_yes_supported_yes", "kind": "outgoing", "active": false, "on_lan": true, "caps": ["q1", "q2"], "kind_supported": true, "expect": "proceed"},
+      {"name": "outgoing_caps_q1+q2_active_yes_lan_no_supported_no", "kind": "outgoing", "active": true, "on_lan": false, "caps": ["q1", "q2"], "kind_supported": false, "expect": "busy"},
+      {"name": "outgoing_caps_q1+q2_active_yes_lan_no_supported_yes", "kind": "outgoing", "active": true, "on_lan": false, "caps": ["q1", "q2"], "kind_supported": true, "expect": "busy"},
+      {"name": "outgoing_caps_q1+q2_active_yes_lan_yes_supported_no", "kind": "outgoing", "active": true, "on_lan": true, "caps": ["q1", "q2"], "kind_supported": false, "expect": "busy"},
+      {"name": "outgoing_caps_q1+q2_active_yes_lan_yes_supported_yes", "kind": "outgoing", "active": true, "on_lan": true, "caps": ["q1", "q2"], "kind_supported": true, "expect": "busy"}
     ]
   }
 }

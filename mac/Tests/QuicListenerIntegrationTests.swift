@@ -364,6 +364,24 @@ struct QuicProductionClientIntegrationTests {
         #expect(result.passed, "\(result.line)")
     }
 
+    @Test func theLinkGoingAwayEndsTheSessionTellsThePhoneAndFreesThePort() throws {
+        let h = try Harness()
+        defer { h.close() }
+        let offer = try #require(h.request())
+        let process = h.client("end", offer, extra: ["--wait", "20"], production: true)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        #expect(h.waitForState(10, .connected), "state \(h.state())")
+        h.server.linkLost()
+        #expect(h.waitForState(3, .ended(.linkLost)), "state \(h.state())")
+        #expect(waitFor(10) { !process.isRunning })
+        let line = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(process.terminationStatus == 0 && line.contains(" PASS "), "\(line)")   // the phone got END
+        #expect(h.actions.all.contains(.end(sid: h.sid)))
+        #expect(waitFor(5) { !h.listening(on: offer.port) })
+    }
+
     @Test func theShippingClientLearnsThatTheMacEndedTheSession() throws {
         let h = try Harness()
         defer { h.close() }
