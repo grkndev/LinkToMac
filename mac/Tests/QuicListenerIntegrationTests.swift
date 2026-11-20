@@ -19,6 +19,16 @@ private let echoClientURL: URL? = {
     return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
 }()
 
+/// The production phone client (`quic_core::client::Client`) driven from the command line (`examples/session_client.rs`).
+private let sessionClientURL: URL? = {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // Tests
+        .deletingLastPathComponent()  // mac
+        .deletingLastPathComponent()  // repo root
+    let url = root.appendingPathComponent("mobile/native-src/quic-core/target/debug/examples/session_client")
+    return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+}()
+
 private final class ActionBox: @unchecked Sendable {
     private let lock = NSLock()
     private var items: [QuicAction] = []
@@ -80,16 +90,16 @@ private final class Harness: @unchecked Sendable {
 
     func waitForState(_ seconds: Double, _ wanted: QuicSession.State) -> Bool { waitFor(seconds) { state() == wanted } }
 
-    func client(_ scenario: String, _ offer: QuicOffer, extra: [String] = []) -> Process {
+    func client(_ scenario: String, _ offer: QuicOffer, extra: [String] = [], production: Bool = false) -> Process {
         let process = Process()
-        process.executableURL = echoClientURL
+        process.executableURL = production ? sessionClientURL : echoClientURL
         process.arguments = ["--addr", "127.0.0.1:\(offer.port)", "--fp", offer.fp, "--tok", offer.tok, "--scenario", scenario] + extra
         return process
     }
 
     /// Runs the client to completion: its exit status and its RESULT line.
-    func run(_ scenario: String, _ offer: QuicOffer, extra: [String] = [], limit: Double = 60) -> (passed: Bool, line: String) {
-        let process = client(scenario, offer, extra: extra)
+    func run(_ scenario: String, _ offer: QuicOffer, extra: [String] = [], limit: Double = 60, production: Bool = false) -> (passed: Bool, line: String) {
+        let process = client(scenario, offer, extra: extra, production: production)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -310,5 +320,62 @@ struct QuicListenerIntegrationTests {
         #expect(result.passed, "\(result.line)")
         #expect(h.state() == .ended(.idleTimeout))
         #expect(waitFor(5) { !h.listening(on: offer.port) })
+    }
+}
+
+
+/// The same server against the client that actually ships (the library the phone's JNI layer wraps), not the protocol probe above.
+@Suite(.serialized, .enabled(if: sessionClientURL != nil, "build the Rust examples first: mac/scripts/quic-it.sh"), .timeLimit(.minutes(3)))
+struct QuicProductionClientIntegrationTests {
+    @Test func theShippingClientOpensASessionAndEchoes() throws {
+        let h = try Harness()
+        defer { h.close() }
+        let offer = try #require(h.request())
+        let result = h.run("happy", offer, production: true)
+        #expect(result.passed, "\(result.line)")
+        #expect(h.waitForState(5, .ended(.connectionLost)), "state \(h.state())")
+    }
+
+    @Test func theShippingClientReportsAWrongFingerprintAsSuch() throws {
+        let h = try Harness()
+        defer { h.close() }
+        let offer = try #require(h.request())
+        let result = h.run("wrong-fp", offer, production: true)
+        #expect(result.passed, "\(result.line)")
+        #expect(h.run("happy", offer, production: true).passed, "the listener must keep serving after a refused handshake")
+    }
+
+    @Test func theShippingClientReportsAWrongTokenAsRefusedAndTheOfferStaysValid() throws {
+        let h = try Harness()
+        defer { h.close() }
+        let offer = try #require(h.request())
+        let result = h.run("wrong-tok", offer, production: true)
+        #expect(result.passed, "\(result.line)")
+        #expect(h.state() == .offered)
+        let accepted = h.run("happy", offer, production: true)
+        #expect(accepted.passed, "\(accepted.line)")
+    }
+
+    @Test func theShippingClientOpensMoreStreamsThanTheInitialLimit() throws {
+        let h = try Harness()
+        defer { h.close() }
+        let offer = try #require(h.request())
+        let result = h.run("streams", offer, extra: ["--count", "2500"], limit: 120, production: true)
+        #expect(result.passed, "\(result.line)")
+    }
+
+    @Test func theShippingClientLearnsThatTheMacEndedTheSession() throws {
+        let h = try Harness()
+        defer { h.close() }
+        let offer = try #require(h.request())
+        let process = h.client("end", offer, extra: ["--wait", "20"], production: true)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        #expect(h.waitForState(10, .connected), "state \(h.state())")
+        h.server.end()
+        #expect(waitFor(10) { !process.isRunning })
+        let line = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(process.terminationStatus == 0 && line.contains(" PASS "), "\(line)")
     }
 }

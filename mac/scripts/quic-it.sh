@@ -10,14 +10,14 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 
-echo "== building the Rust client (examples/echo_client)"
-(cd "$repo/mobile/native-src/quic-core" && cargo build --example echo_client)
+echo "== building the Rust clients (examples/echo_client = protocol probe, examples/session_client = the shipping client)"
+(cd "$repo/mobile/native-src/quic-core" && cargo build --example echo_client --example session_client)
 
 echo "== running the integration tests"
 cd "$repo/mac"
 xcodegen generate >/dev/null
 xcodebuild -project LinkToMac.xcodeproj -scheme LinkToMac -destination 'platform=macOS' \
-  -only-testing:LinkToMacTests/QuicListenerIntegrationTests test 2>&1 | grep -E "error:|✘|✔|Test run with|TEST (FAILED|SUCCEEDED)" || true
+  -only-testing:LinkToMacTests/QuicListenerIntegrationTests -only-testing:LinkToMacTests/QuicProductionClientIntegrationTests test 2>&1 | grep -E "error:|✘|✔|Test run with|TEST (FAILED|SUCCEEDED)" || true
 
 if [[ "${1:-}" == "--release" ]]; then
   echo "== Release build: the debug-only echo code must not be in the binary"
