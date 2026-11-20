@@ -9,6 +9,7 @@ pub mod batch;
 pub mod channel;
 pub mod client;
 pub mod error;
+pub mod jni_api;
 pub mod params;
 pub mod pin;
 

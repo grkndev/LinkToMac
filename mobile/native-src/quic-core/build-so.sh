@@ -56,14 +56,16 @@ echo "built in $((SECONDS - START)) s"
 
 [[ -f "$SO" ]] || { echo "ERROR: expected $SO was not produced." >&2; exit 1; }
 
-# Both JNI entry points must be exported, or QuicCore.kt would fail at the first call.
+# Every JNI entry point must be exported, or QuicCore.kt would fail at the first call of that one (UnsatisfiedLinkError).
 NM="$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-nm | head -1)"
 SYMS="$("$NM" -D --defined-only "$SO")"
-for sym in Java_expo_modules_selfadb_quic_QuicCore_nativePing Java_expo_modules_selfadb_quic_QuicCore_nativeProbe; do
+ENTRIES=(nativePing nativeProbe nativeConnect nativeSessionWrite nativeSendDatagram nativeOpenUni nativeStreamWrite nativeStreamFinish nativeClose)
+for entry in "${ENTRIES[@]}"; do
+  sym="Java_expo_modules_selfadb_quic_QuicCore_$entry"
   grep -q "$sym" <<<"$SYMS" || { echo "ERROR: $sym not exported by $SO" >&2; exit 1; }
 done
 
 echo
 echo "OK -> $SO ($(du -h "$SO" | cut -f1))"
-echo "JNI symbols: nativePing, nativeProbe exported"
+echo "JNI symbols: ${ENTRIES[*]} exported"
 echo "Now rebuild the dev client so the library is bundled."
