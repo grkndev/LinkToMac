@@ -26,6 +26,7 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
+use quic_core::params::decode_token;
 use quic_core::pin::{client_config, parse_fingerprint_hex, FINGERPRINT_LEN, SERVER_NAME};
 use tokio::time::timeout;
 
@@ -42,37 +43,6 @@ struct Args {
     expect_block: bool,
 }
 
-/// Decodes the 43-character unpadded base64url token of a `q.offer` (canonical form only, like the phone's validation).
-fn decode_token(text: &str) -> Result<[u8; 32], String> {
-    if text.len() != 43 {
-        return Err(format!("token must be 43 characters, got {}", text.len()));
-    }
-    let mut bits: u32 = 0;
-    let mut have = 0;
-    let mut out = Vec::with_capacity(33);
-    for c in text.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'-' => 62,
-            b'_' => 63,
-            _ => return Err("token has a character outside base64url".into()),
-        };
-        bits = (bits << 6) | u32::from(v);
-        have += 6;
-        if have >= 8 {
-            have -= 8;
-            out.push((bits >> have) as u8);
-            bits &= (1 << have) - 1;
-        }
-    }
-    if bits != 0 {
-        return Err("token is not canonical (non-zero trailing bits)".into());
-    }
-    out.try_into().map_err(|_| "token does not decode to 32 bytes".to_string())
-}
-
 fn parse_args() -> Result<Args, String> {
     let mut args = Args { scenario: "happy".into(), ..Args::default() };
     let mut it = std::env::args().skip(1);
@@ -85,7 +55,7 @@ fn parse_args() -> Result<Args, String> {
         match flag.as_str() {
             "--addr" => args.addr = Some(value.parse().map_err(|e| format!("--addr: {e}"))?),
             "--fp" => args.fp = Some(parse_fingerprint_hex(&value).map_err(|e| format!("--fp: {e:?}"))?),
-            "--tok" => args.tok = Some(decode_token(&value)?),
+            "--tok" => args.tok = Some(decode_token(&value).map_err(|e| e.to_string())?),
             "--scenario" => args.scenario = value,
             "--count" => args.count = value.parse().map_err(|e| format!("--count: {e}"))?,
             "--wait" => args.wait = Some(value.parse().map_err(|e| format!("--wait: {e}"))?),
@@ -402,25 +372,5 @@ fn main() -> ExitCode {
             println!("RESULT {} FAIL {ms}ms {e}", args.scenario);
             ExitCode::FAILURE
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_token_decodes_like_the_mac_encodes_it() {
-        let expected: Vec<u8> = (0..32).collect();
-        assert_eq!(decode_token("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8").unwrap().to_vec(), expected);
-        assert_eq!(decode_token("-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s").unwrap().to_vec(), vec![0xFB; 32]);
-    }
-
-    #[test]
-    fn a_token_that_is_not_canonical_or_not_the_right_size_is_refused() {
-        assert!(decode_token("").is_err());
-        assert!(decode_token("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh").is_err()); // 42 characters
-        assert!(decode_token("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9").is_err()); // trailing bits set
-        assert!(decode_token("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh+").is_err()); // not base64url
     }
 }

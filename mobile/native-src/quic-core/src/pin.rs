@@ -9,6 +9,7 @@
 //! Never logs or formats a fingerprint into an error: the error types carry no data.
 
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -88,6 +89,9 @@ fn nibble(c: u8) -> Option<u8> {
 pub struct PinnedFingerprintVerifier {
     expected: [u8; FINGERPRINT_LEN],
     algorithms: WebPkiSupportedAlgorithms,
+    /// Raised the moment a certificate does not match the pin. A failed handshake alone can have many causes; this is how the
+    /// client tells "wrong certificate" (`FpMismatch`) apart without parsing an error message.
+    mismatch: Arc<AtomicBool>,
 }
 
 impl PinnedFingerprintVerifier {
@@ -98,7 +102,12 @@ impl PinnedFingerprintVerifier {
 
     pub fn with_provider(expected: &[u8], provider: &CryptoProvider) -> Result<Self, PinError> {
         let expected: [u8; FINGERPRINT_LEN] = expected.try_into().map_err(|_| PinError::BadLength)?;
-        Ok(Self { expected, algorithms: provider.signature_verification_algorithms })
+        Ok(Self { expected, algorithms: provider.signature_verification_algorithms, mismatch: Arc::new(AtomicBool::new(false)) })
+    }
+
+    /// The flag that goes up when a presented certificate does not match (shared, so it outlives the verifier handed to rustls).
+    pub fn mismatch_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.mismatch)
     }
 }
 
@@ -116,6 +125,7 @@ impl ServerCertVerifier for PinnedFingerprintVerifier {
         if bool::from(actual.ct_eq(&self.expected)) {
             Ok(ServerCertVerified::assertion())
         } else {
+            self.mismatch.store(true, Ordering::SeqCst);
             Err(Error::InvalidCertificate(CertificateError::ApplicationVerificationFailure))
         }
     }
@@ -146,8 +156,15 @@ impl ServerCertVerifier for PinnedFingerprintVerifier {
 /// A quinn client configuration that trusts only `expected` (a 32-byte SHA-256), speaks TLS 1.3 only and offers
 /// ALPN [`ALPN`]. Transport: QUIC keep-alive every 5 s (the plan's per-session value) and a 30 s idle timeout.
 pub fn client_config(expected: &[u8]) -> Result<quinn::ClientConfig, PinError> {
+    client_config_with_flag(expected).map(|(config, _)| config)
+}
+
+/// Same, plus the verifier's mismatch flag (see [`PinnedFingerprintVerifier::mismatch_flag`]).
+pub fn client_config_with_flag(expected: &[u8]) -> Result<(quinn::ClientConfig, Arc<AtomicBool>), PinError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let verifier = Arc::new(PinnedFingerprintVerifier::with_provider(expected, &provider)?);
+    let pinned = PinnedFingerprintVerifier::with_provider(expected, &provider)?;
+    let flag = pinned.mismatch_flag();
+    let verifier = Arc::new(pinned);
 
     let mut tls = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -164,5 +181,5 @@ pub fn client_config(expected: &[u8]) -> Result<quinn::ClientConfig, PinError> {
     transport.keep_alive_interval(Some(Duration::from_secs(5)));
     transport.max_idle_timeout(Some(Duration::from_secs(30).try_into().map_err(|_| PinError::Config)?));
     config.transport_config(Arc::new(transport));
-    Ok(config)
+    Ok((config, flag))
 }

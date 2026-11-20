@@ -5,6 +5,11 @@
 //! the device by building a TLS 1.3 client config and binding (then closing) a UDP endpoint. No
 //! network traffic leaves the device and no address, port or key ever appears in a result string.
 
+pub mod batch;
+pub mod channel;
+pub mod client;
+pub mod error;
+pub mod params;
 pub mod pin;
 
 use std::net::Ipv4Addr;

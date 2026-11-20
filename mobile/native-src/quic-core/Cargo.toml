@@ -15,8 +15,9 @@ crate-type = ["cdylib", "rlib"]
 # ring, NOT aws-lc-rs: aws-lc-sys needs cmake/NASM on the NDK toolchain.
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "time"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros"] }
 jni = "0.21"
+bytes = "1"
 # Used from stage 1.7 on (fingerprint pinning); declared now so the toolchain is proven with the final dependency set.
 sha2 = "0.10"
 subtle = "2"
@@ -34,3 +35,5 @@ rustls-webpki = { version = "0.103.17", default-features = false, features = ["r
 x509-parser = { version = "0.18.1", features = ["verify"] }
 # Reads the shared protocol vectors (tests/vectors.rs). Dev only: never part of the Android .so.
 serde_json = "1"
+# A throwaway self-signed certificate for the in-process loopback server of tests/client.rs. Dev only.
+rcgen = { version = "0.13", default-features = false, features = ["ring"] }

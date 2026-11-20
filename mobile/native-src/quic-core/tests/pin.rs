@@ -122,3 +122,28 @@ fn webpki_parses_the_macs_certificate() {
         "expected a clean signature failure on a parsed certificate, got {err:?}"
     );
 }
+
+#[test]
+fn the_mismatch_flag_stays_down_for_the_right_certificate_and_goes_up_for_a_wrong_one() {
+    use rustls::client::danger::ServerCertVerifier;
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+    let verifier = PinnedFingerprintVerifier::new(&fingerprint(CERT)).unwrap();
+    let flag = verifier.mismatch_flag();
+    let name = ServerName::try_from("link-to-mac").unwrap();
+    assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
+    let ok = verifier.verify_server_cert(&CertificateDer::from(CERT.to_vec()), &[], &name, &[], UnixTime::now());
+    assert!(ok.is_ok());
+    assert!(!flag.load(std::sync::atomic::Ordering::SeqCst), "a matching certificate must not raise the flag");
+    let mut other = CERT.to_vec();
+    other[10] ^= 0x01;
+    let bad = verifier.verify_server_cert(&CertificateDer::from(other), &[], &name, &[], UnixTime::now());
+    assert!(bad.is_err());
+    assert!(flag.load(std::sync::atomic::Ordering::SeqCst), "a certificate that does not match must raise the flag");
+}
+
+#[test]
+fn a_client_config_comes_with_the_flag_of_its_own_verifier() {
+    let (_config, flag) = quic_core::pin::client_config_with_flag(&[7u8; 32]).unwrap();
+    assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(quic_core::pin::client_config_with_flag(&[7u8; 31]).err(), Some(PinError::BadLength));
+}
