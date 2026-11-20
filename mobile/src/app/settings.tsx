@@ -1,7 +1,7 @@
 import { Icon } from "@expo/ui/jetpack-compose";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useCollapsingTitle } from "@/components/collapsing-title";
 import { useIcons } from "@/components/icons";
@@ -14,6 +14,7 @@ import { COLOR_LABELS } from "@/features/appearance/appearance-store";
 import { useAppearance } from "@/features/appearance/appearance-context";
 import { usePairing } from "@/features/pairing/pairing-context";
 import SelfAdb from "@/features/selfadb/client";
+import type { QuicStatus } from "@/features/selfadb/client";
 import { useClipBootContext } from "@/features/selfadb/clip-boot-context";
 import type { CaptureState } from "@/features/selfadb/use-clip-boot";
 import { usePermissionSettings } from "@/features/selfadb/use-permission-settings";
@@ -86,6 +87,38 @@ export default function SettingsScreen() {
       cancelled = true;
     };
   }, []);
+
+  // The QUIC developer row (dev builds): is QUIC usable right now and what happened last. Feature-detected like the update switch, so an APK
+  // that predates the QUIC work simply shows no status.
+  const [quic, setQuic] = useState<QuicStatus | null>(null);
+  const refreshQuic = useCallback(async () => {
+    if (typeof SelfAdb.getQuicStatus !== "function") return;
+    try {
+      setQuic(await SelfAdb.getQuicStatus());
+    } catch {
+      // keep what is shown
+    }
+  }, []);
+  useEffect(() => {
+    if (!__DEV__ || typeof SelfAdb.getQuicStatus !== "function") return;
+    let cancelled = false;
+    SelfAdb.getQuicStatus()
+      .then((v) => !cancelled && setQuic(v))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const runQuicTest = useCallback(async () => {
+    if (typeof SelfAdb.runQuicSelfTest !== "function") return;
+    try {
+      await SelfAdb.runQuicSelfTest("none");
+    } catch {
+      // the status below tells what happened
+    }
+    // The check takes a second or two: look again a few times.
+    for (const delay of [1000, 2500, 5000]) setTimeout(() => void refreshQuic(), delay);
+  }, [refreshQuic]);
 
   // One notice at a time under "Mirror messages": reading first, then replying.
   const smsNotice =
@@ -320,6 +353,19 @@ export default function SettingsScreen() {
               onPress={() => router.push({ pathname: "/preview", params: { kind: "boot" } })}
               chevron
             />
+            {quic && (
+              <ActionRow
+                colors={colors}
+                icon={icons.laptopActive}
+                label="QUIC echo test"
+                hint={
+                  quic.available
+                    ? `Available (same Wi-Fi, the Mac speaks QUIC).${quic.last ? ` Last: ${quic.last}.` : ""} Tap to run.`
+                    : `Not available: ${quic.reason ?? "unknown"}.${quic.last ? ` Last: ${quic.last}.` : ""}`
+                }
+                onPress={() => (quic.available && quic.debuggable ? void runQuicTest() : void refreshQuic())}
+              />
+            )}
           </Section>
         )}
 

@@ -62,17 +62,19 @@ class QuicManagerTest {
     val sent = mutableListOf<QuicAction>()
     val logs = mutableListOf<String>()
     val ticker = ManualTicker()
+    val accepted = mutableListOf<QuicKind>()
     val manager = QuicManager(
       transport = transport,
       sendAction = { sent += it },
       lanHost = { lanHost },
       onLan = { onLan },
       supportedKinds = setOf(QuicKind.ECHO),
+      autoAcceptKinds = setOf(QuicKind.ECHO),
       log = { logs += it },
       post = { it.run() },
       ticker = ticker,
       now = { clock },
-    )
+    ).also { it.onMacRequestAccepted = { kind -> accepted += kind } }
   }
 
   private fun requestedSid(rig: Rig): String = (rig.sent.first() as QuicAction.Request).sid
@@ -245,6 +247,92 @@ class QuicManagerTest {
     val rig = Rig()
     rig.manager.linkLost()
     assertTrue(rig.sent.isEmpty() && rig.transport.calls.isEmpty())
+  }
+
+  // ---- the Mac asks, the phone accepts (stage 1.8) ----
+
+  @Test fun aMacRequestForTheEchoKindIsAcceptedAndTheHostIsToldWhichKind() {
+    val rig = Rig()
+    val other = "223e4567-e89b-12d3-a456-426614174000"
+    rig.manager.handle(QuicAction.Request(other, QuicKind.ECHO))
+    assertEquals(listOf<QuicAction>(QuicAction.Accept(other)), rig.sent)
+    assertEquals(listOf(QuicKind.ECHO), rig.accepted)
+    assertEquals(QuicSession.State.AwaitingOffer, rig.manager.state)
+    rig.manager.handle(offerFor(other))
+    assertEquals(listOf<Any>(host, port, fp, tok), rig.transport.connectArgs)
+  }
+
+  @Test fun aMacRequestThatIsRefusedTellsNobodyAboutAnAcceptance() {
+    val rig = Rig()
+    rig.manager.handle(QuicAction.Request("223e4567-e89b-12d3-a456-426614174000", QuicKind.FILE))
+    assertTrue(rig.accepted.isEmpty())
+  }
+
+  // ---- saying what happened, plainly (stage 1.8) ----
+
+  @Test fun askingOffTheLanSaysItNeedsTheSameWifiAndAsksNobody() {
+    val rig = Rig().also { it.onLan = false }
+    rig.manager.requestEcho()
+    assertTrue(rig.sent.isEmpty())
+    assertTrue(rig.manager.lastOutcome, rig.manager.lastOutcome!!.contains("same Wi-Fi"))
+  }
+
+  @Test fun aForcedRequestIsSentEvenOffTheLanSoTheOtherSideCanRefuseIt() {
+    val rig = Rig().also { it.onLan = false }
+    rig.manager.requestEcho(force = true)
+    assertTrue(rig.sent.single() is QuicAction.Request)
+  }
+
+  @Test fun theMacRefusingBecauseOfTheLinkSaysItNeedsTheSameWifi() {
+    val rig = Rig()
+    rig.manager.requestEcho()
+    rig.manager.handle(QuicAction.Reject(requestedSid(rig), QuicRejectReason.RELAY))
+    assertTrue(rig.manager.lastOutcome, rig.manager.lastOutcome!!.contains("same Wi-Fi"))
+  }
+
+  @Test fun theOtherOutcomesHavePlainSentences() {
+    fun outcome(drive: (Rig) -> Unit): String { val rig = Rig(); drive(rig); return rig.manager.lastOutcome ?: "" }
+    assertTrue(outcome { it.manager.requestEcho(); it.manager.handle(QuicAction.Reject(requestedSid(it), QuicRejectReason.UNSUPPORTED)) }.contains("does not offer"))
+    assertTrue(outcome { it.manager.requestEcho(); it.manager.handle(QuicAction.Reject(requestedSid(it), QuicRejectReason.BUSY)) }.contains("busy"))
+    assertTrue(outcome { connected(connecting(it)) }.contains("connected"))
+    assertTrue(outcome { val r = connecting(it); r.transport.events!!.onFailed(QuicError.TokenRejected.code) }.contains("TokenRejected"))
+    assertTrue(outcome { val r = connected(connecting(it)); r.manager.linkLost() }.contains("LAN link went away"))
+    assertTrue(outcome { val r = connected(connecting(it)); r.transport.events!!.onPeerEnded() }.contains("ended by the Mac"))
+    assertTrue(outcome { it.lanHost = null; it.manager.requestEcho(); it.manager.handle(offerFor(requestedSid(it))) }.contains("address"))
+  }
+
+  @Test fun anOfferThatNeverComesIsReportedAsNoAnswerFromAPossiblyOlderMac() {
+    val rig = Rig()
+    rig.manager.requestEcho()
+    rig.clock += 10_000
+    rig.ticker.task!!.run()
+    assertTrue(rig.manager.lastOutcome, rig.manager.lastOutcome!!.contains("never answered"))
+  }
+
+  @Test fun theEndOfASessionIsReportedOnceAndOnlyWhenItEnds() {
+    val rig = Rig()
+    val seen = mutableListOf<QuicSession.End>()
+    rig.manager.onEnded = { seen += it }
+    rig.manager.requestEcho()
+    assertTrue(seen.isEmpty())
+    rig.manager.handle(QuicAction.Reject(requestedSid(rig), QuicRejectReason.RELAY))
+    assertEquals(listOf<QuicSession.End>(QuicSession.End.PeerRejected(QuicRejectReason.RELAY)), seen)
+    rig.manager.end()   // nothing is running any more
+    assertEquals(1, seen.size)
+  }
+
+  @Test fun nothingTheUserMaySeeNamesTheAddressThePortTheFingerprintTheTokenOrTheSession() {
+    val rig = Rig()
+    rig.manager.requestEcho()
+    val sid = requestedSid(rig)
+    rig.manager.handle(offerFor(sid))
+    val outcomes = mutableListOf<String?>(rig.manager.lastOutcome)
+    rig.transport.events!!.onConnected()
+    outcomes += rig.manager.lastOutcome
+    rig.transport.events!!.onFailed(QuicError.FpMismatch.code)
+    outcomes += rig.manager.lastOutcome
+    val everything = outcomes.joinToString("\n")
+    for (secret in listOf(host, port.toString(), fp, tok, sid)) assertFalse("an outcome contains $secret", everything.contains(secret))
   }
 
   // ---- the clock ----

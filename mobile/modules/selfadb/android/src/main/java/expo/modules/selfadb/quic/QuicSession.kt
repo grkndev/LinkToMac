@@ -13,6 +13,11 @@ class QuicSession(val config: Config = Config()) {
   data class Config(
     /** Kinds this phone asks for. Stage 1.7: only the debug `echo`. */
     val supportedKinds: Set<QuicKind> = emptySet(),
+    /**
+     * Kinds a request FROM THE MAC is accepted for without asking anybody (stage 1.8: only the debug `echo`; the real approval UI comes
+     * with the file, screen and camera stages). Any other kind a Mac asks for is refused `unsupported`.
+     */
+    val autoAcceptKinds: Set<QuicKind> = emptySet(),
     /** How long the phone waits for the Mac's offer after asking. */
     val offerWaitMs: Long = 10_000,
     /** Backstop for a client that reports neither Connected nor Failed (its own timeouts are 5 s + 6 s). */
@@ -79,6 +84,10 @@ class QuicSession(val config: Config = Config()) {
     private set
 
   private var sid = ""
+
+  /** The kind of the session the MAC asked for and we accepted, else null (a session we asked for). */
+  var requestedByMac: QuicKind? = null
+    private set
   private var handshake: QuicHandshake? = null
   private var offerDeadlineMs = 0L
   private var connectDeadlineMs = 0L
@@ -96,6 +105,7 @@ class QuicSession(val config: Config = Config()) {
   fun request(kind: QuicKind, sid: String, onLan: Boolean, nowMs: Long): List<Effect> {
     if (localRequestRefusal(kind, onLan) != null) return emptyList()
     this.sid = sid.lowercase()
+    requestedByMac = null
     handshake = QuicHandshake(QuicSide.PHONE, iRequested = true, sid = this.sid, nowMs = nowMs)
     offerDeadlineMs = nowMs + config.offerWaitMs
     state = State.AwaitingOffer
@@ -111,9 +121,19 @@ class QuicSession(val config: Config = Config()) {
   fun receive(action: QuicAction, hostAddress: String?, onLan: Boolean, nowMs: Long): List<Effect> {
     val out = tick(nowMs).toMutableList()
     if (action is QuicAction.Request) {
-      // The Mac asking us is a later stage (the file, screen and camera kinds). Until then it must not wait for an answer that never comes.
-      val reason = if (active) QuicRejectReason.BUSY else QuicRejectReason.UNSUPPORTED
-      return out + Effect.SendAction(QuicAction.Reject(action.sid, reason))
+      if (active && action.sid.lowercase() == sid) return out // the same request delivered twice
+      // The Mac asks us. Refused with the gate's reason (a kind we do not accept is `unsupported`, so the Mac never waits for nothing);
+      // otherwise accepted at once, and the offer that follows is handled like one for a session we asked for.
+      val refusal = QuicGate.refusal(active, onLan, kindSupported = action.kind in config.autoAcceptKinds)
+      if (refusal != null) return out + Effect.SendAction(QuicAction.Reject(action.sid, refusal))
+      sid = action.sid.lowercase()
+      val asked = QuicHandshake(QuicSide.PHONE, iRequested = false, sid = sid, nowMs = nowMs)
+      asked.send(QuicAction.Accept(sid), nowMs)
+      handshake = asked
+      requestedByMac = action.kind
+      offerDeadlineMs = nowMs + config.offerWaitMs
+      state = State.AwaitingOffer
+      return out + Effect.SendAction(QuicAction.Accept(sid))
     }
     val hs = handshake
     if (!active || hs == null) return out

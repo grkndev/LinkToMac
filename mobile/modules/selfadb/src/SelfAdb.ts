@@ -10,6 +10,8 @@ import type {
   NotifAppFilter,
   NotifFilterMode,
   PermissionRequestResult,
+  QuicSelfTestMode,
+  QuicStatus,
   RelayEvent,
   SelfAdbModuleEvents,
   StatEvent,
@@ -175,6 +177,13 @@ declare class SelfAdbModule extends NativeModule<SelfAdbModuleEvents> {
    * feature-detect (`typeof SelfAdb.getExitReasons === 'function'`).
    */
   getExitReasons(limit: number): Promise<ExitReason[]>;
+  /**
+   * is QUIC usable right now, and if not why; the session's state and its last outcome in plain words (stage 1.8). Absent in APKs built
+   * before it — callers feature-detect (`typeof SelfAdb.getQuicStatus === 'function'`).
+   */
+  getQuicStatus(): Promise<QuicStatus>;
+  /** debug builds only (a release build ignores it): run the on-device QUIC echo check against the Mac. */
+  runQuicSelfTest(mode: QuicSelfTestMode): Promise<void>;
   /**
    * fetch the privileged daemon's own on-device log + a liveness/socket probe.
    * (Re)connects adb over mDNS, self-enabling wireless debugging if permitted.

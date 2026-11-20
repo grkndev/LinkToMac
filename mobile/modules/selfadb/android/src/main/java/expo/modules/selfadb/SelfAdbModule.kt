@@ -163,6 +163,22 @@ class SelfAdbModule : Module() {
     // storage of ours is involved. Only the reason, importance, status and a capped description go
     // out — never the ANR trace stream, which is large and can carry data. minSdk is 30, which is
     // where getHistoricalProcessExitReasons starts, so there is no version gate.
+    // The QUIC developer screen (stage 1.8). Only fixed words and flags: never an address, port, fingerprint, token or session id.
+    AsyncFunction("getQuicStatus") {
+      ClipForegroundService.instance?.quicStatus() ?: mapOf(
+        "available" to false,
+        "state" to "Idle",
+        "last" to null,
+        "reason" to "the connection service is not running",
+        "debuggable" to (appCtx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0),
+      )
+    }
+
+    // Debug builds only (the service ignores it otherwise): the on-device echo check. mode = none | fp | tok | hold | force.
+    AsyncFunction("runQuicSelfTest") { mode: String ->
+      ClipForegroundService.instance?.runQuicSelfTest(mode)
+    }
+
     AsyncFunction("getExitReasons") { limit: Int ->
       val am = appCtx.getSystemService(ActivityManager::class.java)
       am.getHistoricalProcessExitReasons(appCtx.packageName, 0, limit.coerceIn(1, 30)).map { info ->

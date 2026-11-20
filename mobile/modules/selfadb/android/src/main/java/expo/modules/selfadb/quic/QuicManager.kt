@@ -41,6 +41,7 @@ class QuicManager(
   private val lanHost: () -> String?,
   private val onLan: () -> Boolean,
   supportedKinds: Set<QuicKind>,
+  autoAcceptKinds: Set<QuicKind> = emptySet(),
   private val log: (String) -> Unit,
   private val post: (Runnable) -> Unit,
   private val ticker: Ticker,
@@ -51,7 +52,7 @@ class QuicManager(
     fun cancel()
   }
 
-  private val session = QuicSession(QuicSession.Config(supportedKinds = supportedKinds))
+  private val session = QuicSession(QuicSession.Config(supportedKinds = supportedKinds, autoAcceptKinds = autoAcceptKinds))
 
   @Volatile var state: QuicSession.State = QuicSession.State.Idle
     private set
@@ -59,8 +60,22 @@ class QuicManager(
   /** Sees every client event after the manager did (the debug self-test listens here). Called on the manager's thread. */
   @Volatile var tap: QuicEvents? = null
 
+  /** Told, on the manager's thread, when a request FROM THE MAC was accepted (and which kind): the debug echo check starts from here. */
+  @Volatile var onMacRequestAccepted: ((QuicKind) -> Unit)? = null
+
   /** Debug only: changes what is handed to the client (the device self-test flips one character of the fingerprint or the token). */
   @Volatile var tamper: ((QuicSession.Effect.Connect) -> QuicSession.Effect.Connect)? = null
+
+  /**
+   * What happened, as a plain sentence for a developer screen (stage 1.8; the real UX comes with stage 2): "needs the same Wi-Fi", "the Mac
+   * never answered (an older Mac?)" … Fixed sentences only: never the address, port, fingerprint, token or session id.
+   */
+  @Volatile var lastOutcome: String? = null
+    private set
+
+  /** Told once, on the manager's thread, when a session ENDS (for whatever reason). */
+  @Volatile var onEnded: ((QuicSession.End) -> Unit)? = null
+  private var endReported = false
 
   @Volatile private var handle = 0L
 
@@ -71,8 +86,18 @@ class QuicManager(
   /** A parsed `q.*` action from the Mac. */
   fun handle(action: QuicAction) = post { run(session.receive(action, lanHost(), onLan(), now())) }
 
-  /** Debug: ask the Mac for an `echo` session. */
-  fun requestEcho() = post { run(session.request(QuicKind.ECHO, UUID.randomUUID().toString(), onLan(), now())) }
+  /**
+   * Debug: ask the Mac for an `echo` session. When it cannot be made the reason is the outcome and nobody is asked. [force] skips the
+   * link check so the request is sent anyway (the device test uses it to see a Mac refuse over the relay, or an old Mac ignore it).
+   */
+  fun requestEcho(force: Boolean = false) = post {
+    val refusal = if (force) null else session.localRequestRefusal(QuicKind.ECHO, onLan())
+    if (refusal != null) {
+      lastOutcome = refusalSentence(refusal)
+    } else {
+      run(session.request(QuicKind.ECHO, UUID.randomUUID().toString(), force || onLan(), now()))
+    }
+  }
 
   /** The phone ends the session (the user, Unpair). */
   fun end() = post { run(session.end(now())) }
@@ -105,6 +130,7 @@ class QuicManager(
         is QuicSession.Effect.SendAction -> {
           sendAction(effect.action)
           log("quic: ${nameOf(effect.action)} sent")
+          if (effect.action is QuicAction.Accept) session.requestedByMac?.let { onMacRequestAccepted?.invoke(it) }
         }
         is QuicSession.Effect.Connect -> connect(tamper?.invoke(effect) ?: effect)
         is QuicSession.Effect.Close -> {
@@ -116,6 +142,16 @@ class QuicManager(
       }
     }
     state = session.state
+    describe(state)?.let { lastOutcome = it }
+    val ended = state
+    if (ended is QuicSession.State.Ended) {
+      if (!endReported) {
+        endReported = true
+        onEnded?.invoke(ended.end)
+      }
+    } else {
+      endReported = false
+    }
     ticker.cancel()
     session.nextDeadlineMs?.let { ticker.schedule(maxOf(0L, it - now()), tickTask) }
   }
@@ -131,6 +167,47 @@ class QuicManager(
         run(session.failed(QuicError.Internal, now()))
       }
     }
+  }
+
+  private fun refusalSentence(reason: QuicRejectReason) = when (reason) {
+    QuicRejectReason.RELAY -> "needs the same Wi-Fi (the LAN-direct link)"
+    QuicRejectReason.BUSY -> "another QUIC session is already running"
+    QuicRejectReason.UNSUPPORTED -> "this kind of session is not available"
+    QuicRejectReason.DENIED -> "refused"
+    QuicRejectReason.TIMEOUT -> "refused (timed out)"
+  }
+
+  private fun describe(state: QuicSession.State): String? = when (state) {
+    QuicSession.State.Idle -> null
+    QuicSession.State.AwaitingOffer -> "waiting for the Mac's offer"
+    QuicSession.State.Connecting -> "connecting"
+    QuicSession.State.Connected -> "connected"
+    is QuicSession.State.Ended -> when (val end = state.end) {
+      QuicSession.End.PeerEnded -> "ended by the Mac"
+      is QuicSession.End.PeerRejected -> when (end.reason) {
+        QuicRejectReason.RELAY -> "needs the same Wi-Fi (the Mac refused: not on the LAN)"
+        QuicRejectReason.UNSUPPORTED -> "the Mac does not offer this kind of session"
+        QuicRejectReason.BUSY -> "the Mac is busy with another session"
+        QuicRejectReason.DENIED -> "the Mac's user refused"
+        QuicRejectReason.TIMEOUT -> "the Mac timed out"
+      }
+      QuicSession.End.LocalEnded -> "ended here"
+      QuicSession.End.OfferTimeout -> "the Mac never answered (an older Mac?)"
+      QuicSession.End.ConnectTimeout -> "could not connect in time"
+      QuicSession.End.NoAddress -> "no LAN address for the Mac"
+      is QuicSession.End.Failed -> failedSentence(end.error)
+      QuicSession.End.LinkLost -> "the connection was lost"
+      QuicSession.End.LinkChanged -> "the LAN link went away"
+    }
+  }
+
+  private fun failedSentence(error: QuicError) = when (error) {
+    QuicError.FpMismatch -> "failed: FpMismatch"
+    QuicError.TokenRejected -> "failed: TokenRejected"
+    QuicError.Timeout -> "failed: Timeout"
+    QuicError.LinkLost -> "failed: LinkLost"
+    QuicError.Protocol -> "failed: Protocol"
+    QuicError.Internal -> "failed: Internal"
   }
 
   /** One fixed sentence per error code: a log line may name a state, never be built from data. */
@@ -195,6 +272,7 @@ class QuicManager(
       lanHost: () -> String?,
       onLan: () -> Boolean,
       supportedKinds: Set<QuicKind>,
+      autoAcceptKinds: Set<QuicKind>,
       log: (String) -> Unit,
     ): QuicManager {
       val worker = Executors.newSingleThreadExecutor { Thread(it, "quic-manager").apply { isDaemon = true } }
@@ -215,6 +293,7 @@ class QuicManager(
         lanHost = lanHost,
         onLan = onLan,
         supportedKinds = supportedKinds,
+        autoAcceptKinds = autoAcceptKinds,
         log = log,
         post = { worker.execute(it) },
         ticker = ticker,

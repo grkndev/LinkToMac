@@ -10,27 +10,58 @@ import java.util.concurrent.TimeUnit
  * words (`quic-selftest: PASS echo`, `PASS FpMismatch`, `FAIL <reason>`); nothing about the Mac, the session or the data.
  */
 class QuicSelfTest(private val manager: QuicManager, private val log: (String) -> Unit) : QuicEvents {
-  enum class Tamper { None, Fp, Tok }
+  /**
+   * `None`: the echo check. `Fp`/`Tok`: one character flipped, the connection must be refused the right way. `Hold`: connect and stay (60 s)
+   * until the session ends by itself, for the link-loss test. `Force`: ask even though the gate says no (off the LAN, or the Mac never
+   * announced `q1`); passes when the Mac refuses (`Refused:<reason>`) or says nothing (`NoAnswer`, which is what an older Mac does).
+   */
+  enum class Mode { None, Fp, Tok, Hold, Force }
 
   private val timer = Executors.newSingleThreadScheduledExecutor { Thread(it, "quic-selftest").apply { isDaemon = true } }
-  private var tamper = Tamper.None
+  private var mode = Mode.None
   private var step = 0
   @Volatile private var done = false
 
-  fun start(tamper: Tamper) {
-    this.tamper = tamper
+  fun start(mode: Mode) {
+    this.mode = mode
     step = 0
     done = false
     manager.tamper = { c ->
-      when (tamper) {
-        Tamper.Fp -> c.copy(fp = flip(c.fp))
-        Tamper.Tok -> c.copy(tok = flip(c.tok, at = 5))
-        Tamper.None -> c
+      when (mode) {
+        Mode.Fp -> c.copy(fp = flip(c.fp))
+        Mode.Tok -> c.copy(tok = flip(c.tok, at = 5))
+        else -> c
       }
     }
     manager.tap = this
+    if (mode == Mode.Hold || mode == Mode.Force) manager.onEnded = ::onEnded
+    val limit = if (mode == Mode.Hold) 60L else 20L
+    timer.schedule({ if (!done) fail("no verdict in time") }, limit, TimeUnit.SECONDS)
+    manager.requestEcho(force = mode == Mode.Force)
+  }
+
+  private fun onEnded(end: QuicSession.End) {
+    when (mode) {
+      Mode.Hold -> pass("held until it ended")
+      Mode.Force -> when (end) {
+        QuicSession.End.OfferTimeout -> pass("NoAnswer")
+        is QuicSession.End.PeerRejected -> pass("Refused:${end.reason.wire}")
+        else -> fail("ended unexpectedly")
+      }
+      else -> Unit
+    }
+  }
+
+  /**
+   * Joins a session the MAC asked for (the Mac's debug "QUIC test session"): nothing to request and no tamper; once connected, the same echo
+   * check runs and, when it passes, the phone ends the session, which is what the Mac's test waits for.
+   */
+  fun attach() {
+    mode = Mode.None
+    step = 0
+    done = false
+    manager.tap = this
     timer.schedule({ if (!done) fail("no verdict in time") }, 20, TimeUnit.SECONDS)
-    manager.requestEcho()
   }
 
   private fun flip(text: String, at: Int = 0): String {
@@ -44,6 +75,7 @@ class QuicSelfTest(private val manager: QuicManager, private val log: (String) -
     log("quic-selftest: PASS $what")
     manager.tamper = null
     manager.tap = null
+    manager.onEnded = null
     manager.end()
   }
 
@@ -53,11 +85,13 @@ class QuicSelfTest(private val manager: QuicManager, private val log: (String) -
     log("quic-selftest: FAIL $why")
     manager.tamper = null
     manager.tap = null
+    manager.onEnded = null
     manager.end()
   }
 
   override fun onConnected() {
-    if (tamper != Tamper.None) return fail("connected despite the tamper")
+    if (mode == Mode.Hold) return log("quic-selftest: HOLDING")
+    if (mode != Mode.None) return fail("connected although it should not have")
     step = 1
     manager.sendSessionLine("ping")
   }
@@ -65,8 +99,8 @@ class QuicSelfTest(private val manager: QuicManager, private val log: (String) -
   override fun onFailed(code: Int) {
     val error = QuicError.fromCode(code)
     when {
-      tamper == Tamper.Fp && error == QuicError.FpMismatch -> pass("FpMismatch")
-      tamper == Tamper.Tok && error == QuicError.TokenRejected -> pass("TokenRejected")
+      mode == Mode.Fp && error == QuicError.FpMismatch -> pass("FpMismatch")
+      mode == Mode.Tok && error == QuicError.TokenRejected -> pass("TokenRejected")
       else -> fail("failed ${error?.name ?: "Unknown"}")
     }
   }

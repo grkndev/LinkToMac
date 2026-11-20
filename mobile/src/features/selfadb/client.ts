@@ -27,6 +27,8 @@ export type {
   NotifAppFilter,
   NotifFilterMode,
   PermissionRequestResult,
+  QuicSelfTestMode,
+  QuicStatus,
   RelayEvent,
   StatEvent,
   StatusEvent,

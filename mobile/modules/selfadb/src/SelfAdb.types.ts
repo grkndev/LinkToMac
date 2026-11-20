@@ -146,3 +146,23 @@ export type SelfAdbModuleEvents = {
   onStatus: (event: StatusEvent) => void;
   onRelay: (event: RelayEvent) => void;
 };
+
+/**
+ * The QUIC developer screen's view of the phone-to-Mac data plane (stage 1.8). Plain words and flags only: never an address, a port, a
+ * fingerprint, a token or a session id.
+ */
+export type QuicStatus = {
+  /** QUIC can be used right now: the library is in this build, the Mac announced `q1` and the LAN-direct link is up. */
+  available: boolean;
+  /** `Idle`, `AwaitingOffer`, `Connecting`, `Connected` or `Ended(<reason>)`. */
+  state: string;
+  /** What last happened, as a sentence, or `null` when nothing has. */
+  last: string | null;
+  /** Why QUIC is not available, or `null` when it is. */
+  reason: string | null;
+  /** Only a debuggable build can run the echo test. */
+  debuggable: boolean;
+};
+
+/** `none` = the echo check; `fp`/`tok` = flip one character and expect the right refusal; `hold` = stay connected; `force` = ask even if the gate says no. */
+export type QuicSelfTestMode = 'none' | 'fp' | 'tok' | 'hold' | 'force';

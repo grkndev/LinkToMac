@@ -49,9 +49,11 @@ import expo.modules.selfadb.quic.QuicAction
 import expo.modules.selfadb.quic.QuicCaps
 import expo.modules.selfadb.quic.QuicControl
 import expo.modules.selfadb.quic.QuicCore
+import expo.modules.selfadb.quic.QuicGate
 import expo.modules.selfadb.quic.QuicKind
 import expo.modules.selfadb.quic.QuicManager
 import expo.modules.selfadb.quic.QuicParse
+import expo.modules.selfadb.quic.QuicRejectReason
 import expo.modules.selfadb.quic.QuicSelfTest
 
 /**
@@ -1431,23 +1433,55 @@ class ClipForegroundService : Service() {
       onLan = { ClipBus.onLan() },
       // Stage 1.7 serves only the debug `echo`; the file, screen and camera stages add their kinds.
       supportedKinds = if (debuggable) setOf(QuicKind.ECHO) else emptySet(),
+      // A request from the Mac is accepted without asking only for the debug `echo`; the real approval UI comes with stage 2.
+      autoAcceptKinds = if (debuggable) setOf(QuicKind.ECHO) else emptySet(),
       log = { ClipBus.log(it) },
-    ).also { quicManager = it }
+    ).also { manager ->
+      // The Mac's debug "QUIC test session": once we accepted it, run the echo check on it ourselves.
+      manager.onMacRequestAccepted = { kind -> if (debuggable && kind == QuicKind.ECHO) QuicSelfTest(manager, ClipBus::log).attach() }
+      quicManager = manager
+    }
   }
 
   /** Debug builds only: the end-to-end check of stage 1.7 (see `mobile/scripts/quic-device-test.sh`). */
-  fun runQuicSelfTest(tamper: String?) {
+  fun runQuicSelfTest(mode: String?) {
     if (!debuggable) return
-    val kind = when (tamper) {
-      "fp" -> QuicSelfTest.Tamper.Fp
-      "tok" -> QuicSelfTest.Tamper.Tok
-      else -> QuicSelfTest.Tamper.None
+    val kind = when (mode) {
+      "fp" -> QuicSelfTest.Mode.Fp
+      "tok" -> QuicSelfTest.Mode.Tok
+      "hold" -> QuicSelfTest.Mode.Hold
+      "force" -> QuicSelfTest.Mode.Force
+      else -> QuicSelfTest.Mode.None
     }
     when {
       !QuicCore.isAvailable() -> ClipBus.log("quic-selftest: FAIL library unavailable")
-      !quicAvailable() -> ClipBus.log("quic-selftest: FAIL the Mac does not offer QUIC here (no q1 or not on the LAN)")
+      // The gate: the controls (and the test) are only for a Mac that announced `q1` on the LAN-direct link. `force` skips it on purpose.
+      kind != QuicSelfTest.Mode.Force && !quicAvailable() -> ClipBus.log("quic-selftest: FAIL the Mac does not offer QUIC here (no q1 or not on the LAN)")
       else -> QuicSelfTest(quic(), ClipBus::log).start(kind)
     }
+  }
+
+  /**
+   * For the developer screen (stage 1.8): is QUIC usable right now and if not why, the session's state and the last outcome in plain words.
+   * Never carries an address, port, fingerprint, token or session id.
+   */
+  fun quicStatus(): Map<String, Any?> {
+    val library = QuicCore.isAvailable()
+    val gate = QuicGate.outgoing(active = false, onLan = ClipBus.onLan(), caps = macCaps.caps, kindSupported = debuggable)
+    val reason = when {
+      !library -> "this build has no QUIC library"
+      gate == QuicGate.Outgoing.Hidden -> "the Mac does not offer QUIC (an older app, or it has not said so yet)"
+      gate == QuicGate.Outgoing.Refused(QuicRejectReason.RELAY) -> "needs the same Wi-Fi (the LAN-direct link)"
+      gate is QuicGate.Outgoing.Refused -> "this build does not serve a test session"
+      else -> null
+    }
+    return mapOf(
+      "available" to (library && gate == QuicGate.Outgoing.Proceed),
+      "state" to (quicManager?.state?.toString() ?: "Idle"),
+      "last" to quicManager?.lastOutcome,
+      "reason" to reason,
+      "debuggable" to debuggable,
+    )
   }
 
   /**

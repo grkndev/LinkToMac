@@ -317,6 +317,66 @@ class QuicSessionStateTest {
     assertEquals(State.AwaitingOffer, s.state)
   }
 
+  // ---- the Mac asks, the phone accepts (debug kinds only; the real approval UI is stage 2) ----
+
+  private fun macAsked(now: Long = 0): QuicSession =
+    QuicSession(QuicSession.Config(supportedKinds = setOf(QuicKind.ECHO), autoAcceptKinds = setOf(QuicKind.ECHO))).also {
+      it.receive(QuicAction.Request(sid, QuicKind.ECHO), host, true, now)
+    }
+
+  @Test fun aRequestForAKindWeAcceptAutomaticallyIsAcceptedAndWeWaitForTheOffer() {
+    val s = QuicSession(QuicSession.Config(autoAcceptKinds = setOf(QuicKind.ECHO)))
+    assertEquals(
+      listOf<Effect>(Effect.SendAction(QuicAction.Accept(sid))),
+      s.receive(QuicAction.Request(sid, QuicKind.ECHO), host, true, 1000),
+    )
+    assertEquals(State.AwaitingOffer, s.state)
+    assertEquals(QuicKind.ECHO, s.requestedByMac)
+    assertEquals(11_000L, s.nextDeadlineMs)
+  }
+
+  @Test fun theOfferThatFollowsAnAcceptedRequestMakesTheClientConnect() {
+    val s = macAsked()
+    assertEquals(listOf<Effect>(Effect.Connect(host, 53125, fp, tok)), s.receive(offer(), host, true, 100))
+    assertEquals(State.Connecting, s.state)
+    assertEquals(emptyList<Effect>(), s.connected(150))
+    assertEquals(State.Connected, s.state)
+  }
+
+  @Test fun anAcceptedRequestWhoseOfferNeverComesTimesOutAndTellsTheMac() {
+    val s = macAsked(now = 500)
+    assertEquals(emptyList<Effect>(), s.tick(10_499))
+    assertEquals(listOf<Effect>(Effect.SendAction(QuicAction.End(sid))), s.tick(10_500))
+    assertEquals(State.Ended(End.OfferTimeout), s.state)
+  }
+
+  @Test fun theMacEndingBeforeTheOfferEndsTheSession() {
+    val s = macAsked()
+    assertEquals(emptyList<Effect>(), s.receive(QuicAction.End(sid), host, true, 5))
+    assertEquals(State.Ended(End.PeerEnded), s.state)
+  }
+
+  @Test fun aRequestWeDoNotAcceptAutomaticallyOrOffTheLanOrWhileBusyIsRefusedWithTheGatesReason() {
+    val auto = QuicSession(QuicSession.Config(autoAcceptKinds = setOf(QuicKind.ECHO)))
+    assertEquals(listOf<Effect>(Effect.SendAction(QuicAction.Reject(otherSid, QuicRejectReason.UNSUPPORTED))), auto.receive(QuicAction.Request(otherSid, QuicKind.FILE), host, true, 0))
+    assertEquals(listOf<Effect>(Effect.SendAction(QuicAction.Reject(otherSid, QuicRejectReason.RELAY))), auto.receive(QuicAction.Request(otherSid, QuicKind.ECHO), null, false, 0))
+    assertEquals(State.Idle, auto.state)
+    val busy = macAsked()
+    assertEquals(listOf<Effect>(Effect.SendAction(QuicAction.Reject(otherSid, QuicRejectReason.BUSY))), busy.receive(QuicAction.Request(otherSid, QuicKind.ECHO), host, true, 5))
+    assertEquals(State.AwaitingOffer, busy.state)
+  }
+
+  @Test fun theSameRequestDeliveredTwiceIsIgnored() {
+    val s = macAsked()
+    assertEquals(emptyList<Effect>(), s.receive(QuicAction.Request(sid, QuicKind.ECHO), host, true, 5))
+    assertEquals(State.AwaitingOffer, s.state)
+  }
+
+  @Test fun aSessionWeAskedForIsNotOneTheMacAskedFor() {
+    val s = asked()
+    assertNull(s.requestedByMac)
+  }
+
   // ---- error codes ----
 
   @Test fun errorCodesKeepTheirNumbersAndNames() {
