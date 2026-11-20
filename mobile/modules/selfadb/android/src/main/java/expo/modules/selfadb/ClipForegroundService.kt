@@ -1434,7 +1434,8 @@ class ClipForegroundService : Service() {
   }
 
   /** Debug builds only: the end-to-end check of stage 1.7 (see `mobile/scripts/quic-device-test.sh`). */
-  private fun runQuicSelfTest(tamper: String?) {
+  fun runQuicSelfTest(tamper: String?) {
+    if (!debuggable) return
     val kind = when (tamper) {
       "fp" -> QuicSelfTest.Tamper.Fp
       "tok" -> QuicSelfTest.Tamper.Tok
@@ -1755,8 +1756,8 @@ class ClipForegroundService : Service() {
     private const val ACTION_RETRY_SEND = "expo.modules.selfadb.RETRY_SEND"
 
     /** Debug-only start-intent action: run the QUIC echo self-test (`--es tamper none|fp|tok`). */
-    private const val ACTION_QUIC_SELFTEST = "expo.modules.selfadb.QUIC_SELFTEST"
-    private const val EXTRA_TAMPER = "tamper"
+    const val ACTION_QUIC_SELFTEST = "expo.modules.selfadb.QUIC_SELFTEST"
+    const val EXTRA_TAMPER = "tamper"
     private const val EXTRA_PICK_URIS = "pickUris"
     private const val EXTRA_TREE = "treeUri"
     private const val EXTRA_HISTORY_ID = "historyId"

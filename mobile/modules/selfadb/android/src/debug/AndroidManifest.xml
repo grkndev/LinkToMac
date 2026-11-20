@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug variant only (stage 1.7): this source set is not part of a release build. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Exported on purpose, so `adb shell am broadcast` can reach it. It does nothing unless the app is debuggable. -->
+    <receiver
+      android:name="expo.modules.selfadb.QuicSelfTestReceiver"
+      android:exported="true" />
+  </application>
+</manifest>
