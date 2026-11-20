@@ -74,7 +74,7 @@ final class QuicService {
     /// Sets the status the Settings row shows and prints it (a script can read it from the log: `[QuicTest] …`; fixed sentences only).
     private func report(_ text: String) {
         testStatus = text
-        print("[QuicTest] \(text)")
+        NSLog("[QuicTest] %@", text)   // stderr is unbuffered: a script reading the redirected log sees it at once
     }
 
     private func testStateChanged(_ state: QuicSession.State) {
@@ -89,6 +89,10 @@ final class QuicService {
         case let .ended(end):
             switch end {
             case .peerEnded where reachedConnected: report("Completed: the phone's echo check passed and it ended the session")
+            // The phone sends `q.end` over the control channel and closes the QUIC connection; the close can reach us first, and then this
+            // is how the end looks. A session that was open and then closed counts as completed here (the phone's own log holds the
+            // echo verdict); a connection lost for real reads the same, which is why this is a debug aid and not a health signal.
+            case .connectionLost where reachedConnected: report("Completed: the session was open and the phone closed it")
             case .peerEnded: report("The phone ended the session before it opened")
             case let .peerRejected(reason): report("The phone refused (\(reason.rawValue))")
             case .acceptTimeout: report("No answer from the phone in time (an older app?)")

@@ -85,6 +85,7 @@ hold no case tables of their own — so a rule changes by changing the file, and
   `PeerCaps` and the set expected after each. `available`: `quicAvailable` is true only on the LAN-direct link AND with `q1` known.
   `advertise`: what a side writes into its own stat — `["q1"]` when it can serve the protocol, nothing otherwise (both sides keep this off until
   their QUIC piece exists: Mac stage 1.6, phone stage 1.7).
+- **`gate`** (stage 1.8) — who may open a session and what the controls show; a full truth table. `incoming`: a peer's `q.req` arrives (`active`, `on_lan`, `kind_supported` → `busy` first, then `relay`, then `unsupported`, else `proceed`). `visible`: the QUIC controls show only on the LAN-direct link AND with `q1` in the peer's `caps` (the same rule as `stat.available`). `outgoing`: this side wants to ask: `hidden` when the peer never announced `q1`, then the same order busy, relay, unsupported, proceed. Swift and Kotlin run every case (`QuicGate`).
 - **`handshake`** — who may send what, when, per session. A scenario is `side` (`mac`/`phone`), `asker` (this side sent the `q.req`),
   `start_ms`, optional `timeout_ms`, the `initial` phase and `steps`: `send` (this side wants to send `action`), `receive` (the peer's `action`
   arrives) or `tick` (the clock reaches `at_ms`). `expect` is `{applied: phase}` or `{ignored: code}` for send/receive and `{phase}` for tick; an
