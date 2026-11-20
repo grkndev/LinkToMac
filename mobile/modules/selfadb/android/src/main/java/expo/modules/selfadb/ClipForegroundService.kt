@@ -48,7 +48,11 @@ import expo.modules.selfadb.quic.PeerCaps
 import expo.modules.selfadb.quic.QuicAction
 import expo.modules.selfadb.quic.QuicCaps
 import expo.modules.selfadb.quic.QuicControl
+import expo.modules.selfadb.quic.QuicCore
+import expo.modules.selfadb.quic.QuicKind
+import expo.modules.selfadb.quic.QuicManager
 import expo.modules.selfadb.quic.QuicParse
+import expo.modules.selfadb.quic.QuicSelfTest
 
 /**
  * What caught a clip. The shell daemon is the only source that sees a copy on its own; every
@@ -251,6 +255,8 @@ class ClipForegroundService : Service() {
     // The notification's Cancel button for an outgoing transfer. Handled on the main thread, so
     // it only flips a flag and wakes the sender; the send loop does the actual stopping.
     if (intent?.action == ACTION_CANCEL_TRANSFER) cancelShare()
+    // Debug builds only: the on-device QUIC check, started from `adb` (the action does nothing in a release build).
+    if (intent?.action == ACTION_QUIC_SELFTEST && debuggable) runQuicSelfTest(intent.getStringExtra(EXTRA_TAMPER))
     return START_STICKY
   }
 
@@ -1288,8 +1294,9 @@ class ClipForegroundService : Service() {
       .put("level", pct)
       .put("charging", charging)
       .put("name", deviceName())
-    // Stage 1.4: tell the Mac this phone speaks `q1` once it really does (the client of stage 1.7). Nothing is added until then.
-    val caps = QuicCaps.advertised(PHONE_SUPPORTS_QUIC)
+    // Stage 1.4/1.7: tell the Mac this phone speaks `q1` — true when the Rust client is in this build (an x86 emulator, or a build made
+    // without `build-so.sh`, has no libquic_core.so and must not claim it).
+    val caps = QuicCaps.advertised(QuicCore.isAvailable())
     if (caps.isNotEmpty()) stat.put("caps", org.json.JSONArray(caps))
     return stat.toString()
   }
@@ -1408,19 +1415,43 @@ class ClipForegroundService : Service() {
     )
   }
 
-  /**
-   * Receives a parsed `q.*` action from the Mac (stage 1.3). Nothing consumes it yet: the QUIC client of stage 1.7 and the session
-   * lifecycle of stage 1.8 will set it.
-   */
+  private val debuggable: Boolean
+    get() = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+
+  /** The phone's QUIC session host (stage 1.7), made on the first `q.*` action or debug request; nothing runs before that. */
   @Volatile
-  private var onQuicAction: ((QuicAction) -> Unit)? = null
+  private var quicManager: QuicManager? = null
+
+  private fun quic(): QuicManager = quicManager ?: synchronized(this) {
+    quicManager ?: QuicManager.create(
+      sendAction = { sendCmd(QuicControl.encode(it)) },
+      lanHost = { conn?.activeLanHost() },
+      onLan = { ClipBus.onLan() },
+      // Stage 1.7 serves only the debug `echo`; the file, screen and camera stages add their kinds.
+      supportedKinds = if (debuggable) setOf(QuicKind.ECHO) else emptySet(),
+      log = { ClipBus.log(it) },
+    ).also { quicManager = it }
+  }
+
+  /** Debug builds only: the end-to-end check of stage 1.7 (see `mobile/scripts/quic-device-test.sh`). */
+  private fun runQuicSelfTest(tamper: String?) {
+    val kind = when (tamper) {
+      "fp" -> QuicSelfTest.Tamper.Fp
+      "tok" -> QuicSelfTest.Tamper.Tok
+      else -> QuicSelfTest.Tamper.None
+    }
+    when {
+      !QuicCore.isAvailable() -> ClipBus.log("quic-selftest: FAIL library unavailable")
+      !quicAvailable() -> ClipBus.log("quic-selftest: FAIL the Mac does not offer QUIC here (no q1 or not on the LAN)")
+      else -> QuicSelfTest(quic(), ClipBus::log).start(kind)
+    }
+  }
 
   /**
    * A JSON `cmd` action from the Mac: parse it as one of the `q.*` actions. The `echo` kind exists in a debuggable build only. Only fixed
    * texts and lengths are logged, never the action: a session id, a port, a fingerprint and a token ride in it.
    */
   private fun dispatchCmdJson(json: String) {
-    val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     when (val parsed = QuicControl.parse(json, allowEcho = debuggable)) {
       is QuicParse.Action -> {
         val what = when (parsed.action) {
@@ -1431,7 +1462,7 @@ class ClipForegroundService : Service() {
           is QuicAction.End -> "end"
         }
         ClipBus.log("cmd: quic $what received")
-        onQuicAction?.invoke(parsed.action)
+        quic().handle(parsed.action)
       }
       QuicParse.Unknown -> ClipBus.log("cmd: json ignored, unknown action (${json.length} chars)")
       is QuicParse.Invalid -> ClipBus.log("cmd: json invalid (${parsed.code})")
@@ -1504,6 +1535,8 @@ class ClipForegroundService : Service() {
     AppUpdater.get(this).cancelSchedule()
     shareExec.shutdownNow()
     unregisterBatteryReceiver()
+    quicManager?.shutdown()
+    quicManager = null
     conn?.shutdown()
     conn = null
     bleAdvertiser?.stop()
@@ -1720,6 +1753,10 @@ class ClipForegroundService : Service() {
     private const val ACTION_CANCEL_TRANSFER = "expo.modules.selfadb.CANCEL_TRANSFER"
     private const val ACTION_SUBMIT_PICK = "expo.modules.selfadb.SUBMIT_PICK"
     private const val ACTION_RETRY_SEND = "expo.modules.selfadb.RETRY_SEND"
+
+    /** Debug-only start-intent action: run the QUIC echo self-test (`--es tamper none|fp|tok`). */
+    private const val ACTION_QUIC_SELFTEST = "expo.modules.selfadb.QUIC_SELFTEST"
+    private const val EXTRA_TAMPER = "tamper"
     private const val EXTRA_PICK_URIS = "pickUris"
     private const val EXTRA_TREE = "treeUri"
     private const val EXTRA_HISTORY_ID = "historyId"
@@ -1806,11 +1843,6 @@ class ClipForegroundService : Service() {
     /** The Mac's device name, learned from its `stat` frames — see [rememberMacName]. */
     private const val KEY_MAC_NAME = "macName"
 
-    /**
-     * Whether this phone can run the QUIC session protocol. Stays false until the client of stage 1.7 exists (then `QuicCore.isAvailable()`):
-     * advertising `q1` earlier would make the Mac offer sessions nothing answers. Flip it together with that stage.
-     */
-    private const val PHONE_SUPPORTS_QUIC = false
     private const val KEY_DAEMON_SECRET = "daemonSecret"
     private const val KEY_CLIP_PORT = "clipPort"
     /** How long a write stamp lives before it can no longer suppress an echo. */

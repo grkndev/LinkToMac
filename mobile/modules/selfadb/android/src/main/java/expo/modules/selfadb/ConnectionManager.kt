@@ -63,6 +63,14 @@ class ConnectionManager(
    *  [RelayClient] is not enough — its `ws?.send` silently no-ops until the socket is up. */
   private var relayJoined = false
   private var lastLanHost: String? = null
+
+  /**
+   * The Mac's LAN address while the LAN link is up, else null: where a QUIC session connects (stage 1.7). Kept in memory only and never
+   * logged. A volatile mirror of [lanUp]/[lastLanHost], which are touched on this manager's own thread, so other threads can read it.
+   */
+  @Volatile private var lanHostInUse: String? = null
+
+  fun activeLanHost(): String? = lanHostInUse
   private var fallbackFuture: ScheduledFuture<*>? = null
 
   /** Outbound frames produced while no link is joined (service just started, the relay grace
@@ -120,6 +128,7 @@ class ConnectionManager(
       lan?.shutdown(); lan = null
       relay?.shutdown(); relay = null
       lanUp = false
+      lanHostInUse = null
       relayJoined = false
       pending.clear()
       wifiNets.clear()
@@ -246,6 +255,7 @@ class ConnectionManager(
     lan?.shutdown(); lan = null; lastLanHost = null
     if (lanUp) {
       lanUp = false
+      lanHostInUse = null
       log("wifi lost -> relay fallback")
     }
     ensureRelay()
@@ -291,6 +301,7 @@ class ConnectionManager(
   private fun onLanStatus(status: String, peerOnline: Boolean, error: String?, attempt: Int) {
     if (status == "joined") {
       lanUp = true
+      lanHostInUse = lastLanHost
       cancelFallback()
       stopDiscovery() // found & connected -> stop scanning and release the multicast lock
       stopRelay() // LAN wins -> ensure a single active link
@@ -306,6 +317,7 @@ class ConnectionManager(
     // (lanUp already false) the grace timer governs the first fallback, so don't pre-empt it here.
     if (lanUp) {
       lanUp = false
+      lanHostInUse = null
       log("lan link lost ($status) -> relay fallback")
       // Re-scan to re-find the Mac (e.g. its DHCP lease changed) while we're still on Wi-Fi.
       if (wifiNets.isNotEmpty()) startDiscovery()
