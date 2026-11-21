@@ -30,7 +30,22 @@ export const FORBIDDEN = [
   'peerName', 'macName', 'deviceName',
 ];
 
-const FORBIDDEN_RE = new RegExp(`\\b(${FORBIDDEN.join('|')})\\b`, 'g');
+/**
+ * The QUIC data plane's secrets (stage 1.9). An address, a port, a certificate fingerprint, a session token and a session id travel through
+ * that code; none may reach a log line. `offer` is here because the offer is a data class whose `toString()` writes `sid`, `port`, `fp` and
+ * `tok` all at once; `fpHex` / `tokB64` / `hostAddress` are what the values are called where the client receives them.
+ *
+ * Held against Kotlin and TypeScript only: the clipboard daemon is a separate Java program with no QUIC in it, and touching its source
+ * (even a comment) would leave the committed dex asset out of step with it (`build-dex.sh`).
+ */
+export const QUIC_FORBIDDEN = [
+  'tok', 'fp', 'port', 'sid',
+  'fingerprint', 'certFingerprint', 'sessionId', 'hostAddress', 'lanHost', 'fpHex', 'tokB64', 'offer',
+];
+
+const wordsRe = (names) => new RegExp(`\\b(${names.join('|')})\\b`, 'g');
+const FORBIDDEN_RE = wordsRe(FORBIDDEN);
+const FORBIDDEN_WITH_QUIC_RE = wordsRe([...FORBIDDEN, ...QUIC_FORBIDDEN]);
 /**
  * `text.length`, `uri?.isEmpty()`, `secret != null` … : asking about the data without printing it
  * is fine.
@@ -125,10 +140,11 @@ function readCall(src, openIdx, lang) {
   return { end: j, frags };
 }
 
-function leaks(frags) {
+function leaks(frags, lang) {
   const found = new Set();
+  const forbidden = lang === 'java' ? FORBIDDEN_RE : FORBIDDEN_WITH_QUIC_RE;
   for (const f of frags) {
-    for (const m of f.matchAll(FORBIDDEN_RE)) {
+    for (const m of f.matchAll(forbidden)) {
       if (!SAFE_USE.test(f.slice(m.index + m[0].length))) found.add(m[0]);
     }
   }
@@ -160,7 +176,7 @@ export function findViolations(src, lang) {
   for (const m of src.matchAll(CALLS[lang])) {
     if (inComment(src, m.index)) continue;
     const { end, frags } = readCall(src, m.index + m[0].length, lang);
-    const names = leaks(frags);
+    const names = leaks(frags, lang);
     if (names.length === 0) continue;
     const firstLineStart = src.lastIndexOf('\n', m.index - 1) + 1;
     const lastLineEnd = src.indexOf('\n', end) === -1 ? src.length : src.indexOf('\n', end);

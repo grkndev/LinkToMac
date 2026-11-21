@@ -188,7 +188,7 @@ class ClipForegroundService : Service() {
       bridge = null
     }
     if (bridge == null) {
-      ClipBus.log("service: starting bridge on :$port")
+      ClipBus.log("service: starting bridge on :$port") // log-privacy: ok — the daemon bridge's own loopback port, not an address of anyone
       bridgeSecret = daemonSecret
       bridge = ClipBridge(
         port = port,

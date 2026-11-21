@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { findViolations } from './check-log-privacy.mjs';
+import { QUIC_FORBIDDEN, findViolations } from './check-log-privacy.mjs';
 
 const kt = (code) => findViolations(code, 'kt');
 const java = (code) => findViolations(code, 'java');
@@ -40,7 +42,7 @@ describe('does not cry wolf', () => {
     ['literal text that merely contains a forbidden word', 'ClipBus.log("no text on the clipboard, skipping")'],
     ['a nested string inside an interpolation', 'ClipBus.log("(relay=${if (url.isEmpty()) "none" else "on"}, lan=off)")'],
     ['an exception class name', 'ClipBus.log("share: read failed (${e.javaClass.simpleName})")'],
-    ['a null check', 'log("listening " + port + (secret != null ? " (auth required)" : ""))'],
+    ['a null check', 'log("listening on loopback" + (secret != null ? " (auth required)" : ""))'],
     ['a function that only looks like log', 'logRetry("x $text")'],
     ['a comment', '// log("leaks $text")'],
     ['a doc comment', ' * ClipBus.log("leaks $text") is what NOT to do'],
@@ -78,5 +80,82 @@ describe('mechanics', () => {
 
   test('kotlin: `$name.length` interpolates name itself, so it is flagged', () => {
     expect(names(kt('log("len $text.length")'))).toContain('text');
+  });
+});
+
+// ── stage 1.9: the QUIC data plane's secrets ────────────────────────────────────────────────
+// An address, a port, a certificate fingerprint, a session token and a session id travel through the QUIC code. None of them may reach a
+// log line, and no log line may interpolate the object that holds them all (the offer's toString() writes every one).
+
+describe('QUIC secrets (stage 1.9): catches the lines that would leak them', () => {
+  test.each([
+    ['the whole offer (its toString holds sid, port, fp and tok)', 'ClipBus.log("quic offer $offer")', 'offer'],
+    ['the fingerprint as a property', 'log("pinned ${c.fp}")', 'fp'],
+    ['the token, concatenated', 'log("token: " + tok)', 'tok'],
+    ['the session id', 'ClipBus.log("session $sid started")', 'sid'],
+    ['the port', 'log("connecting, port $port")', 'port'],
+    ['the hex fingerprint as the client receives it', 'log("fp $fpHex")', 'fpHex'],
+    ['the base64 token as the client receives it', 'log("tok $tokB64")', 'tokB64'],
+    ['the Mac\'s LAN address', 'log("to $hostAddress")', 'hostAddress'],
+    ['the LAN host', 'ClipBus.log("lan host ${lanHost}")', 'lanHost'],
+    ['a session id spelled out', 'log("id $sessionId")', 'sessionId'],
+    ['a certificate fingerprint spelled out', 'log("cert ${certFingerprint}")', 'certFingerprint'],
+  ])('kotlin: %s', (_label, code, name) => {
+    expect(names(kt(code))).toContain(name);
+  });
+
+  test('typescript: a template that interpolates the token or the fingerprint', () => {
+    expect(names(ts('console.log(`pinned ${fp}`)'))).toContain('fp');
+    expect(names(ts('append(`${clock()}  token ${tok}`)'))).toContain('tok');
+  });
+
+  test('every QUIC name is in the list and the list has no duplicates', () => {
+    for (const n of ['tok', 'fp', 'port', 'sid', 'offer', 'fpHex', 'tokB64', 'hostAddress']) expect(QUIC_FORBIDDEN).toContain(n);
+    expect(new Set(QUIC_FORBIDDEN).size).toBe(QUIC_FORBIDDEN.length);
+  });
+});
+
+describe('QUIC secrets (stage 1.9): does not cry wolf', () => {
+  test.each([
+    ['a fixed sentence', 'ClipBus.log("quic: connecting")'],
+    ['an enum of what went wrong', 'log("quic: connect refused (${result.reason})")'],
+    ['a length', 'log("tok ${tok.length} bytes")'],
+    ['asking whether it is there', 'log("sid known: ${sid != null}")'],
+    ['an offer null check', 'log("offer " + (offer != null))'],
+    ['literal text that merely contains the words', 'log("the port, the fp and the tok stay out of the log")'],
+  ])('kotlin: %s', (_label, code) => {
+    expect(kt(code)).toEqual([]);
+  });
+
+  test('the escape comment silences one call and only that call', () => {
+    const src = [
+      'ClipBus.log("bridge on :$port") // log-privacy: ok — the daemon bridge\'s own loopback port',
+      'ClipBus.log("again $port")',
+    ].join('\n');
+    expect(kt(src).map((v) => v.line)).toEqual([2]);
+  });
+
+  test('java is not held to the QUIC names (the daemon has no QUIC and its dex asset must not go stale)', () => {
+    expect(java('log("listening 127.0.0.1:" + port);')).toEqual([]);
+    expect(names(java('log("x " + uri);'))).toEqual(['uri']);   // the older rule still applies there
+  });
+});
+
+describe('the repository itself', () => {
+  const quicDir = join(import.meta.dir, '../modules/selfadb/android/src/main/java/expo/modules/selfadb');
+  const files = [
+    ...readdirSync(join(quicDir, 'quic')).filter((f) => f.endsWith('.kt')).map((f) => join(quicDir, 'quic', f)),
+    join(quicDir, 'ClipForegroundService.kt'),
+    join(quicDir, 'ConnectionManager.kt'),
+    join(quicDir, 'LanDiscovery.kt'),
+  ];
+
+  test.each(files.map((f) => [f.slice(quicDir.length + 1), f]))('%s logs none of the QUIC secrets', (_name, file) => {
+    expect(kt(readFileSync(file, 'utf8'))).toEqual([]);
+  });
+
+  test('only the two reasoned `port` lines carry the escape comment', () => {
+    const escaped = files.flatMap((f) => readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('log-privacy: ok') && /port/i.test(l)));
+    expect(escaped).toHaveLength(2);
   });
 });

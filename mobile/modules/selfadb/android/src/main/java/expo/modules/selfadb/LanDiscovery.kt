@@ -127,7 +127,7 @@ class LanDiscovery(
       if (rid != expectedRid) return // a different Mac on the LAN
       val host = serviceInfo.host?.hostAddress ?: return
       if (running) {
-        log("mdns: found Mac (port ${serviceInfo.port})")
+        log("mdns: found Mac (port ${serviceInfo.port})") // log-privacy: ok — the Mac's Bonjour-advertised LAN WebSocket port (broadcast to the whole network), not the QUIC data-plane port
         onFound(host, serviceInfo.port)
       }
     }
