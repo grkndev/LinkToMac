@@ -35,10 +35,11 @@ fourth is a stock-Android system service the Android app talks to through a tric
 |---|---|---|---|
 | **Clipboard sync** | WebSocket `clip` frames (images: `file`) | Yes — *or* LAN-direct (§5.1) | Both ways |
 | **Files and folders** | WebSocket `file` frames, chunked + acked (§5.4) | Yes — *or* LAN-direct (§5.1) | Both ways |
-| **Remote lock** | WebSocket `cmd` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
+| **Remote lock** | WebSocket `cmd` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac (`cmd` also carries the Mac → phone QUIC control actions, §5.6) |
 | **Battery telemetry** | WebSocket `stat` frames | Yes — *or* LAN-direct (§5.1) | Both ways (Mac↔Phone) |
 | **Notification mirroring** | WebSocket `note` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac |
 | **Message (SMS) mirroring + replies** | WebSocket `sms` frames | Yes — *or* LAN-direct (§5.1) | Phone → Mac (mirror); Mac → phone (reply request), phone → Mac (ack) |
+| **QUIC data plane** *(in progress: Phase 1 = control + session only, no user feature yet)* | QUIC (UDP) between the phone and the Mac, set up through `cmd` control actions (§5.6) | No — LAN only | Both ways |
 | **App updates** | Sparkle appcast (Mac) / GitHub "latest release" API (Android: the app downloads the APK itself, §3.9) | No — GitHub | GitHub → app |
 | **Media (now playing + controls)** | WebSocket `stat` frames (`media`, `mediaArt` / `mediaCmd`, §5.5) | Yes — *or* LAN-direct (§5.1) | Phone → Mac (state); Mac → phone (controls) |
 | **Proximity auto-lock** | BLE advertisement | **No** (fully local) | Phone advertises → Mac decides |
@@ -671,7 +672,7 @@ receive/heartbeat run as detached `Task`s. App-level ping every 25 s with a 50 s
 "pong timeout" that tears down a half-open socket (after sleep/wake or a NAT timeout, *sending*
 proves nothing — only receiving does); exponential backoff reconnect capped at 30 s. Joins as `"mac"`.
 On a received `clip` it writes to the pasteboard (and appends to an in-memory clip-history ring the
-dashboard reads); on a `cmd` it dispatches to a handler (currently only `"lock"`). It also **reports the
+dashboard reads); on a `cmd` it dispatches to a handler: `"lock"`, or — for an action that starts with `{` — the QUIC control actions of §5.6 (`handleCommand` → `onQuicControl`, logging only the *kind* of outcome, never the payload). It also **reports the
 Mac's battery** as `stat` frames (`BatteryMonitor.swift`, IOKit power sources) merged with the BLE
 proximity reading (§8): pushed the moment a peer connects and whenever either changes; a desktop Mac with
 no battery sends only proximity. **Inbound** `stat` is decoded into `phoneBatteryLevel`/`phoneCharging`/
@@ -748,7 +749,7 @@ notification identifier).
 
 JSON text frames over WebSocket. The relay reads control frames but treats `clip`/`cmd`/`stat`/`note`/`sms`/`file`
 payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProtocol.swift`
-(Mac) and inline `JSONObject` building in `RelayClient.kt` (Android).
+(Mac) and inline `JSONObject` building in `RelayClient.kt` (Android). `cmd` travels **both ways** since the QUIC work and carries JSON control actions as well as `lock` — see §5.6; the relay is unchanged because it never reads a `cmd`.
 
 ```jsonc
 // client → relay
@@ -1035,6 +1036,78 @@ existing `stat` plaintext, so the relay is untouched. Pinned by `protocol-vector
   need `MediaProjection` + `AudioPlaybackCapture` (per-session consent, apps may opt out) and a LAN-direct
   binary stream — the relay's 1 MiB frame and 120 frames/10 s limits don't fit continuous audio.
 
+### 5.6 QUIC data plane — Phase 1: control and session
+
+> **Status.** Only the *control and session* layer exists (plan `docs/plans/2026-11-14-quic-data-plane.md`, Phase 1).
+> No user feature rides on it yet: the only kind the Mac serves is a **debug-only `echo`**. File, screen, audio and
+> camera streams arrive in later phases, and this section is rewritten in full when they do (stage 6.11). What is
+> described here is what the code does today; the per-component detail lives in `mac/CLAUDE.md` (`Quic/`) and
+> `mobile/CLAUDE.md` (`quic/`, `native-src/quic-core`).
+
+**Why.** Large files, screen and media streaming don't fit the WebSocket path (the relay's 1 MiB frame and 120
+frames/10 s limits, TCP head-of-line blocking, no datagrams). QUIC gives independent streams and unreliable
+datagrams over one UDP port. The WebSocket link stays the **control plane**: it is already authenticated,
+end-to-end encrypted and relayed, so it is where a session is asked for, offered and ended.
+
+**`cmd` is two-way.** `cmd` used to be phone → Mac (`lock`). The Mac now sends it too:
+`RelayClient.sendCommand` writes it to exactly **one** link — `CommandRoute.choose(lanConnected:relayOnline:)`
+picks the LAN-direct link, else the relay, else nothing — and **never queues** (a `q.req` must be fresh). The
+envelope is unchanged (v2, AAD `"cmd"`); the phone opens it with `InboundCmd.open`. `true` means a socket took
+the frame, not that the phone received it. The relay learns nothing: a `cmd` is opaque to it.
+
+**Control actions.** A `cmd` whose action string starts with `{` is a JSON object with an `a` field:
+
+| `a` | Fields | Meaning |
+|---|---|---|
+| `q.req` | `sid`, `kind` | "open a session of this kind" (`cast`, `file`, `audio`, `cam`; `echo` only in a debug build) |
+| `q.accept` | `sid` | the asked side agrees |
+| `q.offer` | `sid`, `port`, `fp`, `tok` | **always the Mac's**: where to connect (`port` 1024–65535), the SHA-256 fingerprint to pin (`fp`, 64 lower-case hex), the single-use session token (`tok`, unpadded base64url of 32 bytes) |
+| `q.reject` | `sid`, `reason` | `busy`, `relay`, `unsupported`, … |
+| `q.end` | `sid` | best-effort "this session is over" |
+
+Rules (identical on both sides, pinned by `protocol-vectors/quic-control.json`): at most 4096 UTF-8 bytes, `sid` a
+canonical UUID (lower-cased), `port` a JSON **integer**, an object with a missing or unknown `a` is **ignored
+quietly** (so a newer peer can't break an older one — an old Mac that predates all this simply drops the frame),
+anything else malformed is `invalid`. Encoding writes keys alphabetically so both sides produce the same bytes.
+Either side may ask; if the phone asked there is no accept step; an offer before the accept is ignored.
+
+**Capabilities and the gate.** Each side learns whether the other speaks this protocol from the optional
+`caps:["q1"]` of its `stat` (§5.5): a `stat` without a usable `caps` never changes what is known, an array sets it,
+`[]` means none, and the set is cleared when the peer leaves both links. `QuicGate` is the one place that decides
+who may open a session: **busy** (a session is already running — checked first so it is never disturbed) >
+**relay** (QUIC runs on the LAN-direct link only) > **unsupported** (that kind isn't served here); the UI shows the
+controls only on the LAN link with `q1` announced. A session also ends when the LAN-direct link goes away
+(phone: `ConnectionManager`'s `onLanLost`; Mac: `onLanPeerLost`). Measured on a Galaxy S24 Ultra: the phone's
+session ends 1.7 s after Wi-Fi is switched off, the Mac releases its socket 4.2 s after (bounded by the phone's
+relay reconnect); a phone that vanishes without a trace is noticed by QUIC's own 30 s idle timeout, because the
+Mac never pings it.
+
+**The QUIC connection.** The Mac listens on UDP (preferred 53125, else a free port), TLS 1.3, ALPN `ltm/1`, with a
+long-lived self-signed P-256 identity in its login Keychain (`QuicIdentity`, hand-built DER because macOS can't
+create certificates). The phone is a `quinn` + `rustls` client (`mobile/native-src/quic-core`, behind a thin JNI):
+it accepts **only** a certificate whose SHA-256 equals the `fp` of the offer — host name and clock are ignored —
+and connects by IP literal. The first bidirectional stream is the **session stream**: the client writes the 32 raw
+token bytes; the Mac answers `OK\n`, or `NO\n` + FIN (then the client closes — Network.framework can't), and later
+maybe `END\n`. A token is single use, a wrong one refuses only that connection (up to 4 may wait at once, so a
+stranger on the LAN can't lock the real phone out). Every later stream starts with a channel varint (1 file
+(bidi), 2 screen, 3 camera (uni)); datagrams are accepted only after authentication. Time limits: token within 5 s
+of the connection, offer valid 30 s, idle 30 s (the client also sends a QUIC keep-alive every 5 s), accept 60 s;
+the phone waits 10 s for an offer and 12 s for the connection.
+
+**Privacy.** Only the LAN, only a pinned certificate, a single-use token; log lines are fixed sentences (§10 —
+the address, port, fingerprint, token and session id never appear in a log, and the sanitizer has shape rules for the
+last two as a second defence); the Diagnostics report carries a "QUIC data plane" section of availability, session
+state and RTT / loss / congestion numbers only. Honest caveat: the RTT is quinn's smoothed value on a mostly idle
+link — it read 76–81 ms where `ping` said 19–32 ms — so it is not a ping.
+
+**Tests.** Shared vectors (`protocol-vectors/quic-control.json`, run by Swift, Kotlin and, for the ALPN and channels,
+Rust); pure rule engines on both sides with an injected clock (`QuicSession`, `QuicHandshake`, `QuicGate`, `PeerCaps`);
+the real Mac listener against the real Rust client over localhost (`mac/scripts/quic-it.sh`); a phone debug build
+against a Mac Debug build (`mobile/scripts/quic-device-test.sh`). Two Network.framework behaviours cost time and are
+recorded in `mac/CLAUDE.md`: a datagram arriving with no datagram flow attached shows up as a *connection* with
+stream id 0 (told apart only by `usableDatagramFrameSize > 0`), and `group.cancel()` alone does not release the
+connection's UDP socket while the peer stays connected (streams and the datagram flow are cancelled first).
+
 ---
 
 ## 6. Clipboard sync — end to end
@@ -1212,7 +1285,12 @@ also rotates the BLE UUID, so proximity stops matching the old device automatica
   *class* names — never clipboard text, file names, hosts/IPs, package names, URIs/paths or the pairing
   secrets. `mobile/scripts/check-log-privacy.mjs` (chained after `expo lint`) fails the build on an
   interpolated `text`/`name`/`url`/`host`/`pkg`/`uri`/…; a reviewed exception carries a
-  `// log-privacy: ok — <reason>` comment. `e.message` stays allowed (free text, so (2) cleans it).
+  `// log-privacy: ok — <reason>` comment. `e.message` stays allowed (free text, so (2) cleans it). The QUIC data plane's
+  values — peer address, port, certificate fingerprint, session token, session id, and the offer object that
+  carries them all — are forbidden names too (`QUIC_FORBIDDEN`: `tok`, `fp`, `port`, `sid`, `offer`, …), in Kotlin
+  and TypeScript only (the Java daemon has no QUIC); the Mac's twin is `QuicLogPrivacyTests`, which reads the
+  `Quic/` sources and rejects an interpolated or secret-named log call. Both check **names, not values**, which
+  is why (2) also has explicit shape rules for a 64-hex fingerprint and a UUID session id.
   (2) *At the boundary:* Logs, Daemon Log and the Diagnostics report draw and share
   `src/features/diagnostics/sanitize.ts` output — idempotent patterns for clipboard lines, file names,
   URLs/IPs/hosts, content URIs and paths, packages, e-mail/phone/tokens, plus the runtime-known Mac and
@@ -1316,6 +1394,8 @@ in one step. The relay's `RELAY_AUTH_TOKEN` must match the password you set on t
 | Android (dev) | `cd mobile && bun install && bun run android` — builds the **`.dev`** variant (own app id, own daemon port 53125) so it coexists with a release install; custom native module → **no Expo Go** |
 | Android tests | `cd mobile/android && ./gradlew :selfadb:testDebugUnitTest` (JUnit + the real `org.json`; first run needs network); `cd mobile && npx tsc --noEmit && npx expo lint` |
 | Clipboard agent | rebuild dex with `native-src/clipboard-agent/build-dex.sh` only if `ClipboardAgent.java` changes |
+| QUIC core (Rust) | `cd mobile/native-src/quic-core && cargo test && cargo clippy --all-targets -- -D warnings`; `./build-so.sh` (cargo-ndk, arm64-v8a) writes the **gitignored** `libquic_core.so` into the module — rebuild it when `quic-core` changes and **always before a release** (a build without it still works but has no QUIC) |
+| QUIC integration | `mac/scripts/quic-it.sh` (the real Mac listener against the Rust client over localhost; `--release` proves the debug echo code is not in a Release binary); `mobile/scripts/quic-device-test.sh basic\|link\|relay\|macasked\|status\|oldmac\|all` (a phone debug build against a Mac Debug build; header lists the setup) |
 
 There is no CI: `protocol-vectors/` (run by both the Swift and the Kotlin suite), the Mac and Android
 test suites, `tsc` and `expo lint` are run by hand before a change merges. The cross-language contracts
@@ -1392,6 +1472,8 @@ server/
 protocol-vectors/   wire vectors BOTH codecs must pass (README.md explains the format)
   file-frame.json   the `file` frame plaintext: parse, encode, over-long header, malformed
   dir-sanitize.json how a peer-supplied folder path is made safe
+  stat-media.json   the media fields of `stat` (now playing + controls)
+  quic-control.json the QUIC control plane: q.* actions, channels, handshake, stat.caps, the gate (§5.6)
 
 mac/
   project.yml                    XcodeGen spec (app + share extension + LinkToMacTests); the .xcodeproj is generated
@@ -1419,7 +1501,12 @@ mac/
     SettingsWindow.swift / AppearanceSettings.swift / AboutView.swift   settings surfaces
     DashboardComponents.swift                           shared M3 components
   ShareExtension/                Finder ▸ Share ▸ "Send to Phone" (needs a Developer ID build to run; hands the path over via linktomac://)
-  Tests/                         swift-testing: AckWindow, FileSender (resume), FileInbox, FileBatchPlanner, FileFrame, FileFrameVectors, BurstCounter
+  Sources/LinkToMac/Quic/        the QUIC data plane (§5.6): QuicControl (q.* actions, QuicChannel, QuicGate, QuicCaps/PeerCaps), QuicSession (rules, pure),
+                                 QuicListener (NWListener glue + QuicServer driver), QuicService (wiring), QuicIdentity + DERWriter (Keychain identity,
+                                 self-signed cert), DelayRateController (file-rate controller, not used by the app yet)
+  scripts/quic-it.sh             integration tests against the Rust client (+ --release check that the debug echo is absent)
+  Tests/                         swift-testing: AckWindow, FileSender (resume), FileInbox, FileBatchPlanner, FileFrame, FileFrameVectors, BurstCounter,
+                                 Quic* (control + caps vectors, session, identity, listener integration, log privacy), NowPlaying, DelayRateController
 
 mobile/modules/selfadb/android/src/main/java/expo/modules/selfadb/
   SelfAdbModule.kt          Expo module: autoStart / pair / relay / proximity / SMS-permission / file-history APIs
@@ -1447,11 +1534,19 @@ mobile/modules/selfadb/android/src/main/java/expo/modules/selfadb/
   SmsMirror.kt              FGS-owned SMS reader/sender → sms frames
   BleAdvertiser.kt          BLE presence beacon
   ClipBus.kt                service ↔ module bridge + ring buffers + file-transfer and app-update events
+  quic/                     the QUIC data plane (§5.6): QuicControl (q.* actions, gate, caps), QuicSession (rules, pure), QuicManager (host + link stats),
+                            QuicCore (guarded JNI loader/facade), QuicSelfTest (debug echo check)
+mobile/modules/selfadb/android/src/debug/…/QuicSelfTestReceiver.kt   debug variant only: lets adb start the echo self-test / read the status
 mobile/modules/selfadb/android/src/test/…/   JUnit: FileFrameVectorTest, FileInboxTest, FileSinkTest, FolderWalkerTest, FileHistoryTest, AppUpdateTest
 
 mobile/native-src/clipboard-agent/
   ClipboardAgent.java       the privileged daemon source
   build-dex.sh              javac → d8 → dex
+
+mobile/native-src/quic-core/  Rust crate → libquic_core.so (gitignored; build-so.sh): client.rs (the phone's QUIC client), pin.rs (fingerprint pinning),
+                              channel.rs / batch.rs / params.rs / error.rs, jni_api.rs (thin JNI); tests/ (in-process server, vectors, pin, Mac cert);
+                              examples/ (echo_client, session_client — driven by the Mac's quic-it.sh)
+mobile/scripts/               check-log-privacy.mjs (+ test), quic-device-test.sh (on-device QUIC scenarios), build-brand-assets.mjs
 
 mobile/src/
   app/                      Expo Router screens (all Compose): index (Home), files, settings, appearance, notifications,

@@ -9,7 +9,7 @@ under 640 KiB then waited out a 30 s timeout).
 |---|---|---|---|
 | `file-frame.json` | the `file` frame plaintext: `u16 BE header-len ‖ header JSON ‖ raw bytes` | `mac/Tests/FileFrameVectorTests.swift` | `mobile/modules/selfadb/android/src/test/…/FileFrameVectorTest.kt` |
 | `dir-sanitize.json` | how a peer-supplied `dir` (folder path) is made safe to write under the download folder | `FileFrameVectorTests.dirSanitizeVectors` (→ `FileDropStore.sanitizeDir`) | `FileFrameVectorTest.dirSanitizeVectors` (→ `FileSink.sanitizeDir`) |
-| `quic-control.json` | the QUIC control plane: the `q.*` actions, stream channel header, ALPN and shared constants, handshake rules, `stat.caps` | `mac/Tests/QuicControlVectorTests.swift`, `QuicCapsVectorTests.swift` | `…/QuicControlVectorTest.kt`, `QuicCapsVectorTest.kt` (the Rust core also checks the ALPN: `mobile/native-src/quic-core/tests/vectors.rs`) |
+| `quic-control.json` | the QUIC control plane: the `q.*` actions, stream channel header, ALPN and shared constants, handshake rules, `stat.caps`, the session gate | `mac/Tests/QuicControlVectorTests.swift`, `QuicCapsVectorTests.swift` | `…/QuicControlVectorTest.kt`, `QuicCapsVectorTest.kt` (the Rust core also checks the ALPN: `mobile/native-src/quic-core/tests/vectors.rs`) |
 | `stat-media.json` | the media fields inside the `stat` plaintext: `media` / `mediaArt` (phone → Mac) and `mediaCmd` (Mac → phone) | `mac/Tests/NowPlayingTests.swift` (→ `NowPlaying.parse`, `MediaCommand`) | `…/MediaStateTest.kt` (→ `MediaState.toJson`, `parseCommand`) |
 
 Not a vector but a contract in the same spirit: **`FileFrame.maxTransferBytes` (Swift) and
@@ -96,3 +96,28 @@ hold no case tables of their own — so a rule changes by changing the file, and
 
 Run them: Swift and Kotlin as above; Rust with `cd mobile/native-src/quic-core && cargo test --test vectors`. (Kotlin's `build.gradle` declares this
 folder as an input of the test task — without that, editing a vector left Gradle's test task UP-TO-DATE and the Kotlin run silently skipped.)
+
+## `quic-control.json`
+
+The control plane of the QUIC data plane (plan `docs/plans/2026-11-14-quic-data-plane.md`, stages 1.3–1.8; the design is in TECHNICAL.md §5.6). It is the **only** copy of the expected results: neither test suite keeps a case table of its own, so a rule change is a change to this file plus both implementations. Six top-level keys; each section has a `description` (the authoritative statement of its case format) and a list of `cases`:
+
+| Section | Pins | Cases (`kind`) | Run by |
+|---|---|---|---|
+| `constants` | `alpn` (`ltm/1`), `max_action_bytes` (4096), `accept_timeout_ms` (60000) | — (`values`) | Swift, Kotlin; the Rust core checks `alpn` |
+| `actions` | the five `q.*` actions inside a `cmd`: what parses, what is `invalid` (with a short `code`), what is `unknown` (ignored quietly), and the canonical encoding | `parse` (95), `encode` (15) | Swift, Kotlin |
+| `channels` | the first varint of a data stream (1 file / 2 screen / 3 camera): the bytes a sender writes and how a receiver reads any of the four varint lengths, an unknown value, or too few bytes | `header` (3), `parse` (16) | Swift, Kotlin, Rust (`tests/vectors.rs`) |
+| `stat` | the optional `caps` field of a `stat`: absent keeps what is known, an array sets it, offline clears it; `quicAvailable`; what a side advertises | `parse`, `sequence`, `available`, `advertise` | Swift, Kotlin |
+| `handshake` | who may send what, when (per side and per asker), including timeouts | `scenario` (29): `initial` phase, `steps` of `send` / `receive` / `tick` with `expect` and `then` | Swift, Kotlin |
+| `gate` | who may open a session (`busy` > `relay` > `unsupported` > `proceed`), when the controls show, and the outgoing variant (adds `hidden`) | `incoming` (8), `visible` (8), `outgoing` (32): the whole truth table | Swift, Kotlin |
+
+Two rules that make the `actions` cases portable: a case's `text` may carry a `{PAD}` marker that is expanded to an exact UTF-8 byte length (so the 4096-byte limit is tested at exactly 4096 and at 4097, and counted in bytes rather than characters, without a 4 KiB literal), and `encoded` is the canonical form — keys in alphabetical order, no whitespace, the session id lower case — which both sides must also parse back to itself (the two codecs write identical bytes because neither relies on its JSON library's key order).
+
+Run them:
+
+```sh
+cd mac && xcodegen generate && xcodebuild -project LinkToMac.xcodeproj -scheme LinkToMac -destination 'platform=macOS' test
+cd mobile/android && ./gradlew :selfadb:testDebugUnitTest
+cd mobile/native-src/quic-core && cargo test
+```
+
+**`mobile/modules/selfadb/android/build.gradle` declares `protocol-vectors/` as an input of the unit-test task.** Without it, editing a vector left the Gradle task `UP-TO-DATE` and the Kotlin tests silently did not run.
