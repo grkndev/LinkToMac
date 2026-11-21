@@ -75,6 +75,22 @@ import Testing
         }
     }
 
+    @Test func theStatFragmentIsAJsonArrayOrNothing() throws {
+        #expect(LanAddressHint.statFragment([]) == nil)
+        #expect(LanAddressHint.statFragment(["192.168.1.10:53124"]) == "\"lan\":[\"192.168.1.10:53124\"]")
+        #expect(LanAddressHint.statFragment(["192.168.1.10:53124", "10.0.0.7:53124"]) == "\"lan\":[\"192.168.1.10:53124\",\"10.0.0.7:53124\"]")
+        // the whole payload stays valid JSON and the phone's parser reads it back
+        let json = "{" + (LanAddressHint.statFragment(["192.168.1.10:53124"]) ?? "") + "}"
+        let obj = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] ?? [:]
+        #expect(StatLan.parse(stat: obj) == .hints([StatLan.Hint(host: "192.168.1.10", port: 53124)]))
+    }
+
+    @Test func theFragmentRefusesWhatThePhoneWouldRefuse() {
+        // a malformed address must never reach the wire, even if a caller passes one
+        #expect(LanAddressHint.statFragment(["8.8.8.8:53124"]) == nil)
+        #expect(LanAddressHint.statFragment(["not an address", "192.168.1.10:53124"]) == "\"lan\":[\"192.168.1.10:53124\"]")
+    }
+
     @Test func theLiveInterfaceListIsUsableAndNeverLoopback() {
         // The real machine: whatever it has, the result must obey the same rules (this also proves getifaddrs wiring does not crash).
         let live = LanAddressHint.currentInterfaces()

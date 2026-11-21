@@ -88,6 +88,14 @@ enum LanAddressHint {
         return out
     }
 
+    /// The `"lan":[…]` fragment of the stat payload, or nil when there is nothing usable to say. Every item is re-checked with the phone's own
+    /// rule, so a malformed address can never reach the wire. Digits, dots and a colon only: no JSON escaping needed.
+    static func statFragment(_ addresses: [String]) -> String? {
+        let ok = addresses.filter { StatLan.parseItem($0) != nil }
+        guard !ok.isEmpty else { return nil }
+        return "\"lan\":[" + ok.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+    }
+
     private static func ethernetNumber(_ i: NetInterface) -> (number: Int, interface: NetInterface)? {
         guard i.up, i.running, !i.loopback, i.name.hasPrefix("en"), let n = Int(i.name.dropFirst(2)), String(n) == String(i.name.dropFirst(2)) else { return nil }
         return (n, i)

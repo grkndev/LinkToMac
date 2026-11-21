@@ -524,6 +524,11 @@ final class RelayClient {
         }
         // Stage 1.4: tell the phone this Mac speaks `q1` once it really does (the listener of stage 1.6). Nothing is added until then.
         if let caps = QuicCaps.statFragment(supportsQuic: Self.supportsQuic) { parts.append(caps) }
+        // Where this Mac listens on the LAN, so the phone can reach it without mDNS (a campus Wi-Fi dropped the multicast). Never logged.
+        if Config.lanEnabled,
+           let lan = LanAddressHint.statFragment(LanAddressHint.pick(interfaces: LanAddressHint.currentInterfaces(), port: Config.lanPort)) {
+            parts.append(lan)
+        }
         guard !parts.isEmpty else { return nil }
         return "{" + parts.joined(separator: ",") + "}"
     }
