@@ -2,7 +2,7 @@
 # On-device end-to-end checks of the QUIC data plane (plan stages 1.7 and 1.8): the real phone (Rust quinn client through JNI) against the
 # real Mac (a Debug build of the Mac app, which serves the debug `echo` kind), over the LAN.
 #
-#   mobile/scripts/quic-device-test.sh [basic|link|relay|macasked|oldmac|all]      (default: basic; `all` = everything but oldmac)
+#   mobile/scripts/quic-device-test.sh [basic|link|relay|macasked|status|oldmac|all]      (default: basic; `all` = everything but oldmac)
 #   ANDROID_SERIAL=<serial> mobile/scripts/quic-device-test.sh link
 #
 # Scenarios
@@ -14,6 +14,9 @@
 #   relay     Wi-Fi off: asking is refused plainly ("needs the same Wi-Fi") and a FORCED request makes the Mac refuse (`PASS Refused:relay`).
 #   macasked  the Mac asks (`open -a <Debug app> linktomac://quic-test`): the phone accepts on its own, runs the echo check, ends the session;
 #             the Mac's log says `Completed`.
+#   status    (stage 1.9) what the diagnostics report shows, read from the phone's own status function through the debug receiver's STATUS action:
+#             idle -> `state=Idle` and no link numbers; a held session -> `state=Connected` with a real round-trip time and loss/congestion
+#             counters (numbers, never `null`); once the session has ended (Wi-Fi off) -> the numbers are `null` again.
 #   oldmac    the installed pre-QUIC Mac app (v0.13.0) must run INSTEAD of the Debug build: the gate hides QUIC (no `caps`), a FORCED request is
 #             ignored by the old app (`PASS NoAnswer` after 10 s) and the Mac's screen is not locked by it.
 #
@@ -132,6 +135,42 @@ scenario_link() {
   restore_wifi; wait_for_lan || echo "   (the phone did not rejoin the LAN within 60 s)"
 }
 
+status_line() { # asks the phone for its status and prints the STATUS line it logs
+  local v=""
+  "${ADB[@]}" logcat -c
+  "${ADB[@]}" shell am broadcast -n "$PKG/$RECEIVER" -a "expo.modules.selfadb.QUIC_STATUS" >/dev/null 2>&1
+  for _ in $(seq 1 20); do sleep 0.25; v="$(phone_log | grep -o 'quic-selftest: STATUS .*' | tail -1)"; [[ -n "$v" ]] && break; done
+  keep_log
+  echo "$v"
+}
+field() { echo "$1" | grep -o " $2=[^ ]*" | head -1 | cut -d= -f2; }
+is_number() { [[ "$1" =~ ^[0-9]+$ ]]; }
+
+scenario_status() {
+  need_debug_mac
+  local v
+  v="$(status_line)"; echo "   idle:      $v"
+  [[ "$(field "$v" available)" == "true" ]] || bad "QUIC is not available on the phone ($v)"
+  if [[ "$(field "$v" state)" == "Idle" && "$(field "$v" rtt)" == "null" && "$(field "$v" lost)" == "null" && "$(field "$v" congestion)" == "null" ]]; then ok "idle: no session, no link numbers"; else bad "idle status is not Idle with null numbers ($v)"; fi
+
+  "${ADB[@]}" logcat -c
+  broadcast hold
+  local held=""
+  for _ in $(seq 1 30); do sleep 0.5; held="$(phone_log | grep -c 'quic-selftest: HOLDING')"; [[ "$held" -ge 1 ]] && break; done
+  [[ "$held" -ge 1 ]] || { bad "the session did not open (no HOLDING)"; keep_log; return; }
+  sleep 2   # statistics arrive every 500 ms
+  v="$(status_line)"; echo "   connected: $v"
+  if [[ "$(field "$v" state)" == "Connected" ]] && is_number "$(field "$v" rtt)" && is_number "$(field "$v" lost)" && is_number "$(field "$v" congestion)"; then
+    ok "connected: a real round-trip time ($(field "$v" rtt) ms), lost=$(field "$v" lost), congestion=$(field "$v" congestion)"
+  else bad "a held session must show state=Connected and numbers ($v)"; fi
+
+  wifi disable
+  for _ in $(seq 1 40); do sleep 0.5; phone_log | grep -q 'quic-selftest: PASS held until it ended' && break; done
+  v="$(status_line)"; echo "   ended:     $v"
+  if [[ "$(field "$v" rtt)" == "null" && "$(field "$v" lost)" == "null" && "$(field "$v" congestion)" == "null" ]]; then ok "ended: the link numbers are gone again"; else bad "numbers outlived the session ($v)"; fi
+  restore_wifi; wait_for_lan || echo "   (the phone did not rejoin the LAN within 60 s)"
+}
+
 scenario_relay() {
   need_debug_mac
   wifi disable; sleep 4
@@ -170,6 +209,7 @@ case "$SCENARIO" in
   link) scenario_link ;;
   relay) scenario_relay ;;
   macasked) scenario_macasked ;;
+  status) scenario_status ;;
   oldmac) scenario_oldmac ;;
   all) scenario_basic; scenario_macasked; scenario_link; scenario_relay ;;
   *) echo "unknown scenario '$SCENARIO'"; exit 2 ;;
