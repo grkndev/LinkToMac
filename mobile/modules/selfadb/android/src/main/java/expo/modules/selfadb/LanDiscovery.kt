@@ -72,17 +72,19 @@ class LanDiscovery(
   }
 
   private val discoveryListener = object : NsdManager.DiscoveryListener {
-    override fun onDiscoveryStarted(serviceType: String) {}
-    override fun onDiscoveryStopped(serviceType: String) {}
+    override fun onDiscoveryStarted(serviceType: String) { log("mdns: discovery started") }
+    override fun onDiscoveryStopped(serviceType: String) { log("mdns: discovery stopped") }
     override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
       log("mdns discovery start failed: $errorCode")
       releaseFailedStart()
     }
     override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
     override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-      if (serviceInfo.serviceType.trimEnd('.').endsWith(SERVICE_TYPE.trimEnd('.'))) enqueue(serviceInfo)
+      val ours = serviceInfo.serviceType.trimEnd('.').endsWith(SERVICE_TYPE.trimEnd('.'))
+      log(if (ours) "mdns: a service was seen" else "mdns: a service of another type was seen")
+      if (ours) enqueue(serviceInfo)
     }
-    override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
+    override fun onServiceLost(serviceInfo: NsdServiceInfo) { log("mdns: a service went away") }
   }
 
   @Synchronized
@@ -119,12 +121,13 @@ class LanDiscovery(
 
   private val resolveListener = object : NsdManager.ResolveListener {
     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+      log("mdns: resolve failed (code $errorCode)")
       synchronized(this@LanDiscovery) { resolving = false; resolveNext() }
     }
     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
       synchronized(this@LanDiscovery) { resolving = false; resolveNext() }
       val rid = serviceInfo.attributes["rid"]?.let { String(it, Charsets.UTF_8) }
-      if (rid != expectedRid) return // a different Mac on the LAN
+      if (rid != expectedRid) { log("mdns: resolved a Mac that is not ours"); return } // a different Mac on the LAN
       val host = serviceInfo.host?.hostAddress ?: return
       if (running) {
         log("mdns: found Mac (port ${serviceInfo.port})") // log-privacy: ok — the Mac's Bonjour-advertised LAN WebSocket port (broadcast to the whole network), not the QUIC data-plane port

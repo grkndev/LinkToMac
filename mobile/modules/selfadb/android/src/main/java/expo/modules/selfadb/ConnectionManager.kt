@@ -245,6 +245,7 @@ class ConnectionManager(
 
   private fun onWifiUp(network: Network) {
     wifiNets.add(network)
+    log("wifi up (${wifiNets.size} network(s), lan ${if (lanUp) "joined" else "not joined"})")
     if (!running || !canLan || lanUp) return
     startDiscovery()
     lanHost?.takeIf { it.isNotEmpty() }?.let { tryLan(it, lanPort) }
@@ -254,6 +255,7 @@ class ConnectionManager(
 
   private fun onWifiDown(network: Network) {
     wifiNets.remove(network)
+    log("wifi down (${wifiNets.size} network(s) left)")
     if (!running || wifiNets.isNotEmpty()) return // another Wi-Fi still up
     // No Wi-Fi -> LAN is impossible. Release discovery's multicast lock, drop any LAN link, relay.
     stopDiscovery()
@@ -271,7 +273,8 @@ class ConnectionManager(
     // An existing instance may have had its start() fail (NsdManager error released its state):
     // start() is a no-op while healthy and a retry after a failure, so call it either way —
     // otherwise a failed discovery stays dead until Wi-Fi cycles.
-    discovery?.let { it.start(); return }
+    discovery?.let { log("lan: discovery already running"); it.start(); return }
+    log("lan: starting discovery")
     discovery = LanDiscovery(
       appCtx,
       room,
