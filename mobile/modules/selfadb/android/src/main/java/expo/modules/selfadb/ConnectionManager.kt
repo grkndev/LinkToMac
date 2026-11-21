@@ -52,6 +52,12 @@ class ConnectionManager(
    * needs that link and ends here (stage 1.8). Called on this manager's thread; do not block.
    */
   private val onLanLost: () -> Unit = {},
+  /** The last Mac address that joined ("host:port", remembered from an earlier session): tried as soon as Wi-Fi is up, before mDNS answers. */
+  private val rememberedLan: String? = null,
+  /** Called on this manager's thread when a LAN link authenticates, so the address can be persisted. Never log what it receives. */
+  private val onLanRemember: (host: String, port: Int) -> Unit = { _, _ -> },
+  /** Debug builds only: false switches mDNS off so the other ways of finding the Mac can be tested on their own. */
+  private val discoveryEnabled: Boolean = true,
   private val log: (String) -> Unit,
 ) {
   private val appCtx = context.applicationContext
@@ -68,6 +74,10 @@ class ConnectionManager(
    *  [RelayClient] is not enough — its `ws?.send` silently no-ops until the socket is up. */
   private var relayJoined = false
   private var lastLanHost: String? = null
+  private var lastLanPort = 0
+
+  /** Every address worth trying for the Mac, from mDNS, the Mac's own `stat.lan` hint, the manual seed and the last one that joined. */
+  private val book = LanHostBook()
 
   /**
    * The Mac's LAN address while the LAN link is up, else null: where a QUIC session connects (stage 1.7). Kept in memory only and never
@@ -111,6 +121,12 @@ class ConnectionManager(
     running = true
     post {
       canLan = lanEnabled && lanPort > 0 && room.isNotEmpty() && key.isNotEmpty()
+      lanHost?.takeIf { it.isNotEmpty() }?.let { book.add(it, lanPort, LanHostBook.Source.SEED) }
+      rememberedLan?.let { raw ->
+        val colon = raw.lastIndexOf(':')
+        val remPort = if (colon > 0) raw.substring(colon + 1).toIntOrNull() else null
+        if (remPort != null) book.add(raw.substring(0, colon), remPort, LanHostBook.Source.REMEMBERED)
+      }
       if (canLan) {
         // Drive LAN off Wi-Fi presence: onAvailable fires immediately for an already-connected
         // Wi-Fi and kicks off discovery + the seed-host connect. The grace timer then falls back
@@ -215,7 +231,7 @@ class ConnectionManager(
     if (cm == null) {
       // No ConnectivityManager (shouldn't happen on a real device): degrade to always-on discovery.
       startDiscovery()
-      lanHost?.takeIf { it.isNotEmpty() }?.let { tryLan(it, lanPort) }
+      tryBest()
       return
     }
     val req = NetworkRequest.Builder()
@@ -233,7 +249,7 @@ class ConnectionManager(
       netCallback = null
       // Degrade gracefully: behave like the old always-on discovery so LAN still works.
       startDiscovery()
-      lanHost?.takeIf { it.isNotEmpty() }?.let { tryLan(it, lanPort) }
+      tryBest()
     }
   }
 
@@ -247,8 +263,9 @@ class ConnectionManager(
     wifiNets.add(network)
     log("wifi up (${wifiNets.size} network(s), lan ${if (lanUp) "joined" else "not joined"})")
     if (!running || !canLan || lanUp) return
+    book.resetFailures() // a (re)joined network: an address that failed on the last one may work here
+    tryBest()
     startDiscovery()
-    lanHost?.takeIf { it.isNotEmpty() }?.let { tryLan(it, lanPort) }
     // No new grace timer needed: at startup start() already armed one; on a later Wi-Fi reconnect
     // the relay is already serving, and a LAN "joined" will stop it.
   }
@@ -270,6 +287,10 @@ class ConnectionManager(
   }
 
   private fun startDiscovery() {
+    if (!discoveryEnabled) {
+      log("lan: mDNS discovery is switched off (debug)")
+      return
+    }
     // An existing instance may have had its start() fail (NsdManager error released its state):
     // start() is a no-op while healthy and a retry after a failure, so call it either way —
     // otherwise a failed discovery stays dead until Wi-Fi cycles.
@@ -278,7 +299,7 @@ class ConnectionManager(
     discovery = LanDiscovery(
       appCtx,
       room,
-      onFound = { host, port -> post { if (running) tryLan(host, port) } },
+      onFound = { host, port -> post { if (running) { book.add(host, port, LanHostBook.Source.DISCOVERED); tryLan(host, port) } } },
       log = log,
     ).also { it.start() }
   }
@@ -288,11 +309,27 @@ class ConnectionManager(
     discovery = null
   }
 
+  /** Try the most preferred address in the book that has not failed; no-op when there is none or it is already the target. */
+  private fun tryBest() {
+    book.best()?.let { tryLan(it.host, it.port) }
+  }
+
+  /** The Mac told us (over any link) where it listens on the LAN. Used right away when we are on Wi-Fi without a LAN link. */
+  fun offerLanHints(hints: List<StatLan.Hint>) = post {
+    if (!running || !canLan) return@post
+    book.offerHints(hints)
+    if (!lanUp && wifiNets.isNotEmpty()) {
+      log("lan: the Mac announced ${hints.size} address(es)")
+      tryBest()
+    }
+  }
+
   private fun tryLan(host: String, port: Int) {
     if (!running) return
-    if (lan != null && host == lastLanHost) return // already targeting this Mac
+    if (lan != null && host == lastLanHost && port == lastLanPort) return // already targeting this Mac
     lan?.shutdown()
     lastLanHost = host
+    lastLanPort = port
     if (lanHostInUse != null) {
       // The Mac's address changed under a live link: the address a QUIC session was opened to is stale (stage 1.8).
       lanHostInUse = null
@@ -316,6 +353,7 @@ class ConnectionManager(
     if (status == "joined") {
       lanUp = true
       lanHostInUse = lastLanHost
+      lastLanHost?.let { book.markJoined(it, lastLanPort); onLanRemember(it, lastLanPort) }
       cancelFallback()
       stopDiscovery() // found & connected -> stop scanning and release the multicast lock
       stopRelay() // LAN wins -> ensure a single active link
@@ -329,6 +367,11 @@ class ConnectionManager(
     // just died -> fail over to the relay now. LanClient keeps retrying; when it re-auths we
     // switch back (the "joined" branch stops the relay again). During the initial bring-up
     // (lanUp already false) the grace timer governs the first fallback, so don't pre-empt it here.
+    if (!lanUp && status == "connecting" && attempt >= 1) {
+      // The target did not answer (LanClient counts a failed attempt): after two failures the book offers the next address, if any.
+      lastLanHost?.let { book.markFailed(it, lastLanPort) }
+      tryBest()
+    }
     if (lanUp) {
       lanUp = false
       lanHostInUse = null

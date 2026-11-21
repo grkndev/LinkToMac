@@ -392,6 +392,7 @@ class ClipForegroundService : Service() {
         ClipBus.macStat(json)
         rememberMacName(json)
         rememberMacCaps(json)
+        rememberLanHints(json)
         handleMediaCommand(json)
       },
       onFileReceived = { bytes -> applyFile(bytes) },
@@ -413,6 +414,10 @@ class ClipForegroundService : Service() {
       },
       // A QUIC session needs the LAN-direct link: when it goes away the session ends (stage 1.8).
       onLanLost = { quicManager?.linkLost() },
+      // The last Mac address that joined: tried the moment Wi-Fi is up, before mDNS has answered (a campus Wi-Fi dropped its multicast).
+      rememberedLan = p.getString(PREF_LAST_LAN, null),
+      onLanRemember = { lanHost, lanPort -> rememberLan(lanHost, lanPort) },
+      discoveryEnabled = !(debuggable && p.getBoolean(PREF_DEBUG_NO_MDNS, false)),
       log = { ClipBus.log(it) },
     ).also { it.start() }
   }
@@ -1264,6 +1269,36 @@ class ClipForegroundService : Service() {
     macCaps.applyStat(stat)
   }
 
+  /** The Mac's own LAN addresses (`stat.lan`): handed to the connection, which tries them when it is on Wi-Fi without a LAN link. */
+  private fun rememberLanHints(json: String) {
+    val stat = try { JSONObject(json) } catch (e: Exception) { return }
+    val update = StatLan.parse(stat)
+    if (update is StatLan.Update.Hints) conn?.offerLanHints(update.hints)
+  }
+
+  /** Persists the address of a LAN link that authenticated (memory of the last good Mac address; never logged). */
+  private fun rememberLan(lanHost: String, lanPort: Int) {
+    val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val now = "$lanHost:$lanPort"
+    if (p.getString(PREF_LAST_LAN, null) != now) p.edit().putString(PREF_LAST_LAN, now).apply()
+  }
+
+  /** Debug builds only (via the debug receiver): switch mDNS off/on and reconnect, to prove the other ways of finding the Mac. */
+  fun debugSetDiscovery(on: Boolean) {
+    if (!debuggable) return
+    getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(PREF_DEBUG_NO_MDNS, !on).apply()
+    ClipBus.log("lan-debug: mDNS discovery ${if (on) "on" else "off"}")
+    reloadConnection()
+  }
+
+  /** Debug builds only: forget the remembered Mac address and reconnect. */
+  fun debugForgetLan() {
+    if (!debuggable) return
+    getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(PREF_LAST_LAN).apply()
+    ClipBus.log("lan-debug: remembered address forgotten")
+    reloadConnection()
+  }
+
   private fun rememberMacName(json: String) {
     val name = try {
       JSONObject(json).optString("name").takeIf { it.isNotBlank() }
@@ -1807,6 +1842,8 @@ class ClipForegroundService : Service() {
     /** Debug-only start-intent action: run the QUIC echo self-test (`--es tamper none|fp|tok`). */
     const val ACTION_QUIC_SELFTEST = "expo.modules.selfadb.QUIC_SELFTEST"
     const val ACTION_QUIC_STATUS = "expo.modules.selfadb.QUIC_STATUS"
+    const val ACTION_LAN_DISCOVERY = "expo.modules.selfadb.LAN_DISCOVERY"
+    const val ACTION_LAN_FORGET = "expo.modules.selfadb.LAN_FORGET"
     const val EXTRA_TAMPER = "tamper"
     private const val EXTRA_PICK_URIS = "pickUris"
     private const val EXTRA_TREE = "treeUri"
@@ -1881,6 +1918,8 @@ class ClipForegroundService : Service() {
     }
 
     private const val PREFS = "linktomac_relay"
+    private const val PREF_LAST_LAN = "lastLanAddr"
+    private const val PREF_DEBUG_NO_MDNS = "debugNoMdns"
     // Separate prefs file: clearConfig() wipes PREFS on unpair, UI settings must survive that.
     private const val PREFS_UI = "linktomac_ui"
     private const val KEY_STATUS_NOTIF_VISIBLE = "statusNotifVisible"

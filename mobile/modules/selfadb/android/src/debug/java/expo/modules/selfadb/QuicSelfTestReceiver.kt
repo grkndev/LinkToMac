@@ -19,6 +19,14 @@ class QuicSelfTestReceiver : BroadcastReceiver() {
       ClipForegroundService.instance?.logQuicStatus()
       return
     }
+    if (intent.action == ClipForegroundService.ACTION_LAN_DISCOVERY) {
+      ClipForegroundService.instance?.debugSetDiscovery(intent.getBooleanExtra("on", true))
+      return
+    }
+    if (intent.action == ClipForegroundService.ACTION_LAN_FORGET) {
+      ClipForegroundService.instance?.debugForgetLan()
+      return
+    }
     if (intent.action != ClipForegroundService.ACTION_QUIC_SELFTEST) return
     val tamper = intent.getStringExtra(ClipForegroundService.EXTRA_TAMPER)
     val running = ClipForegroundService.instance
