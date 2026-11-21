@@ -1,0 +1,1002 @@
+{
+ "description": "The Mac's LAN address hint (stat.lan, plan note 'LAN rediscovery'). The Mac writes the private IPv4 addresses of its Ethernet/Wi-Fi interfaces into its own `stat` as `\"lan\":[\"a.b.c.d:port\", ...]`, so the phone can reach the Mac's LAN-direct server over a relay-learned address when mDNS multicast does not get through. Swift (`mac/Tests/StatLanVectorTests.swift`) and Kotlin (`StatLanVectorTest.kt`) run the same `parse` cases; only the Mac builds the field, so `pick` is run by Swift alone. The hint is untrusted input (the LAN handshake authenticates the peer): anything malformed is dropped quietly and never fatal.",
+ "parse": {
+  "description": "What the phone makes of a decoded stat object (`stat`). `expect.update`: `absent` (no usable `lan`: the receiver keeps what it knows; `lan` must be a JSON array) or `hints` with the accepted `\"a.b.c.d:port\"` strings in order. Rules: each item a string of at most 21 characters in canonical form (four decimal octets 0-255 without leading zeros, one colon, a decimal port 1024-65535 without sign or leading zero); the address must be RFC 1918 (10/8, 172.16/12, 192.168/16); duplicates collapse; at most 3 are kept (the first valid ones); anything else is skipped.",
+  "cases": [
+   {
+    "name": "no_lan_field",
+    "kind": "parse",
+    "stat": {
+     "level": 80,
+     "charging": false
+    },
+    "expect": {
+     "update": "absent"
+    }
+   },
+   {
+    "name": "lan_is_a_string",
+    "kind": "parse",
+    "stat": {
+     "lan": "192.168.1.10:53124"
+    },
+    "expect": {
+     "update": "absent"
+    }
+   },
+   {
+    "name": "lan_is_a_number",
+    "kind": "parse",
+    "stat": {
+     "lan": 5
+    },
+    "expect": {
+     "update": "absent"
+    }
+   },
+   {
+    "name": "lan_is_an_object",
+    "kind": "parse",
+    "stat": {
+     "lan": {
+      "h": "192.168.1.10"
+     }
+    },
+    "expect": {
+     "update": "absent"
+    }
+   },
+   {
+    "name": "lan_is_null",
+    "kind": "parse",
+    "stat": {
+     "lan": null
+    },
+    "expect": {
+     "update": "absent"
+    }
+   },
+   {
+    "name": "empty_array_means_no_hints",
+    "kind": "parse",
+    "stat": {
+     "lan": []
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "one_valid_192_168",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "192.168.1.10:53124"
+     ]
+    }
+   },
+   {
+    "name": "other_stat_fields_do_not_matter",
+    "kind": "parse",
+    "stat": {
+     "level": 80,
+     "charging": true,
+     "name": "Pixel",
+     "caps": [
+      "q1"
+     ],
+     "lan": [
+      "10.0.0.7:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "10.0.0.7:53124"
+     ]
+    }
+   },
+   {
+    "name": "three_valid_in_order",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:53124",
+      "10.0.0.7:53124",
+      "172.16.5.4:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "192.168.1.10:53124",
+      "10.0.0.7:53124",
+      "172.16.5.4:53124"
+     ]
+    }
+   },
+   {
+    "name": "a_fourth_valid_one_is_dropped",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:53124",
+      "10.0.0.7:53124",
+      "172.16.5.4:53124",
+      "192.168.2.2:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "192.168.1.10:53124",
+      "10.0.0.7:53124",
+      "172.16.5.4:53124"
+     ]
+    }
+   },
+   {
+    "name": "duplicates_collapse",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:53124",
+      "192.168.1.10:53124",
+      "10.0.0.7:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "192.168.1.10:53124",
+      "10.0.0.7:53124"
+     ]
+    }
+   },
+   {
+    "name": "invalid_items_are_skipped_not_fatal",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "nonsense",
+      "192.168.1.10:53124",
+      7,
+      null,
+      {
+       "x": 1
+      },
+      [
+       "a"
+      ]
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "192.168.1.10:53124"
+     ]
+    }
+   },
+   {
+    "name": "a_public_address_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "8.8.8.8:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "loopback_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "127.0.0.1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "link_local_169_254_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "169.254.1.1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "unspecified_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "0.0.0.0:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "broadcast_like_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "255.255.255.255:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "172_15_is_outside_the_private_block",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "172.15.0.1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "172_16_is_the_first_private",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "172.16.0.1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "172.16.0.1:53124"
+     ]
+    }
+   },
+   {
+    "name": "172_31_is_the_last_private",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "172.31.255.254:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "172.31.255.254:53124"
+     ]
+    }
+   },
+   {
+    "name": "172_32_is_outside",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "172.32.0.1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "10_slash_8_is_private",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "10.255.255.254:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "10.255.255.254:53124"
+     ]
+    }
+   },
+   {
+    "name": "192_169_is_not_192_168",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.169.1.10:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_1023_is_too_low",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:1023"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_1024_is_the_lowest",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:1024"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "192.168.1.10:1024"
+     ]
+    }
+   },
+   {
+    "name": "port_65535_is_the_highest",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:65535"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": [
+      "192.168.1.10:65535"
+     ]
+    }
+   },
+   {
+    "name": "port_65536_is_too_high",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:65536"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_zero",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:0"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_missing",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_not_a_number",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:abc"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_negative",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:-1"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_with_leading_zero",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:053124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "port_with_a_plus_sign",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:+53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "octet_over_255",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.256:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "octet_with_leading_zero",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.01.10:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "only_three_octets",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "five_octets",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10.1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "empty_octet",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168..10:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "spaces_are_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      " 192.168.1.10:53124",
+      " 192.168.1.10 :53124",
+      "192.168.1.10:53124 "
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "a_host_name_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "macbook.local:53124",
+      "localhost:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "ipv6_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "[fe80::1]:53124",
+      "[::1]:53124",
+      "fe80::1:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "two_colons",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:53124:1"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "an_overlong_string_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "192.168.1.10:53124                                                                      "
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "the_empty_string",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      ""
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   },
+   {
+    "name": "a_url_is_refused",
+    "kind": "parse",
+    "stat": {
+     "lan": [
+      "ws://192.168.1.10:53124"
+     ]
+    },
+    "expect": {
+     "update": "hints",
+     "hints": []
+    }
+   }
+  ]
+ },
+ "pick": {
+  "description": "Which addresses the Mac puts in `stat.lan` from a list of its interfaces (`interfaces`: name, up, running, loopback, ipv4 or null) and its LAN server `port`. Rules: only interfaces named `en<number>` that are up AND running and not loopback, with a private IPv4 (the same rule as `parse`); ordered by interface number (`en0` first, numerically: `en2` before `en10`); duplicates collapse; at most 3; a port outside 1024-65535 yields none.",
+  "cases": [
+   {
+    "name": "one_wifi_interface",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "192.168.1.10:53124"
+    ]
+   },
+   {
+    "name": "en0_first_then_by_name",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en5",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.5"
+     },
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     },
+     {
+      "name": "en1",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "172.16.0.9"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "192.168.1.10:53124",
+     "172.16.0.9:53124",
+     "10.0.0.5:53124"
+    ]
+   },
+   {
+    "name": "a_down_interface_is_skipped",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": false,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     },
+     {
+      "name": "en1",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.5"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "10.0.0.5:53124"
+    ]
+   },
+   {
+    "name": "a_not_running_interface_is_skipped",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": false,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 53124,
+    "expect": []
+   },
+   {
+    "name": "loopback_is_skipped",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "lo0",
+      "up": true,
+      "running": true,
+      "loopback": true,
+      "ipv4": "127.0.0.1"
+     },
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "192.168.1.10:53124"
+    ]
+   },
+   {
+    "name": "only_en_interfaces",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "awdl0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "169.254.1.1"
+     },
+     {
+      "name": "utun3",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.9.9.9"
+     },
+     {
+      "name": "bridge100",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.64.1"
+     },
+     {
+      "name": "llw0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "169.254.2.2"
+     },
+     {
+      "name": "ap1",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.5.1"
+     },
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "192.168.1.10:53124"
+    ]
+   },
+   {
+    "name": "a_public_address_on_en0_is_skipped",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "8.8.8.8"
+     },
+     {
+      "name": "en1",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.5"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "10.0.0.5:53124"
+    ]
+   },
+   {
+    "name": "link_local_on_en0_is_skipped",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "169.254.7.7"
+     }
+    ],
+    "port": 53124,
+    "expect": []
+   },
+   {
+    "name": "at_most_three",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     },
+     {
+      "name": "en1",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.5"
+     },
+     {
+      "name": "en2",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.6"
+     },
+     {
+      "name": "en3",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.7"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "192.168.1.10:53124",
+     "10.0.0.5:53124",
+     "10.0.0.6:53124"
+    ]
+   },
+   {
+    "name": "duplicates_collapse",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     },
+     {
+      "name": "en1",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "192.168.1.10:53124"
+    ]
+   },
+   {
+    "name": "no_interfaces",
+    "kind": "pick",
+    "interfaces": [],
+    "port": 53124,
+    "expect": []
+   },
+   {
+    "name": "port_is_copied_as_given",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 55555,
+    "expect": [
+     "192.168.1.10:55555"
+    ]
+   },
+   {
+    "name": "an_invalid_port_yields_nothing",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 80,
+    "expect": []
+   },
+   {
+    "name": "a_missing_ipv4_is_skipped",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": null
+     },
+     {
+      "name": "en1",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.5"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "10.0.0.5:53124"
+    ]
+   },
+   {
+    "name": "en10_sorts_after_en2_numerically",
+    "kind": "pick",
+    "interfaces": [
+     {
+      "name": "en10",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.10"
+     },
+     {
+      "name": "en2",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "10.0.0.2"
+     },
+     {
+      "name": "en0",
+      "up": true,
+      "running": true,
+      "loopback": false,
+      "ipv4": "192.168.1.10"
+     }
+    ],
+    "port": 53124,
+    "expect": [
+     "192.168.1.10:53124",
+     "10.0.0.2:53124",
+     "10.0.0.10:53124"
+    ]
+   }
+  ]
+ }
+}

@@ -97,6 +97,8 @@ targets:
       - path: Sources/LinkToMac/Quic/QuicSession.swift
       # The Network.framework QUIC server (stage 1.6) and its driver; tested against the Rust client over localhost.
       - path: Sources/LinkToMac/Quic/QuicListener.swift
+      # The Mac's LAN address hint written into `stat.lan` (and the strict parser both sides share the vectors for). Foundation + Darwin only.
+      - path: Sources/LinkToMac/LanAddressHint.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
