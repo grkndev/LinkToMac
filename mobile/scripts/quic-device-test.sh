@@ -2,7 +2,7 @@
 # On-device end-to-end checks of the QUIC data plane (plan stages 1.7 and 1.8): the real phone (Rust quinn client through JNI) against the
 # real Mac (a Debug build of the Mac app, which serves the debug `echo` kind), over the LAN.
 #
-#   mobile/scripts/quic-device-test.sh [basic|link|relay|macasked|status|oldmac|all]      (default: basic; `all` = everything but oldmac)
+#   mobile/scripts/quic-device-test.sh [basic|link|relay|macasked|status|rejoin|nomdns|oldmac|all]      (default: basic; `all` = everything but oldmac)
 #   ANDROID_SERIAL=<serial> mobile/scripts/quic-device-test.sh link
 #
 # Scenarios
@@ -17,6 +17,11 @@
 #   status    (stage 1.9) what the diagnostics report shows, read from the phone's own status function through the debug receiver's STATUS action:
 #             idle -> `state=Idle` and no link numbers; a held session -> `state=Connected` with a real round-trip time and loss/congestion
 #             counters (numbers, never `null`); once the session has ended (Wi-Fi off) -> the numbers are `null` again.
+#   rejoin    (LAN rediscovery) three times: the phone's Wi-Fi off for 6 s, then on. Each time the LAN link must authenticate within 15 s of
+#             "wifi up", and not flap (at most 2 authentications in the next 20 s: two connection managers used to evict each other).
+#   nomdns    (LAN rediscovery) mDNS is switched off through the debug receiver. (1) the remembered address is forgotten: the LAN must still come up,
+#             through the address the Mac announces in its stat (log: "the Mac announced"); (2) after a Wi-Fi toggle the remembered address brings
+#             the LAN back within 8 s without any discovery. mDNS is switched on again at the end.
 #   oldmac    the installed pre-QUIC Mac app (v0.13.0) must run INSTEAD of the Debug build: the gate hides QUIC (no `caps`), a FORCED request is
 #             ignored by the old app (`PASS NoAnswer` after 10 s) and the Mac's screen is not locked by it.
 #
@@ -146,6 +151,78 @@ status_line() { # asks the phone for its status and prints the STATUS line it lo
 field() { echo "$1" | grep -o " $2=[^ ]*" | head -1 | cut -d= -f2; }
 is_number() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
+# ---- LAN rediscovery helpers ----
+# epoch seconds of the first log line matching $1 in the current log, or empty
+log_epoch() { "${ADB[@]}" logcat -d -v epoch -s LinkToMac:I | grep -m1 "$1" | awk '{print $1}'; }
+log_epoch_after() { # pattern, epoch: the first matching line at or after that time
+  "${ADB[@]}" logcat -d -v epoch -s LinkToMac:I | grep "$1" | awk -v t="$2" '$1 >= t {print $1; exit}'
+}
+lan_auth_count() { "${ADB[@]}" logcat -d -s LinkToMac:I | grep -c "lan authenticated"; }
+debug_broadcast() { "${ADB[@]}" shell am broadcast -n "$PKG/$RECEIVER" -a "$1" "${@:2}" >/dev/null 2>&1; }
+lan_is_up() { # asks the app which link is active (a debug-receiver line), instead of inferring it from older log lines
+  "${ADB[@]}" shell am broadcast -n "$PKG/$RECEIVER" -a expo.modules.selfadb.LAN_STATUS >/dev/null 2>&1
+  sleep 0.7
+  [[ "$("${ADB[@]}" logcat -d -s LinkToMac:I | grep 'lan-debug: link is' | tail -1)" == *"link is lan"* ]]
+}
+wait_for_lan_up() { # seconds
+  for _ in $(seq 1 $(($1 * 2))); do lan_is_up && return 0; sleep 0.5; done; return 1
+}
+wait_for_auth() { # seconds; returns 0 when "lan authenticated" is in the log
+  for _ in $(seq 1 $(($1 * 2))); do "${ADB[@]}" logcat -d -s LinkToMac:I | grep -q "lan authenticated" && return 0; sleep 0.5; done; return 1
+}
+
+scenario_rejoin() {
+  need_debug_mac
+  wait_for_lan_up 60 || { bad "the LAN link is not up to begin with (open the app against Metro first)"; return; }
+  sleep 5
+  for i in 1 2 3; do
+    "${ADB[@]}" logcat -c
+    wifi disable; sleep 6; wifi enable
+    if ! wait_for_auth 40; then keep_log; bad "round $i: the LAN did not come back within 40 s"; continue; fi
+    local up auth delta
+    up="$(log_epoch 'wifi up')"; auth="$(log_epoch_after 'lan authenticated' "${up:-0}")"
+    delta="$(python3 -c "print(round($auth - $up, 1))" 2>/dev/null || echo "?")"
+    sleep 20
+    local n; n="$(lan_auth_count)"
+    keep_log
+    if [[ "$delta" != "?" ]] && python3 -c "import sys; sys.exit(0 if $delta <= 15 else 1)"; then ok "round $i: the LAN link authenticated ${delta} s after Wi-Fi came back"; else bad "round $i: LAN took ${delta} s (limit 15 s)"; fi
+    if [[ "$n" -le 2 ]]; then ok "round $i: no flapping ($n authentication(s) in 20+ s)"; else bad "round $i: the LAN link flapped ($n authentications)"; fi
+  done
+}
+
+scenario_nomdns() {
+  need_debug_mac
+  wait_for_lan_up 60 || { bad "the LAN link is not up to begin with (open the app against Metro first)"; return; }
+  # (1) forget the remembered address, switch mDNS off, reconnect: only the Mac's own announcement can bring the LAN back
+  "${ADB[@]}" logcat -c
+  debug_broadcast expo.modules.selfadb.LAN_FORGET
+  sleep 2
+  debug_broadcast expo.modules.selfadb.LAN_DISCOVERY --ez on false
+  if wait_for_auth 60; then
+    keep_log
+    ok "(1) the LAN came up with mDNS off and no remembered address"
+    "${ADB[@]}" logcat -d -s LinkToMac:I | grep -q "the Mac announced" && ok "(1) it was the Mac's own announcement (stat.lan)" || bad "(1) no 'the Mac announced' line: the LAN came from somewhere else"
+    "${ADB[@]}" logcat -d -s LinkToMac:I | grep -q "mdns: found Mac" && bad "(1) mDNS found the Mac although it was switched off" || ok "(1) mDNS stayed off"
+  else
+    keep_log; bad "(1) the LAN did not come up within 60 s with mDNS off"
+  fi
+  sleep 5
+  # (2) the address is remembered now: a Wi-Fi toggle must bring the LAN back at once, with mDNS still off
+  "${ADB[@]}" logcat -c
+  wifi disable; sleep 6; wifi enable
+  if wait_for_auth 30; then
+    local up auth delta
+    up="$(log_epoch 'wifi up')"; auth="$(log_epoch_after 'lan authenticated' "${up:-0}")"
+    delta="$(python3 -c "print(round($auth - $up, 1))" 2>/dev/null || echo "?")"
+    keep_log
+    if [[ "$delta" != "?" ]] && python3 -c "import sys; sys.exit(0 if $delta <= 8 else 1)"; then ok "(2) the remembered address brought the LAN back ${delta} s after Wi-Fi (mDNS off)"; else bad "(2) the LAN took ${delta} s (limit 8 s)"; fi
+  else
+    keep_log; bad "(2) the LAN did not come back within 30 s"
+  fi
+  debug_broadcast expo.modules.selfadb.LAN_DISCOVERY --ez on true
+  echo "   mDNS switched on again"
+}
+
 scenario_status() {
   need_debug_mac
   local v
@@ -210,6 +287,8 @@ case "$SCENARIO" in
   relay) scenario_relay ;;
   macasked) scenario_macasked ;;
   status) scenario_status ;;
+  rejoin) scenario_rejoin ;;
+  nomdns) scenario_nomdns ;;
   oldmac) scenario_oldmac ;;
   all) scenario_basic; scenario_macasked; scenario_link; scenario_relay ;;
   *) echo "unknown scenario '$SCENARIO'"; exit 2 ;;

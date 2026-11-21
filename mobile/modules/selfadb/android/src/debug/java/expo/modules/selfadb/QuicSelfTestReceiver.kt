@@ -23,6 +23,10 @@ class QuicSelfTestReceiver : BroadcastReceiver() {
       ClipForegroundService.instance?.debugSetDiscovery(intent.getBooleanExtra("on", true))
       return
     }
+    if (intent.action == ClipForegroundService.ACTION_LAN_STATUS) {
+      ClipForegroundService.instance?.debugLogLink()
+      return
+    }
     if (intent.action == ClipForegroundService.ACTION_LAN_FORGET) {
       ClipForegroundService.instance?.debugForgetLan()
       return

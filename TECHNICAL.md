@@ -756,7 +756,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "join", "room": "<roomId>", "device": "android" | "mac" }
 { "t": "clip", "nonce": "<base64>", "ct": "<base64>" }   // forwarded verbatim
 { "t": "cmd",  "nonce": "<base64>", "ct": "<base64>" }   // action E2E-encrypted, forwarded verbatim
-{ "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name; Mac also ± BLE prox/rssi), bidirectional, E2E-encrypted, forwarded verbatim
+{ "t": "stat", "nonce": "<base64>", "ct": "<base64>" }   // telemetry (battery ± name; Mac also ± BLE prox/rssi ± lan address hints, §5.1), bidirectional, E2E-encrypted, forwarded verbatim
 { "t": "note", "nonce": "<base64>", "ct": "<base64>" }   // mirrored notification (phone → Mac), E2E-encrypted, forwarded verbatim
 { "t": "sms",  "nonce": "<base64>", "ct": "<base64>" }   // phone → Mac: mirrored SMS batch/delta, reply ack; Mac → phone: reply request. E2E-encrypted, forwarded verbatim
 { "t": "file", "nonce": "<base64>", "ct": "<base64>" }   // both ways: clipboard image, file chunk, chunk ack/nack. plaintext = u16 header-len ‖ header JSON ‖ raw bytes (§5.4), E2E-encrypted, forwarded verbatim
@@ -767,7 +767,7 @@ payloads as opaque. Defined in `server/src/protocol.ts`, mirrored by `RelayProto
 { "t": "peer",   "state": "online" | "offline", "device": "mac" }
 { "t": "clip",   "nonce": "...", "ct": "..." }            // the peer's frame, relayed
 { "t": "cmd",    "nonce": "...", "ct": "..." }            // the peer's command, relayed
-{ "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name; Mac also ± BLE prox/rssi), relayed
+{ "t": "stat",   "nonce": "...", "ct": "..." }            // the peer's telemetry (battery ± name; Mac also ± BLE prox/rssi ± lan hints), relayed
 { "t": "note",   "nonce": "...", "ct": "..." }            // the peer's mirrored notification, relayed
 { "t": "sms",    "nonce": "...", "ct": "..." }            // the peer's mirrored SMS batch/delta, reply request or reply ack, relayed
 { "t": "file",   "nonce": "...", "ct": "..." }            // the peer's clipboard image, file chunk, or chunk ack/nack, relayed
@@ -797,6 +797,17 @@ is the client (`LanClient.kt`, OkHttp). Transport is plain `ws://` (no TLS on th
   Wi-Fi network is present and not already LAN-joined, and stops on join. Off Wi-Fi (e.g. cellular)
   the Mac can't be on the LAN, so the phone drops discovery — releasing its battery-draining Wi-Fi
   multicast lock — and leans on the relay.
+- **Finding the Mac without mDNS.** mDNS alone proved fragile: on a campus Wi-Fi the phone's NSD sent six queries and found nothing while
+  the Mac advertised normally (`dns-sd` saw it), so the LAN stayed down for good. `ConnectionManager` therefore keeps a `LanHostBook`
+  (`LanHostBook.kt`, plain Kotlin) ordered **mDNS result > the Mac's own hint > the manual seed > the last address that joined**, with the
+  address that is *currently* joined first; one that fails twice yields to the next, and a new network clears the failures. (1) The
+  **last joined address** is persisted (`SharedPreferences`) and tried the moment Wi-Fi is up, before mDNS answers. (2) The Mac writes
+  its private IPv4 addresses into its `stat` as **`"lan":["192.168.1.10:53124", …]`** (`LanAddressHint.swift`: only `en<n>`
+  interfaces that are up and running, RFC 1918 only, at most three, only when LAN-direct is on); the phone, on Wi-Fi without a LAN link,
+  tries them — over the relay this brings the LAN up whatever the network does to multicast. The hint is **untrusted input**: strict
+  canonical parsing (`StatLan`, pinned by `protocol-vectors/stat-lan.json`, run by both sides), a bad item is skipped, a bad field is
+  "no information", and the HMAC handshake below authenticates whoever answers. Addresses are never logged (`host`/`addr` are
+  forbidden log names); the book and its entries print no address either.
 - **Auth handshake** (LAN has no relay token/room gate): on connect the Mac sends
   `{ t:"hello", nonce }`; the phone replies `{ t:"auth", proof }` where
   `proof = base64(HMAC-SHA256(key, nonce))`; the Mac verifies in constant time and replies

@@ -1291,6 +1291,12 @@ class ClipForegroundService : Service() {
     reloadConnection()
   }
 
+  /** Debug builds only: one log line saying which link is active (so a script need not infer it from older log lines). */
+  fun debugLogLink() {
+    if (!debuggable) return
+    ClipBus.log("lan-debug: link is ${if (ClipBus.onLan()) "lan" else "not lan"}")
+  }
+
   /** Debug builds only: forget the remembered Mac address and reconnect. */
   fun debugForgetLan() {
     if (!debuggable) return
@@ -1844,6 +1850,7 @@ class ClipForegroundService : Service() {
     const val ACTION_QUIC_STATUS = "expo.modules.selfadb.QUIC_STATUS"
     const val ACTION_LAN_DISCOVERY = "expo.modules.selfadb.LAN_DISCOVERY"
     const val ACTION_LAN_FORGET = "expo.modules.selfadb.LAN_FORGET"
+    const val ACTION_LAN_STATUS = "expo.modules.selfadb.LAN_STATUS"
     const val EXTRA_TAMPER = "tamper"
     private const val EXTRA_PICK_URIS = "pickUris"
     private const val EXTRA_TREE = "treeUri"

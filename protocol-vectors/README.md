@@ -10,6 +10,7 @@ under 640 KiB then waited out a 30 s timeout).
 | `file-frame.json` | the `file` frame plaintext: `u16 BE header-len ‖ header JSON ‖ raw bytes` | `mac/Tests/FileFrameVectorTests.swift` | `mobile/modules/selfadb/android/src/test/…/FileFrameVectorTest.kt` |
 | `dir-sanitize.json` | how a peer-supplied `dir` (folder path) is made safe to write under the download folder | `FileFrameVectorTests.dirSanitizeVectors` (→ `FileDropStore.sanitizeDir`) | `FileFrameVectorTest.dirSanitizeVectors` (→ `FileSink.sanitizeDir`) |
 | `quic-control.json` | the QUIC control plane: the `q.*` actions, stream channel header, ALPN and shared constants, handshake rules, `stat.caps`, the session gate | `mac/Tests/QuicControlVectorTests.swift`, `QuicCapsVectorTests.swift` | `…/QuicControlVectorTest.kt`, `QuicCapsVectorTest.kt` (the Rust core also checks the ALPN: `mobile/native-src/quic-core/tests/vectors.rs`) |
+| `stat-lan.json` | the Mac's LAN address hint in `stat`: `lan` (strict `a.b.c.d:port` parsing, RFC 1918 only) and which addresses the Mac writes | `mac/Tests/StatLanVectorTests.swift` (`parse` and `pick`) | `…/StatLanVectorTest.kt` (`parse`) |
 | `stat-media.json` | the media fields inside the `stat` plaintext: `media` / `mediaArt` (phone → Mac) and `mediaCmd` (Mac → phone) | `mac/Tests/NowPlayingTests.swift` (→ `NowPlaying.parse`, `MediaCommand`) | `…/MediaStateTest.kt` (→ `MediaState.toJson`, `parseCommand`) |
 
 Not a vector but a contract in the same spirit: **`FileFrame.maxTransferBytes` (Swift) and
@@ -121,3 +122,12 @@ cd mobile/native-src/quic-core && cargo test
 ```
 
 **`mobile/modules/selfadb/android/build.gradle` declares `protocol-vectors/` as an input of the unit-test task.** Without it, editing a vector left the Gradle task `UP-TO-DATE` and the Kotlin tests silently did not run.
+
+## `stat-lan.json`
+
+The Mac's LAN address hint (TECHNICAL.md §5.1, "Finding the Mac without mDNS"): the Mac writes `"lan":["192.168.1.10:53124", …]` into its own `stat`, so the phone can reach the LAN-direct server when mDNS multicast does not get through. Two sections, each with a `description` that is the authoritative statement of its rules:
+
+- **`parse`** (45 cases, run by **Swift and Kotlin**) — what a receiver makes of a decoded stat: `absent` (no usable `lan`: it must be a JSON array, so a string, number, object or null changes nothing) or `hints` with the accepted items in order. An item is canonical (four decimal octets without leading zeros, one colon, a port 1024–65535 without sign or leading zero, at most 21 characters), a **private** IPv4 (10/8, 172.16/12, 192.168/16 — the boundaries 172.15/172.16/172.31/172.32 and 192.168/192.169 are cases), duplicates collapse, the first three valid ones are kept, and a bad item is skipped, never fatal.
+- **`pick`** (15 cases, **Swift only** — only the Mac builds the field) — which addresses the Mac writes from its interface list: only `en<number>` interfaces that are up *and* running and not loopback, with a private IPv4, ordered by interface number (`en2` before `en10`), at most three, none for a port outside 1024–65535.
+
+The hint is untrusted input on the phone (the LAN handshake still authenticates whoever answers); change the rules in the vectors and **both** parsers (`StatLan` in `mac/Sources/LinkToMac/LanAddressHint.swift`, `StatLan.kt` in the module) together.

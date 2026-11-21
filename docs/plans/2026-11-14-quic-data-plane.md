@@ -620,6 +620,8 @@ Dosya özelliğinin kullanıcıya görünen her şeyi (Files ekranı, geçmiş, 
 aynen kalır; yalnızca LAN'da taşıma katmanı değişir. Büyüklük: **M**. Bağımlılık: Faz 0 kapıları ("10 GB hız", "MediaStore
 doğrudan yazma", "kalıcı kimlik") ve Faz 1. Bu üç kapı **geçti** (0.12); "10 GB, LAN WS'den yavaş değil" 1 GiB medyanlarıyla doğrulandı (QUIC 2,0× ve 1,4×), 10 GB'ta WS ölçülemedi.
 
+**Ön koşul notu (2026-11-21, Faz 1 sonrası): LAN bulma sağlamlaştırıldı.** QUIC oturumu LAN-direct bağlantıya bağlı; telefonun Mac'i LAN'da hiç bulamaması (kampüs Wi-Fi'ında mDNS multicast'i düşüyor: telefonun NSD'si 6 sorgu yollayıp 0 servis buldu, Mac ise yayında) Faz 2'yi engellerdi. Çözüm (`fix/lan-rediscovery`): (1) servis aynı anda **iki** `ConnectionManager` açıyordu (kilitsiz `conn`), ikisi Mac'in tek-eşli LAN sunucusunda birbirini düşürüp saniyede bir yeniden bağlanıyordu (10 sn'de 9 kimlik doğrulama, tekrar eden SMS geri doldurma) → `ConnectionHolder`; (2) son bağlanan Mac adresi saklanıp Wi-Fi gelince mDNS'ten önce deneniyor; (3) Mac adreslerini `stat.lan` ile duyuruyor (`protocol-vectors/stat-lan.json`), telefon relay'den öğrenip bağlanıyor; (4) mDNS yaşam döngüsü loglanıyor. Cihazda: `rejoin` 3/3 (LAN Wi-Fi'dan 4,0–4,1 sn sonra, dalgalanma yok), `nomdns` (mDNS kapalı: Mac'in duyurusuyla ve hatırlanan adresle LAN geldi). Doğrulanmadı: ağdaki multicast kaybının tam nedeni (Mac'e `tcpdump` istendi, sonuç gelmedi; telefon tarafı kanıtı yeterli) ve doğal 'mDNS sessiz' durumunun yeniden üretilmesi (testler anahtarla simüle etti).
+
 ### [ ] 2.1 Taşıma seçimi
 
 **Amaç.** Her dosya için hangi yoldan gideceğini tek yerde, saf bir fonksiyonla belirlemek.
