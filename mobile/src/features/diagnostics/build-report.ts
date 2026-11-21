@@ -25,6 +25,24 @@ export type ExitRecord = {
   description?: string;
 };
 
+/**
+ * What the QUIC data plane looks like right now (stage 1.9). Only fixed sentences, enum words and numbers come from native; the free-text
+ * fields still go through the sanitizer here, as a second defence. Nothing about WHO or WHERE: no address, port, fingerprint, token or id.
+ */
+export type QuicReport = {
+  available: boolean;
+  /** `Idle` / `Connecting` / `Connected` / `Ended`, possibly with detail. */
+  state: string;
+  /** The last outcome, one plain sentence. */
+  last?: string | null;
+  /** Why QUIC is not available right now. */
+  reason?: string | null;
+  /** The link's numbers: only while a session is open, else null. */
+  rttMs?: number | null;
+  lostPackets?: number | null;
+  congestionEvents?: number | null;
+};
+
 export interface ReportData {
   generatedAt: Date;
   app: {
@@ -65,6 +83,8 @@ export interface ReportData {
   update?: { state: string; version?: string | null; error?: string | null } | null;
   /** `'unsupported'` = the installed APK predates `getExitReasons`; `null` = the call failed. */
   exits: ExitRecord[] | 'unsupported' | null;
+  /** `'unsupported'` = the installed APK predates the QUIC work; `null` = the call failed. */
+  quic: QuicReport | 'unsupported' | null;
   daemonLog: string[] | null;
   appLog: string[] | null;
 }
@@ -164,6 +184,28 @@ export function buildReport(data: ReportData, known?: KnownValues): Report {
                 (e.description ? ` — ${clean(e.description)}` : ''),
             );
 
+  const num = (v: number | null | undefined): string => (typeof v === 'number' && Number.isFinite(v) ? String(v) : '—');
+  const quicRows =
+    data.quic === 'unsupported'
+      ? ['Not available in this build (needs a newer APK).']
+      : data.quic === null
+        ? ['Could not be read.']
+        : (() => {
+            const q = data.quic;
+            const hasLink = q.rttMs != null || q.lostPackets != null || q.congestionEvents != null;
+            return [
+              `Available: ${q.available ? 'yes' : `no${q.reason ? ` (${clean(q.reason)})` : ''}`}`,
+              `Session: ${clean(q.state) || '—'}`,
+              ...(q.last ? [`Last: ${clean(q.last)}`] : []),
+              ...(hasLink
+                ? [
+                    `Round trip: ${num(q.rttMs)}${typeof q.rttMs === 'number' && Number.isFinite(q.rttMs) ? ' ms' : ''}` +
+                      ` · packets lost: ${num(q.lostPackets)} · congestion events: ${num(q.congestionEvents)}`,
+                  ]
+                : []),
+            ];
+          })();
+
   const tail = (lines: string[] | null, max: number, empty: string): string[] =>
     lines === null ? ['Could not be read.'] : lines.length === 0 ? [empty] : sanitizeLines(lines.slice(-max), known);
 
@@ -174,6 +216,7 @@ export function buildReport(data: ReportData, known?: KnownValues): Report {
     ...section('App', appRows),
     ...section('Device', deviceRows),
     ...section('State', statusRows),
+    ...section('QUIC data plane', quicRows),
     ...section('Permissions', permissionRows),
     ...section('Updates', updateRows),
     ...section('Recent exits', exitRows),
@@ -188,6 +231,16 @@ export function buildReport(data: ReportData, known?: KnownValues): Report {
  * The short, structured part of the report that fits in a GitHub issue URL. It deliberately holds
  * no log lines and no free text at all: only enums, versions and numbers.
  */
+const QUIC_SESSION_WORDS = ['Idle', 'Connecting', 'Connected', 'Ended'];
+
+/** One line, enum words only: whatever the native state string carries beyond its first word is dropped. */
+function quicSummary(quic: ReportData['quic']): string {
+  if (quic === 'unsupported') return 'QUIC: not in this build';
+  if (quic === null) return 'QUIC: unknown';
+  const word = /^[A-Za-z]+/.exec(quic.state)?.[0] ?? '';
+  return `QUIC: ${quic.available ? 'yes' : 'no'}, session ${QUIC_SESSION_WORDS.includes(word) ? word : 'unknown'}`;
+}
+
 export function buildIssueSummary(data: ReportData): string {
   const { app, device, status } = data;
   const relay = status.relay;
@@ -211,6 +264,7 @@ export function buildIssueSummary(data: ReportData): string {
     `Device: ${[device.manufacturer, device.model].filter(Boolean).join(' ') || '—'}, Android ${orDash(device.osVersion)} (API ${orDash(device.apiLevel)})`,
     `Link: ${relay ? `${relay.status}${relay.transport ? ` via ${relay.transport}` : ''}, Mac ${relay.peerOnline ? 'online' : 'offline'}` : 'unknown'}`,
     `Capture: ${status.capture ? status.capture.state : 'unknown'}; daemon alive: ${yesNo(status.daemonAlive)}`,
+    quicSummary(data.quic),
     ...(exits ? [`Recent exits: ${exits}`] : []),
     'Full report: attach the file you shared from Settings ▸ Send diagnostics.',
   ];

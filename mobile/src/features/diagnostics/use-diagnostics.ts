@@ -12,6 +12,7 @@ import {
   buildReport,
   type ExitRecord,
   type Granted,
+  type QuicReport,
   type Report,
   type ReportData,
 } from './build-report';
@@ -40,6 +41,25 @@ async function probe<T>(run: () => Promise<T>, ms = PROBE_MS): Promise<T | null>
 async function readExits(): Promise<ExitRecord[] | 'unsupported' | null> {
   if (typeof SelfAdb.getExitReasons !== 'function') return 'unsupported';
   return probe(() => SelfAdb.getExitReasons(EXIT_REASON_LIMIT));
+}
+
+/**
+ * `getQuicStatus` only exists in APKs built after stage 1.8 (and the link numbers after 1.9): an older APK skips the section instead of
+ * throwing. Native hands over fixed sentences, enum words and numbers only; `buildReport` sanitizes the free text again anyway.
+ */
+async function readQuic(): Promise<QuicReport | 'unsupported' | null> {
+  if (typeof SelfAdb.getQuicStatus !== 'function') return 'unsupported';
+  const q = await probe(() => SelfAdb.getQuicStatus());
+  if (!q) return null;
+  return {
+    available: q.available,
+    state: q.state,
+    last: q.last ?? null,
+    reason: q.reason ?? null,
+    rttMs: q.rttMs ?? null,
+    lostPackets: q.lostPackets ?? null,
+    congestionEvents: q.congestionEvents ?? null,
+  };
 }
 
 const PERMISSIONS: { name: string; check: () => Promise<boolean> }[] = [
@@ -80,11 +100,12 @@ export function useDiagnostics(): Diagnostics {
   });
 
   const collect = useCallback(async (): Promise<ReportData> => {
-    const [relay, daemonAlive, update, exits, daemonBlob, appLog, ...granted] = await Promise.all([
+    const [relay, daemonAlive, update, exits, quic, daemonBlob, appLog, ...granted] = await Promise.all([
       probe(() => SelfAdb.relayGetStatus()),
       probe(() => SelfAdb.isDaemonAlive()),
       probe(() => SelfAdb.getAppUpdateState()),
       readExits(),
+      readQuic(),
       probe(() => SelfAdb.readDaemonLog(), DAEMON_LOG_MS),
       probe(() => SelfAdb.getLogs()),
       ...PERMISSIONS.map((p) => probe(p.check) as Promise<Granted>),
@@ -128,6 +149,7 @@ export function useDiagnostics(): Diagnostics {
       permissions: PERMISSIONS.map((perm, i) => ({ name: perm.name, granted: granted[i] ?? null })),
       update: update ? { state: update.state, version: update.version, error: update.error } : null,
       exits,
+      quic,
       daemonLog: daemonBlob === null ? null : daemonBlob.split('\n'),
       appLog,
     };
