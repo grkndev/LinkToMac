@@ -85,7 +85,9 @@ class ClipForegroundService : Service() {
   private var bridge: ClipBridge? = null
   /** The secret [bridge] was built with, to detect a daemon relaunch under a fresh secret. */
   @Volatile private var bridgeSecret: String? = null
-  private var conn: ConnectionManager? = null
+  /** The ONE live connection. Never assign a manager directly: go through the holder (see [ConnectionHolder] for the race it closes). */
+  private val connHolder = ConnectionHolder<ConnectionManager> { it.shutdown() }
+  private val conn: ConnectionManager? get() = connHolder.get()
   private var bleAdvertiser: BleAdvertiser? = null
   /** Reads + live-observes the SMS store, forwarding to the Mac over the `sms` channel. Started
    *  only when the user enabled message mirroring AND granted READ_SMS. */
@@ -337,17 +339,14 @@ class ClipForegroundService : Service() {
 
   /** (Re)apply persisted config, replacing any running connection. */
   fun reloadConnection() {
-    conn?.shutdown()
-    conn = null
-    maybeStartConnection()
+    connHolder.replace { buildConnection() }
   }
 
   /** Unpair: drop the persisted config and the live connection. Stays disconnected
    *  (including across START_STICKY restarts) until a new pairing is pushed. */
   fun clearRelayConfig() {
     clearConfig(this)
-    conn?.shutdown()
-    conn = null
+    connHolder.clear()
     bleAdvertiser?.stop() // room is gone -> nothing to advertise
     bleAdvertiser = null
     ClipBus.relay("disconnected", false, null)
@@ -355,12 +354,16 @@ class ClipForegroundService : Service() {
   }
 
   private fun maybeStartConnection() {
-    if (conn != null) return
+    connHolder.ensure { buildConnection() }
+  }
+
+  /** Builds and starts a manager from the persisted config, or null when nothing is configured. Called only through [connHolder]. */
+  private fun buildConnection(): ConnectionManager? {
     val p = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    val room = p.getString("room", null) ?: return
+    val room = p.getString("room", null) ?: return null
     // Fail closed: without the pairing key we can't E2E-encrypt, so don't connect. The JS
     // pairing context re-pushes setRelay(...key) on launch, which then starts us.
-    val key = p.getString("key", null) ?: run { ClipBus.log("relay: waiting for pairing key"); return }
+    val key = p.getString("key", null) ?: run { ClipBus.log("relay: waiting for pairing key"); return null }
     val url = p.getString("url", null) ?: ""
     val token = p.getString("token", null) ?: ""
     val lanEnabled = p.getBoolean("lanEnabled", true)
@@ -369,10 +372,10 @@ class ClipForegroundService : Service() {
     val lanReady = lanEnabled && lanPort > 0
     if (url.isEmpty() && !lanReady) {
       ClipBus.log("connection: nothing configured (no relay, LAN off)")
-      return
+      return null
     }
     ClipBus.log("connection starting (relay=${if (url.isEmpty()) "none" else "on"}, lan=${if (lanReady) lanPort else "off"})")
-    conn = ConnectionManager(
+    return ConnectionManager(
       context = this,
       relayUrl = url,
       token = token,
@@ -1585,8 +1588,7 @@ class ClipForegroundService : Service() {
     unregisterBatteryReceiver()
     quicManager?.shutdown()
     quicManager = null
-    conn?.shutdown()
-    conn = null
+    connHolder.clear()
     bleAdvertiser?.stop()
     bleAdvertiser = null
     sms?.stop()
