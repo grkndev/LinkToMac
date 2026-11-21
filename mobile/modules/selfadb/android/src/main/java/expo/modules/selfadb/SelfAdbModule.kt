@@ -171,6 +171,9 @@ class SelfAdbModule : Module() {
         "last" to null,
         "reason" to "the connection service is not running",
         "debuggable" to (appCtx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0),
+        "rttMs" to null,
+        "lostPackets" to null,
+        "congestionEvents" to null,
       )
     }
 

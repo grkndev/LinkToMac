@@ -335,6 +335,66 @@ class QuicManagerTest {
     for (secret in listOf(host, port.toString(), fp, tok, sid)) assertFalse("an outcome contains $secret", everything.contains(secret))
   }
 
+  // ---- link statistics for the diagnostics report (stage 1.9) ----
+
+  @Test fun theLatestStatisticsAreKeptWhileTheSessionIsOpen() {
+    val rig = connected()
+    assertEquals(null, rig.manager.stats)
+    rig.transport.events!!.onStats(5, 12_000, 2, 1)
+    assertEquals(QuicManager.LinkStats(rttMs = 5, lostPackets = 2, congestionEvents = 1), rig.manager.stats)
+    rig.transport.events!!.onStats(7, 12_500, 3, 1)
+    assertEquals(QuicManager.LinkStats(rttMs = 7, lostPackets = 3, congestionEvents = 1), rig.manager.stats)
+  }
+
+  @Test fun statisticsAreForgottenWhenTheSessionEndsHoweverItEnds() {
+    val enders: List<(Rig) -> Unit> = listOf(
+      { it.manager.end() },
+      { it.manager.linkLost() },
+      { it.transport.events!!.onPeerEnded() },
+      { it.transport.events!!.onClosed(QuicError.LinkLost.code) },
+    )
+    for ((i, end) in enders.withIndex()) {
+      val rig = connected()
+      rig.transport.events!!.onStats(5, 12_000, 2, 1)
+      end(rig)
+      assertEquals("ender $i", null, rig.manager.stats)
+    }
+  }
+
+  @Test fun aLateStatisticsEventAfterTheEndIsIgnored() {
+    val rig = connected()
+    val events = rig.transport.events!!
+    rig.manager.end()
+    events.onStats(9, 9, 9, 9)
+    assertEquals(null, rig.manager.stats)
+  }
+
+  @Test fun statisticsBeforeTheSessionOpenedAreNotKept() {
+    val rig = connecting()
+    rig.transport.events!!.onStats(1, 1, 1, 1)
+    assertEquals(null, rig.manager.stats)
+  }
+
+  @Test fun statisticsStillReachTheTap() {
+    val rig = connected()
+    var seen = -1L
+    rig.manager.tap = object : QuicEvents by NoopEvents { override fun onStats(rttMs: Long, cwnd: Long, lostPackets: Long, congestionEvents: Long) { seen = rttMs } }
+    rig.transport.events!!.onStats(4, 1, 1, 1)
+    assertEquals(4L, seen)
+  }
+
+  private object NoopEvents : QuicEvents {
+    override fun onConnected() = Unit
+    override fun onFailed(code: Int) = Unit
+    override fun onSessionLine(line: String) = Unit
+    override fun onPeerEnded() = Unit
+    override fun onDatagram(bytes: ByteArray) = Unit
+    override fun onUniStream(id: Long, channel: Int) = Unit
+    override fun onStreamData(id: Long, bytes: ByteArray, fin: Boolean) = Unit
+    override fun onStats(rttMs: Long, cwnd: Long, lostPackets: Long, congestionEvents: Long) = Unit
+    override fun onClosed(code: Int) = Unit
+  }
+
   // ---- the clock ----
 
   @Test fun theHostAsksTheTimerForTheNextDeadlineAndTicksTheRules() {

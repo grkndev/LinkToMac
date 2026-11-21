@@ -1481,7 +1481,18 @@ class ClipForegroundService : Service() {
       "last" to quicManager?.lastOutcome,
       "reason" to reason,
       "debuggable" to debuggable,
+      // The link's numbers while a session is open (else null): for the diagnostics report. Counts and milliseconds only.
+      "rttMs" to quicManager?.stats?.rttMs,
+      "lostPackets" to quicManager?.stats?.lostPackets,
+      "congestionEvents" to quicManager?.stats?.congestionEvents,
     )
+  }
+
+  /** Debug builds only: one log line with the status (fixed words and numbers), so a script can read it with `adb logcat`. */
+  fun logQuicStatus() {
+    if (!debuggable) return
+    val s = quicStatus()
+    ClipBus.log("quic-selftest: STATUS available=${s["available"]} state=${s["state"]} rtt=${s["rttMs"]} lost=${s["lostPackets"]} congestion=${s["congestionEvents"]}")
   }
 
   /**
@@ -1793,6 +1804,7 @@ class ClipForegroundService : Service() {
 
     /** Debug-only start-intent action: run the QUIC echo self-test (`--es tamper none|fp|tok`). */
     const val ACTION_QUIC_SELFTEST = "expo.modules.selfadb.QUIC_SELFTEST"
+    const val ACTION_QUIC_STATUS = "expo.modules.selfadb.QUIC_STATUS"
     const val EXTRA_TAMPER = "tamper"
     private const val EXTRA_PICK_URIS = "pickUris"
     private const val EXTRA_TREE = "treeUri"

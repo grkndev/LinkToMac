@@ -15,6 +15,10 @@ import androidx.core.content.ContextCompat
 class QuicSelfTestReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+    if (intent.action == ClipForegroundService.ACTION_QUIC_STATUS) {
+      ClipForegroundService.instance?.logQuicStatus()
+      return
+    }
     if (intent.action != ClipForegroundService.ACTION_QUIC_SELFTEST) return
     val tamper = intent.getStringExtra(ClipForegroundService.EXTRA_TAMPER)
     val running = ClipForegroundService.instance

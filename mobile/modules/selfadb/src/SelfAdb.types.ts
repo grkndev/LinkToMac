@@ -162,6 +162,12 @@ export type QuicStatus = {
   reason: string | null;
   /** Only a debuggable build can run the echo test. */
   debuggable: boolean;
+  /** The link's round-trip time in milliseconds while a session is open, else `null`. */
+  rttMs: number | null;
+  /** Packets the QUIC connection counted as lost while a session is open, else `null`. */
+  lostPackets: number | null;
+  /** Congestion events while a session is open, else `null`. */
+  congestionEvents: number | null;
 };
 
 /** `none` = the echo check; `fp`/`tok` = flip one character and expect the right refusal; `hold` = stay connected; `force` = ask even if the gate says no. */

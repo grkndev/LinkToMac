@@ -73,6 +73,13 @@ class QuicManager(
   @Volatile var lastOutcome: String? = null
     private set
 
+  /** The link's numbers while a session is open (stage 1.9: the diagnostics report). Only counts and milliseconds, nothing about who or where. */
+  data class LinkStats(val rttMs: Long, val lostPackets: Long, val congestionEvents: Long)
+
+  /** The latest [LinkStats] while the session is open, else null. */
+  @Volatile var stats: LinkStats? = null
+    private set
+
   /** Told once, on the manager's thread, when a session ENDS (for whatever reason). */
   @Volatile var onEnded: ((QuicSession.End) -> Unit)? = null
   private var endReported = false
@@ -142,6 +149,7 @@ class QuicManager(
       }
     }
     state = session.state
+    if (state != QuicSession.State.Connected) stats = null
     describe(state)?.let { lastOutcome = it }
     val ended = state
     if (ended is QuicSession.State.Ended) {
@@ -263,7 +271,10 @@ class QuicManager(
 
   override fun onStreamData(id: Long, bytes: ByteArray, fin: Boolean) = post { tap?.onStreamData(id, bytes, fin) }
 
-  override fun onStats(rttMs: Long, cwnd: Long, lostPackets: Long, congestionEvents: Long) = post { tap?.onStats(rttMs, cwnd, lostPackets, congestionEvents) }
+  override fun onStats(rttMs: Long, cwnd: Long, lostPackets: Long, congestionEvents: Long) = post {
+    if (session.state == QuicSession.State.Connected) stats = LinkStats(rttMs, lostPackets, congestionEvents)
+    tap?.onStats(rttMs, cwnd, lostPackets, congestionEvents)
+  }
 
   companion object {
     /** The manager as the app runs it: one worker thread for everything, a scheduler for the clock. */
