@@ -166,8 +166,14 @@ const ALLOWED_PACKAGE =
 const PHONE_PLUS = /(?<![\w+])\+\d[\d\s().-]{5,}\d(?!\w)/g;
 const PHONE_FORMATTED = /(?<![\w.-])\(?\d{2,4}\)?[\s.-]\d{3}[\s.-]\d{2,4}(?:[\s.-]\d{2,4})?(?![\w.-])/g;
 
-// 7. long opaque tokens: hex digests, base64 keys, UUIDs. A run needs a digit, otherwise it is a
-//    camel-case class name ("ForegroundServiceStartNotAllowedException").
+// 7a. the QUIC data plane's values, by their exact SHAPE (stage 1.9): a SHA-256 certificate fingerprint (64 hex) and a session id (a UUID).
+//     They are never written to a log line, so this is the second line of defence; it must not depend on the "has a digit" luck of the
+//     generic rule below (a digit-less fingerprint is astronomically unlikely, a digit-less guess in a test is not).
+const FINGERPRINT = /(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/gi;
+const UUID = /(?<![0-9a-f-])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f-])/gi;
+
+// 7b. long opaque tokens: hex digests, base64 keys, UUIDs. A run needs a digit, otherwise it is a
+//     camel-case class name ("ForegroundServiceStartNotAllowedException").
 const LONG_TOKEN = /[A-Za-z0-9+/_-]{24,}={0,2}/g;
 
 function stripFileName(_m: string, prefix: string, rest: string): string {
@@ -204,6 +210,8 @@ function sanitizeWith(line: string, known: ((text: string) => string) | null): s
   s = s.replace(PACKAGE_LIKE, (m) => (ALLOWED_PACKAGE.test(m) ? m : '<app>'));
 
   s = s.replace(PHONE_PLUS, '<redacted>').replace(PHONE_FORMATTED, '<redacted>');
+
+  s = s.replace(FINGERPRINT, '<token>').replace(UUID, '<token>');
 
   s = s.replace(LONG_TOKEN, (m) => (/\d/.test(m) ? '<token>' : m));
 

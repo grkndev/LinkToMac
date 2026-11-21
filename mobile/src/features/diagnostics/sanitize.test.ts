@@ -254,3 +254,79 @@ describe('invariants', () => {
     expect(sanitizeLine('x', knownValuesFrom({}))).toBe('x');
   });
 });
+
+// ── stage 1.9: the QUIC data plane's values ──────────────────────────────────────────────────
+// None of these are ever written to a log line (the source check keeps them out), so this is the second line of defence: if one ever
+// slips through, the sanitizer recognises it by SHAPE. The fingerprint and the session id are matched by their exact form, not by the
+// "has a digit" luck of the generic long-token rule.
+
+describe('QUIC values (stage 1.9)', () => {
+  const FP = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const FP_LETTERS = 'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+  const SID = '123e4567-e89b-12d3-a456-426614174000';
+  const SID_LETTERS = 'abcdefab-cdef-abcd-efab-cdefabcdefab';
+  const TOK = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+  const plain = (line: string) => sanitizeLine(line); // no known values: the shape alone has to do it
+
+  test('an address with the QUIC port is an address', () => {
+    expect(plain('quic: connecting to 192.168.1.10:53125')).toBe('quic: connecting to <host>');
+    expect(plain('quic: connecting to [fe80::1ff:fe23:4567:890a]:53125')).not.toContain('fe80');
+  });
+
+  test('a certificate fingerprint is removed, with or without a digit in it, in either case', () => {
+    expect(plain(`pinned ${FP}`)).toBe('pinned <token>');
+    expect(plain(`pinned ${FP_LETTERS}`)).toBe('pinned <token>');
+    expect(plain(`pinned ${FP.toUpperCase()}`)).toBe('pinned <token>');
+    expect(plain(`pinned ${FP_LETTERS.toUpperCase()}`)).toBe('pinned <token>');
+  });
+
+  test('a session id is removed, with or without a digit in it', () => {
+    expect(plain(`session ${SID} started`)).toBe('session <token> started');
+    expect(plain(`session ${SID_LETTERS} started`)).toBe('session <token> started');
+    expect(plain(`session ${SID.toUpperCase()}`)).toBe('session <token>');
+    expect(plain(`session ${SID_LETTERS.toUpperCase()}`)).toBe('session <token>');
+  });
+
+  test('the session token as the offer carries it is removed', () => {
+    expect(plain(`token ${TOK}`)).toBe('token <token>');
+  });
+
+  test('a dumped offer keeps its structure but loses every secret (the bare port number is not a secret by itself)', () => {
+    expect(plain(`QuicOffer(sid=${SID}, port=53125, fp=${FP}, tok=${TOK})`)).toBe('QuicOffer(sid=<token>, port=53125, fp=<token>, tok=<token>)');
+    expect(plain(`{"a":"q.offer","fp":"${FP_LETTERS}","port":53125,"sid":"${SID_LETTERS}","tok":"${TOK}"}`)).toBe(
+      '{"a":"q.offer","fp":"<token>","port":53125,"sid":"<token>","tok":"<token>"}',
+    );
+  });
+
+  test('the device-internal bridge stays readable: a loopback address and its port are not anyone\'s address', () => {
+    const line = 'bridge retry (failed to connect to /127.0.0.1 (port 53125) from /127.0.0.1 (port 38534) after 2000ms)';
+    expect(plain(line)).toBe(line);
+  });
+
+  test('the fixed QUIC sentences the app writes are left alone', () => {
+    for (const line of [
+      'quic: request sent',
+      'quic: connecting',
+      'quic: connected',
+      'quic: failed TokenRejected',
+      'quic: session closed',
+      'quic: connect refused (Unavailable)',
+      'cmd: quic offer received',
+      'quic-selftest: PASS echo',
+      'quic-selftest: PASS Refused:relay',
+    ]) {
+      expect(plain(line)).toBe(line);
+    }
+  });
+
+  test('idempotent on all of the above', () => {
+    for (const line of [
+      `QuicOffer(sid=${SID}, port=53125, fp=${FP_LETTERS}, tok=${TOK})`,
+      `quic: connecting to 192.168.1.10:53125 pinned ${FP}`,
+      `session ${SID_LETTERS.toUpperCase()}`,
+    ]) {
+      const once = plain(line);
+      expect(plain(once)).toBe(once);
+    }
+  });
+});
