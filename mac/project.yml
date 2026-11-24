@@ -99,6 +99,8 @@ targets:
       - path: Sources/LinkToMac/Quic/QuicListener.swift
       # The Mac's LAN address hint written into `stat.lan` (and the strict parser both sides share the vectors for). Foundation + Darwin only.
       - path: Sources/LinkToMac/LanAddressHint.swift
+      # Which path one file takes (stage 2.1, Faz 2): QUIC stream, the WebSocket path, wait for the LAN, too large. Pure Foundation.
+      - path: Sources/LinkToMac/Quic/FileTransportChoice.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
