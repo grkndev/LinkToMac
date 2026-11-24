@@ -13,7 +13,7 @@ PKG="${PKG:-com.grkndev.linktomac.dev}"
 RECEIVER="expo.modules.selfadb.QuicSelfTestReceiver"
 ADB=(adb); [[ -n "${ANDROID_SERIAL:-}" ]] && ADB=(adb -s "$ANDROID_SERIAL")
 NAME="ltm-ui-check-$$.bin"
-OUT="${OUT:-/tmp}"
+OUT="${OUT:-/tmp}"; mkdir -p "$OUT"
 fail=0
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
