@@ -15,9 +15,11 @@ crate-type = ["cdylib", "rlib"]
 # ring, NOT aws-lc-rs: aws-lc-sys needs cmake/NASM on the NDK toolchain.
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros", "io-util"] }
 jni = "0.21"
 bytes = "1"
+# The file stream's header and answers are small JSON objects (stage 2.2). Strict integers, exact string escapes, no float feature creep.
+serde_json = { version = "1", default-features = false, features = ["std"] }
 # Used from stage 1.7 on (fingerprint pinning); declared now so the toolchain is proven with the final dependency set.
 sha2 = "0.10"
 subtle = "2"
