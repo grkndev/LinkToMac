@@ -1043,6 +1043,13 @@ existing `stat` plaintext, so the relay is untouched. Pinned by `protocol-vector
   an app that doesn't offer an action (`PlaybackState.actions`) shows as `can:{…:false}` and the Mac
   disables the button. The Mac sends `seek`/`vol` once, on release (not while dragging).
 - Logs carry no title, artist or app name (`check-log-privacy.mjs` forbids `title`/`artist`/`album`).
+- **Why every session is watched.** Many players activate their `MediaSession` first and write the title a moment later. The phone used to choose
+  a session only when the platform's session *list* changed and only if it already had a title, so it followed nothing, registered no callback,
+  and never heard about the title: the Mac's card stayed empty until "Mirror media" was switched off and on. Two sessions that were both already
+  listed (one paused, one just started) never triggered a new choice either, so the Mac kept the paused one. `MediaSessionTracker` (plain Kotlin,
+  JVM-tested) now watches **every** listed session and chooses again (`MediaState.pickCurrent`, unchanged) whenever any of them reports a
+  metadata or playback change. Reproduced and verified on a device with a debug session that is active first and titled 3 s later
+  (`mobile/scripts/media-check.sh`).
 - Out of scope for now (a possible phase 2, not built): streaming the phone's *audio* to the Mac. It would
   need `MediaProjection` + `AudioPlaybackCapture` (per-session consent, apps may opt out) and a LAN-direct
   binary stream — the relay's 1 MiB frame and 120 frames/10 s limits don't fit continuous audio.
