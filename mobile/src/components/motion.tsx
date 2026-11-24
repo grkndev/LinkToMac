@@ -28,6 +28,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { shouldLatch } from "@/lib/shallow-equal";
+
 /**
  * The app's motion vocabulary, in one place — springs for things that move or scale, a tween for
  * colour, so every screen shares the same feel. All of it runs natively in Compose (no JS frames,
@@ -72,9 +74,11 @@ export function useEntered(): boolean {
  */
 export function useLatched<T>(value: T | null | undefined): T | undefined {
   // State, not a ref: React forbids reading/writing refs during render. Updating state while
-  // rendering is the sanctioned "derive from props" pattern (guarded, so it settles in one pass).
+  // rendering is the sanctioned "derive from props" pattern. It must SETTLE: `shouldLatch` compares one level deep, so an input that the caller
+  // rebuilds every render (`{ current, waiting }` in the Files screen) does not look "changed" each pass. Comparing by reference here once made
+  // that screen throw "Too many re-renders" for as long as a transfer was in progress.
   const [last, setLast] = useState<T | undefined>(value ?? undefined);
-  if (value != null && value !== last) setLast(value);
+  if (shouldLatch(value, last)) setLast(value as T);
   return value ?? last;
 }
 
