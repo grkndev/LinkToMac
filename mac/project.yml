@@ -101,6 +101,8 @@ targets:
       - path: Sources/LinkToMac/LanAddressHint.swift
       # Which path one file takes (stage 2.1, Faz 2): QUIC stream, the WebSocket path, wait for the LAN, too large. Pure Foundation.
       - path: Sources/LinkToMac/Quic/FileTransportChoice.swift
+      # The QUIC file stream's bytes (stage 2.2, Faz 2): header, have, result, limits. Pure Foundation.
+      - path: Sources/LinkToMac/Quic/QuicFileStream.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.grkn.LinkToMacTests
