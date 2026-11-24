@@ -44,6 +44,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import expo.modules.selfadb.quic.FileTransportChoice
 import expo.modules.selfadb.quic.PeerCaps
 import expo.modules.selfadb.quic.QuicAction
 import expo.modules.selfadb.quic.QuicCaps
@@ -1047,6 +1048,12 @@ class ClipForegroundService : Service() {
     val total = item.size
     if (total <= 0L) return "$name is empty"
     if (total > FileFrame.MAX_TRANSFER_BYTES) return "$name is too large"
+    // Which path this file WOULD take (stage 2.1: the rule exists and is logged; QUIC files do not exist yet, so `effective` keeps it on the
+    // WebSocket path and the guards around it stay as they were). A fixed sentence: nothing about the file or the peer.
+    val verdict = FileTransportChoice.choose(
+      if (ClipBus.onLan()) FileTransportChoice.Link.LAN else FileTransportChoice.Link.RELAY, macCaps.caps, total, isClipboardImage = false,
+    )
+    ClipBus.log("files: transport choice ${verdict.logWord}, using ${verdict.effective.logWord}")
     val count = item.chunkCount
     val id = item.transferId
     val t = Transfer(id)

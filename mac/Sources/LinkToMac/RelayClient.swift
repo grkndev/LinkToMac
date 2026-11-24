@@ -770,6 +770,13 @@ final class RelayClient {
             return
         }
         log("files -> phone: \(plan.items.count) file(s) (\(lanPeerConnected ? "lan" : "relay"))")
+        // Which path each file WOULD take (stage 2.1: the rule exists and is logged; QUIC files do not exist yet, so `effective` keeps them on the
+        // WebSocket path and the size guards of the planner stay as they were). Fixed words only: nothing about the files or the peer.
+        let verdicts = plan.items.map {
+            FileTransportChoice.choose(link: lanPeerConnected ? .lan : .relay, peerCaps: peerCaps.caps, size: Int64($0.size), isClipboardImage: false)
+        }
+        let counted = Dictionary(grouping: verdicts, by: \.logWord).map { "\($0.key) \($0.value.count)" }.sorted().joined(separator: ", ")
+        log("files -> phone: transport choice \(counted), using \(Set(verdicts.map { $0.effective.logWord }).sorted().joined(separator: "/"))")
 
         fileSender.send(
             items: plan.items,
