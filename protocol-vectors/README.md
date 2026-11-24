@@ -100,16 +100,17 @@ folder as an input of the test task — without that, editing a vector left Grad
 
 ## `quic-control.json`
 
-The control plane of the QUIC data plane (plan `docs/plans/2026-11-14-quic-data-plane.md`, stages 1.3–1.8; the design is in TECHNICAL.md §5.6). It is the **only** copy of the expected results: neither test suite keeps a case table of its own, so a rule change is a change to this file plus both implementations. Seven top-level keys; each section has a `description` (the authoritative statement of its case format) and a list of `cases`:
+The control plane of the QUIC data plane (plan `docs/plans/2026-11-14-quic-data-plane.md`, stages 1.3–1.8; the design is in TECHNICAL.md §5.6). It is the **only** copy of the expected results: neither test suite keeps a case table of its own, so a rule change is a change to this file plus both implementations. Eight top-level keys; each section has a `description` (the authoritative statement of its case format) and a list of `cases`:
 
 | Section | Pins | Cases (`kind`) | Run by |
 |---|---|---|---|
-| `constants` | `alpn` (`ltm/1`), `max_action_bytes` (4096), `accept_timeout_ms` (60000), `ws_file_limit_bytes` (1 GiB: Swift `FileFrame.maxTransferBytes` and Kotlin `FileFrame.MAX_TRANSFER_BYTES` must both equal it, which both suites now check) | — (`values`) | Swift, Kotlin; the Rust core checks `alpn` |
+| `constants` | `alpn` (`ltm/1`), `max_action_bytes` (4096), `accept_timeout_ms` (60000), `ws_file_limit_bytes` (1 GiB: Swift `FileFrame.maxTransferBytes` and Kotlin `FileFrame.MAX_TRANSFER_BYTES` must both equal it, which both suites now check), and the QUIC file stream's `file_header_max_bytes` (4096), `file_name_max_bytes` (200), `file_mime_max_bytes` (255), `file_first_byte_timeout_ms` (2000) and `file_size_max` (2^53 − 1), which all three suites check | — (`values`) | Swift, Kotlin; the Rust core checks `alpn` |
 | `actions` | the five `q.*` actions inside a `cmd`: what parses, what is `invalid` (with a short `code`), what is `unknown` (ignored quietly), and the canonical encoding | `parse` (95), `encode` (15) | Swift, Kotlin |
 | `channels` | the first varint of a data stream (1 file / 2 screen / 3 camera): the bytes a sender writes and how a receiver reads any of the four varint lengths, an unknown value, or too few bytes | `header` (3), `parse` (16) | Swift, Kotlin, Rust (`tests/vectors.rs`) |
 | `stat` | the optional `caps` field of a `stat`: absent keeps what is known, an array sets it, offline clears it; `quicAvailable`; what a side advertises | `parse`, `sequence`, `available`, `advertise` | Swift, Kotlin |
 | `handshake` | who may send what, when (per side and per asker), including timeouts | `scenario` (29): `initial` phase, `steps` of `send` / `receive` / `tick` with `expect` and `then` | Swift, Kotlin |
 | `gate` | who may open a session (`busy` > `relay` > `unsupported` > `proceed`), when the controls show, and the outgoing variant (adds `hidden`) | `incoming` (8), `visible` (8), `outgoing` (32): the whole truth table | Swift, Kotlin |
+| `file_stream` | **the bytes of one QUIC file stream**: the header message (canonical JSON, limits, strict integers, escapes), the first answer (`have` or a refusal), the last answer (`ok` or a refusal), how many raw bytes follow (`size − have`) and the verdict when the sender closes its side; the header decoder is fed split at every position and must always answer the same | `header_encode` (9), `header_parse` (71), `have_parse` (23), `result_parse` (14), `have_encode` (3), `result_encode` (8), `body_length` (7), `finish_verdict` (5) | Swift (`QuicFileStreamTests`), Kotlin (`QuicFileStreamVectorTest`), Rust (`tests/vectors.rs`, module `file_stream`) |
 | `transport` | which path one file takes: `quic` (LAN-direct link and a `q1` peer, no size limit), `ws` (the existing WebSocket path, up to 1 GiB), `waitForLan` (above 1 GiB on the relay with a `q1` peer) or `tooLarge`; clipboard images always `ws`; an unknown size is `ws` unless QUIC applies | `choose` (72): the full cross product 2 links × 3 capability sets × 6 sizes × 2 kinds, including the limit itself and the limit plus one byte | Swift (`FileTransportChoiceTests`), Kotlin (`FileTransportChoiceVectorTest`) |
 
 Two rules that make the `actions` cases portable: a case's `text` may carry a `{PAD}` marker that is expanded to an exact UTF-8 byte length (so the 4096-byte limit is tested at exactly 4096 and at 4097, and counted in bytes rather than characters, without a 4 KiB literal), and `encoded` is the canonical form — keys in alphabetical order, no whitespace, the session id lower case — which both sides must also parse back to itself (the two codecs write identical bytes because neither relies on its JSON library's key order).
@@ -132,3 +133,18 @@ The Mac's LAN address hint (TECHNICAL.md §5.1, "Finding the Mac without mDNS"):
 - **`pick`** (15 cases, **Swift only** — only the Mac builds the field) — which addresses the Mac writes from its interface list: only `en<number>` interfaces that are up *and* running and not loopback, with a private IPv4, ordered by interface number (`en2` before `en10`), at most three, none for a port outside 1024–65535.
 
 The hint is untrusted input on the phone (the LAN handshake still authenticates whoever answers); change the rules in the vectors and **both** parsers (`StatLan` in `mac/Sources/LinkToMac/LanAddressHint.swift`, `StatLan.kt` in the module) together.
+
+### The QUIC file stream (`file_stream`)
+
+One bidirectional stream per file (plan stage 2.2, Faz 2):
+
+```
+sender   ->  0x01 (the file channel varint)  ‖  header message
+receiver ->  {"have":N}  or  {"err":"…","ok":false}          (N = bytes it already holds, 0 <= N <= size)
+sender   ->  exactly size - have raw bytes, then it closes its side
+receiver ->  {"ok":true}  (only after the file is in its final place)  or  {"err":"…","ok":false}
+```
+
+Every message is `u16 BE length ‖ JSON` (at most 4096 bytes). A sender writes **canonical** JSON (keys alphabetical, no whitespace, `"` `\` and control characters escaped — `\b \f \n \r \t` short, the rest `\u00xx` lower case — everything else raw UTF-8), so the bytes are identical in all three languages; a receiver reads any JSON with the same meaning. Header: `id` (8 lower-case hex), `mime` (1–255 bytes), `mtime` (integer ≥ 0), `name` (1–200 UTF-8 bytes), `size` (integer 0 … 2^53 − 1), optional `dir`; other fields are ignored. A number is an integer only when it is written as one (`1.5`, `5.0`, `1e3`, `"5"`, `true` are not). `header_parse` results: `header` (with the bytes it used; later bytes are the body), `needMore`, or `invalid` — `not-file` (another channel: nothing is answered), `bad-header` (structure or limits) or `bad-id` (checked last, so a structural fault wins). Refusal codes: `space`, `busy`, `bad-id`, `write`, `too-many`, `bad-header`, `size`; an unknown or missing code is read as `unknown`. Not pinned: lone surrogate escapes and duplicate keys (JSON libraries differ).
+
+What the three implementations share beyond the codec: the **receiver's rule for a stream that sends no first byte** (Network.framework's reserved, byte-less server-initiated stream) — ignore it after `file_first_byte_timeout_ms` and serve real streams in parallel — lives in the Rust drivers (`classify_incoming`, `tests/file_stream.rs`, 20 loopback tests on real quinn streams); Swift and Kotlin carry only the constant.

@@ -1056,7 +1056,7 @@ existing `stat` plaintext, so the relay is untouched. Pinned by `protocol-vector
 
 ### 5.6 QUIC data plane — Phase 1: control and session
 
-> **Status (Phase 2, stage 2.1).** The rule for which path a file takes now exists (`FileTransportChoice`, Swift and Kotlin twins pinned by the 72-case `transport` vectors: LAN-direct + `q1` peer → QUIC, otherwise the WebSocket path up to 1 GiB, above it "wait for the LAN" or "too large"), but no file travels over QUIC yet: both senders only log the verdict and keep using the WebSocket path.
+> **Status (Phase 2, stages 2.1–2.2).** The bytes of the QUIC file stream are fixed (see "The file stream" below, vectors `file_stream`, codecs in Swift, Kotlin and Rust, plus Rust drivers tested on real quinn streams), but nothing sends a file over it yet. The rule for which path a file takes exists (`FileTransportChoice`, Swift and Kotlin twins pinned by the 72-case `transport` vectors: LAN-direct + `q1` peer → QUIC, otherwise the WebSocket path up to 1 GiB, above it "wait for the LAN" or "too large"), but no file travels over QUIC yet: both senders only log the verdict and keep using the WebSocket path.
 >
 > **Status.** Only the *control and session* layer exists (plan `docs/plans/2026-11-14-quic-data-plane.md`, Phase 1).
 > No user feature rides on it yet: the only kind the Mac serves is a **debug-only `echo`**. File, screen, audio and
@@ -1113,6 +1113,8 @@ stranger on the LAN can't lock the real phone out). Every later stream starts wi
 (bidi), 2 screen, 3 camera (uni)); datagrams are accepted only after authentication. Time limits: token within 5 s
 of the connection, offer valid 30 s, idle 30 s (the client also sends a QUIC keep-alive every 5 s), accept 60 s;
 the phone waits 10 s for an offer and 12 s for the connection.
+
+**The file stream (Phase 2, stage 2.2).** One bidirectional stream per file, started with the file channel varint `0x01`. The sender writes a header message (`u16 BE length ‖ canonical JSON`: `id` 8 lower-case hex, `mime`, `mtime`, `name` ≤ 200 bytes, `size` ≤ 2^53−1, optional `dir`; at most 4096 bytes); the receiver answers `{"have":N}` (the bytes it already holds, so a resumed file skips them) or a refusal `{"err":"space|busy|bad-id|write|too-many|bad-header|size","ok":false}`; the sender writes exactly `size − have` raw bytes and closes its side (no chunks, no ack window, no pacing: QUIC is reliable and ordered); the receiver answers `{"ok":true}` only **after the file is in its final place**, which is the delivery receipt, or a refusal (`size` for a stream that ended short or carried more, `write` for a disk that failed). A receiver recognises a file stream by its first byte; a bidirectional stream that sends none within 2 s (Network.framework's reserved, byte-less server-initiated stream) is ignored and never delays a real one. Pinned bytes: `protocol-vectors/quic-control.json` section `file_stream`; code: `QuicFileStream` (Swift, Kotlin) and `quic-core/src/file.rs` (Rust, which also holds `send_file` / `receive_file` / `classify_incoming`).
 
 **Privacy.** Only the LAN, only a pinned certificate, a single-use token; log lines are fixed sentences (§10 —
 the address, port, fingerprint, token and session id never appear in a log, and the sanitizer has shape rules for the
