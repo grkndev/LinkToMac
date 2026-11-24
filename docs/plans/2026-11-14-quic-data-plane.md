@@ -622,7 +622,7 @@ doğrudan yazma", "kalıcı kimlik") ve Faz 1. Bu üç kapı **geçti** (0.12); 
 
 **Ön koşul notu (2026-11-21, Faz 1 sonrası): LAN bulma sağlamlaştırıldı.** QUIC oturumu LAN-direct bağlantıya bağlı; telefonun Mac'i LAN'da hiç bulamaması (kampüs Wi-Fi'ında mDNS multicast'i düşüyor: telefonun NSD'si 6 sorgu yollayıp 0 servis buldu, Mac ise yayında) Faz 2'yi engellerdi. Çözüm (`fix/lan-rediscovery`): (1) servis aynı anda **iki** `ConnectionManager` açıyordu (kilitsiz `conn`), ikisi Mac'in tek-eşli LAN sunucusunda birbirini düşürüp saniyede bir yeniden bağlanıyordu (10 sn'de 9 kimlik doğrulama, tekrar eden SMS geri doldurma) → `ConnectionHolder`; (2) son bağlanan Mac adresi saklanıp Wi-Fi gelince mDNS'ten önce deneniyor; (3) Mac adreslerini `stat.lan` ile duyuruyor (`protocol-vectors/stat-lan.json`), telefon relay'den öğrenip bağlanıyor; (4) mDNS yaşam döngüsü loglanıyor. Cihazda: `rejoin` 3/3 (LAN Wi-Fi'dan 4,0–4,1 sn sonra, dalgalanma yok), `nomdns` (mDNS kapalı: Mac'in duyurusuyla ve hatırlanan adresle LAN geldi). Doğrulanmadı: ağdaki multicast kaybının tam nedeni (Mac'e `tcpdump` istendi, sonuç gelmedi; telefon tarafı kanıtı yeterli) ve doğal 'mDNS sessiz' durumunun yeniden üretilmesi (testler anahtarla simüle etti).
 
-### [ ] 2.1 Taşıma seçimi
+### [x] 2.1 Taşıma seçimi
 
 **Amaç.** Her dosya için hangi yoldan gideceğini tek yerde, saf bir fonksiyonla belirlemek.
 
@@ -641,7 +641,7 @@ Mevcut gönderici giriş noktaları (Mac `FileSender`, Android `sendAsFile`) dos
 
 **Testler (beklenen sonuç).** Aynı vektörle Swift ve Kotlin: tüm kombinasyonlar (link × caps × boyut × pano) tablodaki sonucu verir; 1 GiB sınırı tam eşikte (1 GiB WS, 1 GiB+1 bayt `waitForLan`) doğru. Mevcut `FileSender`/`AckWindow`/`FileFrame` testleri değişmeden geçer.
 
-**Bitti ölçütü.** Yol seçimi tek fonksiyonda, iki platformda eş.
+**Bitti ölçütü.** Yol seçimi tek fonksiyonda, iki platformda eş. *(Sonuç, 2026-11-24: **geçti.** `FileTransportChoice.choose(link:peerCaps:size:isClipboardImage:)` Swift (`mac/Sources/LinkToMac/Quic/`) ve Kotlin (`…/quic/`) ikizi; kurallar (ilk eşleşen): pano görseli `.ws`; LAN-direct + `q1` peer `.quic` (sınırsız, boyut bilinmese de); bilinmeyen boyut `.ws`; ≤ 1 GiB `.ws`; üstünde relay + `q1` `.waitForLan`, diğer her şey `.tooLarge` (eski peer'de LAN beklemek işe yaramaz). `quic-control.json`'a `transport` bölümü (72 vaka, tam çapraz çarpım: 2 link × 3 caps × 6 boyut × 2 tür; tam eşik `L` ve `L+1`; vakalar uygulamadan bağımsız bir oracle'dan üretildi) ve `constants.ws_file_limit_bytes`; iki test paketi de tamlığı (72, tekrar/eksik yok) ve Swift `FileFrame.maxTransferBytes` ile Kotlin `FileFrame.MAX_TRANSFER_BYTES`'ın bu sabite eşit olduğunu doğruluyor ("eşit olmak zorunda" sözleşmesi ilk kez makineyle korunuyor). Plan metninde olmayan küçük ara katman: `effective` (`.quic` → `.ws`, `quicFilesServed = false`, 2.5'te açılacak) ve `logWord`; giriş noktaları (Mac `RelayClient.startBatch`, Android `sendAsFile`) kararı **yalnız sabit kelimelerle loglar**, mevcut boyut korumaları ve davranış aynı. Testler: Mac 293 → 302, selfadb JVM 230 → 239, bun 127 → 128; mutasyonlar Swift 10/10 ve Kotlin 9/9 yakalandı. Cihaz duman testi (50 MB, LAN, `q1` bilinen): telefon logu `files: transport choice quic, using ws`, dosya WebSocket'le (80 parça) gitti ve alındı. **Doğrulanmadı:** Mac tarafındaki `startBatch` log satırı cihazda görülmedi (Mac'ten gönderim arayüzden yapılıyor); davranış değişmediği için saf testler ve derleme yeterli sayıldı.)*
 
 ### [ ] 2.2 QUIC dosya akış protokolü + vektörler
 

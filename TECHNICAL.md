@@ -1056,6 +1056,8 @@ existing `stat` plaintext, so the relay is untouched. Pinned by `protocol-vector
 
 ### 5.6 QUIC data plane — Phase 1: control and session
 
+> **Status (Phase 2, stage 2.1).** The rule for which path a file takes now exists (`FileTransportChoice`, Swift and Kotlin twins pinned by the 72-case `transport` vectors: LAN-direct + `q1` peer → QUIC, otherwise the WebSocket path up to 1 GiB, above it "wait for the LAN" or "too large"), but no file travels over QUIC yet: both senders only log the verdict and keep using the WebSocket path.
+>
 > **Status.** Only the *control and session* layer exists (plan `docs/plans/2026-11-14-quic-data-plane.md`, Phase 1).
 > No user feature rides on it yet: the only kind the Mac serves is a **debug-only `echo`**. File, screen, audio and
 > camera streams arrive in later phases, and this section is rewritten in full when they do (stage 6.11). What is
