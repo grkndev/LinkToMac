@@ -23,6 +23,14 @@ class QuicSelfTestReceiver : BroadcastReceiver() {
       ClipForegroundService.instance?.debugSetDiscovery(intent.getBooleanExtra("on", true))
       return
     }
+    if (intent.action == "expo.modules.selfadb.MEDIA_FAKE") {
+      FakeMedia.start(context)
+      return
+    }
+    if (intent.action == "expo.modules.selfadb.MEDIA_FAKE_STOP") {
+      FakeMedia.stop()
+      return
+    }
     if (intent.action == ClipForegroundService.ACTION_SEND_FILE) {
       intent.getStringExtra("name")?.let { ClipForegroundService.instance?.debugSendFile(it) }
       return
