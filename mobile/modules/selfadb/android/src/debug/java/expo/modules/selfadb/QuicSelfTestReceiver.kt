@@ -24,7 +24,7 @@ class QuicSelfTestReceiver : BroadcastReceiver() {
       return
     }
     if (intent.action == "expo.modules.selfadb.MEDIA_FAKE") {
-      FakeMedia.start(context)
+      FakeMedia.start(context, intent.getLongExtra("delay", 3_000L))
       return
     }
     if (intent.action == "expo.modules.selfadb.MEDIA_FAKE_STOP") {
