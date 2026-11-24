@@ -53,7 +53,24 @@ class MediaMirror(
   // All below: touched only on [handler]'s thread.
   private var registered = false
   private var stopped = false
-  private var controller: MediaController? = null
+  /**
+   * Every active session is WATCHED and the one to mirror is chosen again whenever any of them reports a change ([MediaSessionTracker]): a player
+   * that activates its session first and writes the title later used to leave the Mac's card empty, because the choice was made only when
+   * the session LIST changed.
+   */
+  private val tracker = MediaSessionTracker<MediaController>(
+    tokenOf = { it.sessionToken },
+    candidateOf = {
+      MediaState.Candidate(
+        playing = it.playbackState?.state == PlaybackState.STATE_PLAYING,
+        hasMetadata = !titleOf(it.metadata).isNullOrBlank(),
+      )
+    },
+    register = { it.registerCallback(controllerCallback, handler) },
+    unregister = { try { it.unregisterCallback(controllerCallback) } catch (_: Exception) {} },
+    onError = { _, e -> log("media: could not follow a session (${e.javaClass.simpleName})") },
+  )
+  private val controller: MediaController? get() = tracker.current
   private var lastSent: MediaSnapshot? = null
   private var lastSentAt = 0L
   /** Whether the last frame told the Mac we have no access (so it isn't repeated every callback). */
@@ -71,12 +88,11 @@ class MediaMirror(
   }
 
   private val controllerCallback = object : MediaController.Callback() {
-    override fun onMetadataChanged(metadata: MediaMetadata?) = schedule()
-    override fun onPlaybackStateChanged(state: PlaybackState?) = schedule()
+    override fun onMetadataChanged(metadata: MediaMetadata?) = changed()
+    override fun onPlaybackStateChanged(state: PlaybackState?) = changed()
     override fun onAudioInfoChanged(info: MediaController.PlaybackInfo) = schedule()
     override fun onSessionDestroyed() {
       handler.post {
-        controller = null
         refreshSessions()
         schedule()
       }
@@ -115,7 +131,7 @@ class MediaMirror(
         try { sessions.removeOnActiveSessionsChangedListener(sessionsListener) } catch (_: Exception) {}
       }
       registered = false
-      detachController()
+      tracker.clear()
       if (reason != null) send(MediaState.statUnavailable(reason))
       thread.quitSafely()
     }
@@ -142,7 +158,8 @@ class MediaMirror(
   fun refresh() {
     handler.post {
       if (stopped) return@post
-      if (!registered) register()
+      // The notification listener (re)connected or a grant changed: register afresh, in case a registration made against the old binding went quiet.
+      reRegister()
       refreshSessions()
       schedule()
     }
@@ -162,43 +179,39 @@ class MediaMirror(
     }
   }
 
+  /** Drop and redo the registration with the platform (no-op for the sessions already watched). */
+  private fun reRegister() {
+    if (registered) try { sessions.removeOnActiveSessionsChangedListener(sessionsListener) } catch (_: Exception) {}
+    registered = false
+    register()
+  }
+
+  /** A watched session changed (title, playback state): look again at which one to mirror, then publish. */
+  private fun changed() {
+    handler.post {
+      if (stopped) return@post
+      if (tracker.reevaluate()) logChoice(null)
+      schedule()
+    }
+  }
+
+  private fun logChoice(listSize: Int?) {
+    log("media: session ${if (tracker.current != null) "followed" else "none"}${if (listSize != null) " of $listSize" else ""}")
+  }
+
   private fun refreshSessions() {
     try {
       adopt(sessions.getActiveSessions(listenerComponent))
     } catch (e: SecurityException) {
-      detachController()
+      tracker.clear()
     } catch (e: Exception) {
       log("media: could not list sessions (${e.javaClass.simpleName})")
     }
   }
 
-  /** Follow the session [MediaState.pickCurrent] chooses. */
+  /** The platform's session list changed: watch every session in it and choose which one to mirror. */
   private fun adopt(list: List<MediaController>) {
-    val candidates = list.map {
-      MediaState.Candidate(
-        playing = it.playbackState?.state == PlaybackState.STATE_PLAYING,
-        hasMetadata = !titleOf(it.metadata).isNullOrBlank(),
-      )
-    }
-    val next = MediaState.pickCurrent(candidates)?.let { list[it] }
-    if (sameSession(next, controller)) return
-    detachController()
-    controller = next
-    try {
-      next?.registerCallback(controllerCallback, handler)
-    } catch (e: Exception) {
-      log("media: could not follow the session (${e.javaClass.simpleName})")
-      controller = null
-    }
-    log("media: session ${if (controller != null) "followed" else "none"} of ${list.size}")
-  }
-
-  private fun sameSession(a: MediaController?, b: MediaController?): Boolean =
-    a === b || (a != null && b != null && a.sessionToken == b.sessionToken)
-
-  private fun detachController() {
-    try { controller?.unregisterCallback(controllerCallback) } catch (_: Exception) {}
-    controller = null
+    if (tracker.update(list)) logChoice(list.size)
   }
 
   // ---- publishing -----------------------------------------------------------------------------
