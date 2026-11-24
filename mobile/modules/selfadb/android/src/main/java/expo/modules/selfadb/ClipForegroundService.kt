@@ -1297,6 +1297,18 @@ class ClipForegroundService : Service() {
     ClipBus.log("lan-debug: link is ${if (ClipBus.onLan()) "lan" else "not lan"}")
   }
 
+  /**
+   * Debug builds only: send a file that a script staged in `cacheDir/outbox` (`adb shell run-as <pkg> cp …`) to the Mac, exactly as the share
+   * sheet's "Send as a File" would. Lets `scripts/files-ui-check.sh` keep a transfer in progress long enough to look at the Files screen.
+   */
+  fun debugSendFile(fileName: String) {
+    if (!debuggable) return
+    val file = File(File(cacheDir, "outbox"), File(fileName).name) // same folder ShareActivity stages into
+    if (!file.isFile) { ClipBus.log("files-debug: nothing staged to send"); return }
+    ClipBus.log("files-debug: sending a staged file (${file.length() / 1_000_000} MB)")
+    submitShare(this, listOf(ShareRef(file.absolutePath, Uri.fromFile(file), file.name, "application/octet-stream", file.length())), FileFrame.DISP_SAVE)
+  }
+
   /** Debug builds only: forget the remembered Mac address and reconnect. */
   fun debugForgetLan() {
     if (!debuggable) return
@@ -1851,6 +1863,7 @@ class ClipForegroundService : Service() {
     const val ACTION_LAN_DISCOVERY = "expo.modules.selfadb.LAN_DISCOVERY"
     const val ACTION_LAN_FORGET = "expo.modules.selfadb.LAN_FORGET"
     const val ACTION_LAN_STATUS = "expo.modules.selfadb.LAN_STATUS"
+    const val ACTION_SEND_FILE = "expo.modules.selfadb.SEND_FILE"
     const val EXTRA_TAMPER = "tamper"
     private const val EXTRA_PICK_URIS = "pickUris"
     private const val EXTRA_TREE = "treeUri"
